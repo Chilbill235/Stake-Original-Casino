@@ -446,9 +446,10 @@ async function buyCoinPackage(packageId) {
 
     container.innerHTML = ''; // Clear loading text
 
-    // 3. Initialize Embedded Checkout
+    // 3. Initialize Embedded Checkout using fixed 'embedded_page' ui_mode
     state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
       clientSecret: data.clientSecret,
+      uiMode: 'embedded_page',
       onComplete: () => {
         playSound('win');
         alert('Payment completed successfully! Balance refreshed.');
@@ -1547,7 +1548,73 @@ async function executeStandardBet(betAmount) {
 }
 
 // ==========================================================================
-// 12. UTILITY & EVENT BINDINGS
+// 12. PROFILE, AUXILIARY & MODAL CONTROLLERS
+// ==========================================================================
+
+function openProfileModal() {
+  playSound('click');
+  let modal = document.getElementById('modal-profile');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-profile';
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width: 400px;">
+        <div class="modal-header-flex">
+          <h3>👤 User Profile</h3>
+          <button class="x-close" onclick="closeProfileModal()">×</button>
+        </div>
+        <p class="modal-subtitle">Manage your account settings and preferences.</p>
+        <div class="form-group" style="margin: 15px 0;">
+          <label class="form-label">Username / Session Token</label>
+          <input type="text" class="form-input" readonly value="${localStorage.getItem('casino_token') ? 'Authenticated Guest' : 'Standard Guest'}">
+        </div>
+        <div class="form-group" style="margin: 15px 0;">
+          <label class="form-label">Sound FX</label>
+          <button id="btn-toggle-sfx-modal" class="btn-secondary-action btn-full" style="margin-top:5px;">
+            ${state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF'}
+          </button>
+        </div>
+        <div class="modal-actions-flex" style="margin-top: 20px;">
+          <button type="button" onclick="closeProfileModal()" class="btn-play btn-full">Close</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-toggle-sfx-modal').addEventListener('click', () => {
+      state.sfxEnabled = !state.sfxEnabled;
+      document.getElementById('btn-toggle-sfx-modal').textContent = state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF';
+      const mainAudioBtn = document.getElementById('btn-toggle-sfx');
+      if (mainAudioBtn) mainAudioBtn.textContent = state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF';
+    });
+  }
+  modal.classList.remove('hidden');
+}
+
+function closeProfileModal() {
+  playSound('click');
+  document.getElementById('modal-profile')?.classList.add('hidden');
+}
+
+function openProvablyFairModal() {
+  playSound('click');
+  const modal = document.getElementById('modal-pf');
+  if (modal) {
+    modal.classList.remove('hidden');
+    const hashInput = document.getElementById('pf-modal-server-hash');
+    if (hashInput) hashInput.value = state.serverSeedHash || 'Unverified';
+    const clientInput = document.getElementById('pf-modal-client-seed');
+    if (clientInput) clientInput.value = state.clientSeed;
+  }
+}
+
+function closeProvablyFairModal() {
+  playSound('click');
+  document.getElementById('modal-pf')?.classList.add('hidden');
+}
+
+// ==========================================================================
+// 13. UTILITY & EVENT BINDINGS
 // ==========================================================================
 
 function renderCards(hand) {
@@ -1572,6 +1639,14 @@ function setupGlobalEventListeners() {
   if (primaryBtn) {
     primaryBtn.removeEventListener('click', handlePrimaryAction);
     primaryBtn.addEventListener('click', handlePrimaryAction);
+  }
+
+  // Bind profile badge click
+  const userBadge = document.getElementById('user-badge');
+  if (userBadge) {
+    userBadge.style.cursor = 'pointer';
+    userBadge.removeEventListener('click', openProfileModal);
+    userBadge.addEventListener('click', openProfileModal);
   }
 
   const clientSeedInput = document.getElementById('pf-client-seed');

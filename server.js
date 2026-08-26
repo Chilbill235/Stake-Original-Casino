@@ -15,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const PERSONA_WEBHOOK_SECRET = process.env.PERSONA_WEBHOOK_SECRET;
 const HOUSE_EDGE = 0.01; // 1% House Edge (99% RTP)
 const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user
 
@@ -45,10 +46,18 @@ const amoeRegistry = new Map();
 users.set(1, { 
   id: 1, 
   username: 'Player_1001', 
+  email: 'player1001@example.com',
   gc_balance: 10000.0, 
-  sc_unplayed: 100.0, // SC received via purchase/bonus (Must wager 1x)
-  sc_played: 0.0,     // SC won from bets (Redeemable for cash)
+  sc_unplayed: 100.0,
+  sc_played: 0.0,     
   stripeAccountId: null,
+  kyc: {
+    status: 'VERIFIED', // UNVERIFIED | PENDING | VERIFIED | REJECTED
+    tier: 2,           // Tier 0: Unverified, Tier 1: Basic (Purchases), Tier 2: Full (Redemptions)
+    inquiryId: 'inq_demo123',
+    verifiedAt: new Date().toISOString(),
+    rejectionReason: null
+  },
   lastDailyClaim: 0,
   dailyStreak: 0,
   adsWatchedToday: 0,
@@ -103,28 +112,34 @@ function getUserSeedPair(userId) {
   return userSeeds.get(userId);
 }
 
-function logTransaction(userId, type, description, gcDelta, scDelta) {
+function logTransaction(userId, type, description, gcDelta, scDelta, metadata = {}) {
   if (!transactions.has(userId)) transactions.set(userId, []);
-  transactions.get(userId).unshift({
-    id: crypto.randomUUID(),
-    type,
+  
+  const tx = {
+    id: `tx_${crypto.randomUUID()}`,
+    type, // 'BET', 'WIN', 'PURCHASE', 'WITHDRAWAL', 'BONUS', 'RAKEBACK', 'AD_REWARD'
     description,
     gcDelta,
     scDelta,
+    currency: gcDelta !== 0 ? 'GC' : 'SC',
+    amount: gcDelta !== 0 ? Math.abs(gcDelta) : Math.abs(scDelta),
+    status: 'COMPLETED',
+    metadata,
     timestamp: new Date().toISOString()
-  });
+  };
+
+  transactions.get(userId).unshift(tx);
+  return tx;
 }
 
 function updateVipAndRakeback(user, scWagered, gcWagered) {
   user.totalWageredSC += scWagered;
   user.totalWageredGC += gcWagered;
 
-  // Accrue SC Rakeback
   if (scWagered > 0) {
     user.rakebackAccruedSC += (scWagered * HOUSE_EDGE * RAKEBACK_RATE);
   }
 
-  // Tier progression based on SC wagered
   if (user.totalWageredSC >= 100000) user.vipTier = 'Diamond';
   else if (user.totalWageredSC >= 25000) user.vipTier = 'Platinum';
   else if (user.totalWageredSC >= 5000) user.vipTier = 'Gold';
@@ -336,7 +351,7 @@ const GAMES = {
     if (guess === 'LOWER') win = nextCard.score <= currentCard.score;
 
     const multiplier = win ? parseFloat((1.95 * (1 - HOUSE_EDGE)).toFixed(2)) : 0;
-    return { win, multiplier, details: { currentCard, nextCard, guess } };
+    return { win, multiplier: parseFloat(multiplier.toFixed(2)), details: { currentCard, nextCard, guess } };
   },
 
   plinko: (floats) => {
@@ -398,7 +413,7 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error(`[WEBHOOK ERROR] ${err.message}`);
+    console.error(`[STRIPE WEBHOOK ERROR] ${err.message}`);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -420,7 +435,7 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
         user.gc_balance += gcAmount;
         user.sc_unplayed += scAmount;
 
-        logTransaction(userId, 'PURCHASE', `Purchased ${session.metadata.packageName || 'Coin Package'}`, gcAmount, scAmount);
+        logTransaction(userId, 'PURCHASE', `Purchased ${session.metadata.packageName || 'Coin Package'}`, gcAmount, scAmount, { stripeSessionId: session.id });
 
         sendToUser(userId, {
           type: 'BALANCE_UPDATE',
@@ -432,6 +447,52 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
   }
 
   res.json({ received: true });
+});
+
+// Persona / Identity Verification Webhook Endpoint
+app.post('/api/webhooks/kyc', express.json(), (req, res) => {
+  const event = req.body;
+  
+  // Verify Webhook Signature if secret provided
+  if (PERSONA_WEBHOOK_SECRET) {
+    const sig = req.headers['persona-signature'];
+    // In production, add HMAC signature verification here
+  }
+
+  const { event: eventType, data } = event;
+  const inquiryId = data?.id;
+  const referenceId = data?.attributes?.reference_id; // Maps to internal userId
+
+  if (!referenceId) return res.status(400).json({ error: 'Missing reference_id' });
+
+  const userId = parseInt(referenceId, 10);
+  const user = users.get(userId);
+
+  if (user) {
+    if (eventType === 'inquiry.approved') {
+      user.kyc.status = 'VERIFIED';
+      user.kyc.tier = 2;
+      user.kyc.verifiedAt = new Date().toISOString();
+      user.kyc.rejectionReason = null;
+
+      sendToUser(userId, {
+        type: 'KYC_STATUS_UPDATE',
+        kyc: user.kyc,
+        message: 'Your identity has been successfully verified!'
+      });
+    } else if (eventType === 'inquiry.declined' || eventType === 'inquiry.failed') {
+      user.kyc.status = 'REJECTED';
+      user.kyc.rejectionReason = data?.attributes?.declined_reason || 'Document verification failed.';
+
+      sendToUser(userId, {
+        type: 'KYC_STATUS_UPDATE',
+        kyc: user.kyc,
+        message: 'Identity verification failed. Please check your documents and retry.'
+      });
+    }
+  }
+
+  res.json({ success: true });
 });
 
 app.use(express.json());
@@ -523,7 +584,7 @@ function broadcastLiveBet(betData) {
 }
 
 // -----------------------------------------------------------------------------
-// 8. API ROUTES
+// 8. API ROUTES & USER PROFILE ENDPOINTS
 // -----------------------------------------------------------------------------
 
 app.post('/api/auth/guest', (req, res) => {
@@ -532,10 +593,18 @@ app.post('/api/auth/guest', (req, res) => {
   const newUser = {
     id: guestId,
     username,
+    email: `${username.toLowerCase()}@guest.casino`,
     gc_balance: 10000.0,
     sc_unplayed: 10.0,
     sc_played: 0.0,
     stripeAccountId: null,
+    kyc: {
+      status: 'UNVERIFIED',
+      tier: 0,
+      inquiryId: null,
+      verifiedAt: null,
+      rejectionReason: null
+    },
     lastDailyClaim: 0,
     dailyStreak: 0,
     adsWatchedToday: 0,
@@ -552,11 +621,12 @@ app.post('/api/auth/guest', (req, res) => {
   const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ 
     token, 
-    user: { id: newUser.id, username: newUser.username }, 
+    user: { id: newUser.id, username: newUser.username, kyc: newUser.kyc }, 
     balances: { gc: newUser.gc_balance, sc_unplayed: newUser.sc_unplayed, sc_played: newUser.sc_played } 
   });
 });
 
+// Full Profile / Me Endpoint
 app.get('/api/user/me', verifyToken, async (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User profile not found.' });
@@ -574,14 +644,21 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
   res.json({
     id: user.id,
     username: user.username,
+    email: user.email,
+    state: user.state,
     balances: { 
       gc: user.gc_balance, 
       sc_unplayed: user.sc_unplayed, 
       sc_played: user.sc_played,
       total_sc: user.sc_unplayed + user.sc_played 
     },
-    vipTier: user.vipTier,
-    rakebackAccruedSC: user.rakebackAccruedSC,
+    kyc: user.kyc || { status: 'UNVERIFIED', tier: 0 },
+    vip: {
+      tier: user.vipTier,
+      totalWageredSC: user.totalWageredSC,
+      totalWageredGC: user.totalWageredGC,
+      rakebackAccruedSC: user.rakebackAccruedSC
+    },
     hasPayoutAccount: !!user.stripeAccountId,
     transfersActive,
     dailyBonus: {
@@ -592,9 +669,83 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
   });
 });
 
+// Comprehensive, Paginated & Filterable Transaction History
 app.get('/api/user/transactions', verifyToken, (req, res) => {
   const userTransactions = transactions.get(req.user.id) || [];
-  res.json({ transactions: userTransactions });
+  
+  const typeFilter = req.query.type; // 'BET', 'WIN', 'PURCHASE', 'WITHDRAWAL', 'BONUS', 'RAKEBACK'
+  const currencyFilter = req.query.currency; // 'GC' | 'SC'
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 20;
+
+  let filtered = userTransactions;
+
+  if (typeFilter) {
+    filtered = filtered.filter(tx => tx.type === typeFilter.toUpperCase());
+  }
+
+  if (currencyFilter) {
+    filtered = filtered.filter(tx => tx.currency === currencyFilter.toUpperCase());
+  }
+
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+  const paginatedResults = filtered.slice(startIndex, endIndex);
+
+  res.json({
+    transactions: paginatedResults,
+    pagination: {
+      total: filtered.length,
+      page,
+      limit,
+      totalPages: Math.ceil(filtered.length / limit)
+    }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 9. STAKE-STYLE KYC VERIFICATION ENDPOINTS
+// -----------------------------------------------------------------------------
+
+// Initiate or Resume KYC Flow
+app.post('/api/user/kyc/start', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  if (user.kyc.status === 'VERIFIED') {
+    return res.status(400).json({ error: 'Identity is already fully verified.' });
+  }
+
+  // Set pending status and return integration configuration
+  user.kyc.status = 'PENDING';
+  
+  res.json({
+    success: true,
+    kycStatus: user.kyc.status,
+    // Configuration options passed to frontend SDK (e.g. Persona / Sumsub integration details)
+    personaConfig: {
+      templateId: process.env.PERSONA_TEMPLATE_ID || 'itmpl_sandbox_default',
+      referenceId: user.id.toString(),
+      environment: process.env.NODE_ENV === 'production' ? 'production' : 'sandbox'
+    }
+  });
+});
+
+// Mock/Sandbox Completion Route for Testing/Local Dev
+app.post('/api/user/kyc/verify-sandbox', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  user.kyc.status = 'VERIFIED';
+  user.kyc.tier = 2;
+  user.kyc.verifiedAt = new Date().toISOString();
+  user.kyc.rejectionReason = null;
+
+  res.json({
+    success: true,
+    message: 'Sandbox Identity Verification Successful!',
+    kyc: user.kyc
+  });
 });
 
 app.post('/api/user/amoe-code', verifyToken, (req, res) => {
@@ -750,6 +901,15 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
   const host = req.headers.origin || `https://${req.headers.host}`;
 
   if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  // Mandatory KYC Enforcement before cash redemption
+  if (!user.kyc || user.kyc.status !== 'VERIFIED') {
+    return res.status(403).json({
+      error: 'Identity verification (KYC) is required before redeeming Sweeps Coins for cash.',
+      requiresKyc: true
+    });
+  }
+
   if (isNaN(amount) || amount < 50) {
     return res.status(400).json({ error: 'Minimum redemption limit is 50.00 Sweeps Coins (SC).' });
   }
@@ -836,7 +996,7 @@ app.post('/api/provably-fair/rotate-seed', verifyToken, (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 9. MINES GAME ENDPOINTS
+// 10. MINES GAME ENDPOINTS
 // -----------------------------------------------------------------------------
 app.post('/api/play/mines/start', verifyToken, enforceJurisdiction, (req, res) => {
   const { currency, betAmount, mineCount } = req.body;
@@ -936,7 +1096,7 @@ app.post('/api/play/mines/cashout', verifyToken, (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 10. GENERAL GAMES EXECUTION ENDPOINT
+// 11. GENERAL GAMES EXECUTION ENDPOINT
 // -----------------------------------------------------------------------------
 app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
   const { gameId } = req.params;
@@ -1005,7 +1165,7 @@ app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 11. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
+// 12. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
 // -----------------------------------------------------------------------------
 server.listen(PORT, () => {
   console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
