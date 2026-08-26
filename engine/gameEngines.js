@@ -23,7 +23,6 @@ const PLINKO_PAYTABLES = {
 const GAMES = {
   /**
    * 1. SLOTS ENGINE (3x3 Grid, 5 Paylines)
-   * Evaluates 3 horizontal rows and 2 diagonals.
    */
   slots: (serverSeed, clientSeed, nonce, betAmount) => {
     const grid = [];
@@ -55,7 +54,7 @@ const GAMES = {
         totalMultiplier += lineMult;
         winningLines.push({ line: idx, symbols: line, multiplier: lineMult });
       } else if (a === b || b === c || a === c) {
-        totalMultiplier += 0.2; // Minor payout for pairs
+        totalMultiplier += 0.2;
       }
     });
 
@@ -92,11 +91,9 @@ const GAMES = {
 
   /**
    * 4. PLINKO ENGINE (Binomial Path Distribution)
-   * Dynamically maps bucket indices to exact per-row binomial probability curves.
    */
   plinko: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
     const targetRows = params.rows || 10;
-    // Snap to nearest even row count in range [8, 16]
     const rows = Math.min(16, Math.max(8, Math.round(targetRows / 2) * 2));
     
     const path = [];
@@ -122,7 +119,6 @@ const GAMES = {
 
   /**
    * 5. KENO ENGINE (10 Draws out of 40)
-   * Uses unbiased Fisher-Yates array selection to pick winning numbers without infinite loops.
    */
   keno: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
     const playerPicks = (params.selectedNumbers || params.picks || [1, 5, 10, 15, 20]).slice(0, 10);
@@ -137,7 +133,6 @@ const GAMES = {
 
     const matches = playerPicks.filter(val => drawn.includes(val)).length;
     
-    // Dynamic paytable relative to number of picks
     const paytablesByPicksCount = {
       1: [0, 3.8],
       2: [0, 1.7, 5.2],
@@ -183,10 +178,9 @@ const GAMES = {
 
   /**
    * 7. HILO ENGINE (Dynamic Probability Multiplier)
-   * Fixes infinite exploitation bugs by calculating exact conditional odds per card rank.
    */
   hilo: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const currentCard = Math.min(13, Math.max(1, params.currentCard || 7)); // 1 (Ace) - 13 (King)
+    const currentCard = Math.min(13, Math.max(1, params.currentCard || 7));
     const guess = params.guess === 'LOWER' ? 'LOWER' : 'HIGHER';
     const houseEdge = 0.01;
 
@@ -204,7 +198,7 @@ const GAMES = {
     }
 
     if (winningCards === 0) {
-      return { error: 'Invalid guess for card boundary (e.g., HIGHER on King)', win: false, multiplier: 0 };
+      return { error: 'Invalid guess for card boundary', win: false, multiplier: 0 };
     }
 
     const winProbability = winningCards / 13;
@@ -218,18 +212,16 @@ const GAMES = {
    * 8. TOWER ENGINE (Multi-Level Difficulty Configuration)
    */
   tower: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const chosenTile = Math.min(2, Math.max(0, params.tile || 0)); // 0, 1, or 2
+    const chosenTile = Math.min(2, Math.max(0, params.tile || 0));
     const deathTile = ProvablyFair.generateInt(serverSeed, clientSeed, nonce, 0, 2);
     const win = chosenTile !== deathTile;
-
-    // 2 safe tiles out of 3 -> Win probability = 2/3
-    const multiplier = win ? 1.47 : 0; // ~98% RTP per level step
+    const multiplier = win ? 1.47 : 0;
 
     return { result: { chosenTile, deathTile }, multiplier, win };
   },
 
   /**
-   * 9. BLACKJACK INSTANT ENGINE (Evaluates Dealer Rules to standard >=17)
+   * 9. BLACKJACK INSTANT ENGINE
    */
   blackjack: (serverSeed, clientSeed, nonce) => {
     const deck = ProvablyFair.shuffleDeck(serverSeed, clientSeed, nonce);
@@ -253,10 +245,8 @@ const GAMES = {
 
     let playerTotal = calcScore(playerHand);
     let dealerTotal = calcScore(dealerHand);
-
     const playerBJ = playerTotal === 21 && playerHand.length === 2;
 
-    // Dealer draws continuously to 17 if player did not bust or hit BJ
     if (!playerBJ && playerTotal <= 21) {
       while (dealerTotal < 17) {
         dealerHand.push(deck[cardIdx++]);
@@ -270,17 +260,17 @@ const GAMES = {
 
     if (playerBJ) {
       if (dealerBJ) {
-        multiplier = 1.0; // Push
+        multiplier = 1.0;
       } else {
         win = true;
-        multiplier = 2.5; // Standard 3:2 payout
+        multiplier = 2.5;
       }
     } else if (playerTotal <= 21) {
       if (dealerTotal > 21 || playerTotal > dealerTotal) {
         win = true;
-        multiplier = 2.0; // 1:1 payout
+        multiplier = 2.0;
       } else if (playerTotal === dealerTotal) {
-        multiplier = 1.0; // Push
+        multiplier = 1.0;
       }
     }
 
@@ -294,7 +284,6 @@ const GAMES = {
 
   /**
    * 10. MINES ENGINE (Combinatorial Multiplier Evaluator)
-   * Supports multi-tile selections and calculates exact risk odds via binomial combinations: nCr(25-M, K) / nCr(25, K)
    */
   mines: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
     const mineCount = Math.min(24, Math.max(1, params.mineCount || 3));
@@ -302,7 +291,6 @@ const GAMES = {
       ? params.revealedTiles 
       : [params.tile || 0];
 
-    // Build grid and perform deterministic Fisher-Yates shuffle
     const grid = Array(25).fill(0);
     for (let i = 0; i < mineCount; i++) grid[i] = 1;
 
@@ -320,8 +308,6 @@ const GAMES = {
       }
     }
 
-    // Mathematical probability calculation for K safe choices:
-    // P(Win) = nCr(25 - M, K) / nCr(25, K)
     const k = revealedTiles.length;
     const totalComb = nCr(25, k);
     const safeComb = nCr(25 - mineCount, k);
@@ -340,6 +326,136 @@ const GAMES = {
       },
       multiplier,
       win: !hitBomb
+    };
+  },
+
+  /**
+   * 11. BACCARAT ENGINE
+   */
+  baccarat: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
+    const betType = params.betType || 'PLAYER'; // PLAYER, BANKER, TIE
+    const deck = ProvablyFair.shuffleDeck(serverSeed, clientSeed, nonce);
+    let idx = 0;
+
+    const playerHand = [deck[idx++], deck[idx++]];
+    const bankerHand = [deck[idx++], deck[idx++]];
+
+    const handVal = (hand) => {
+      let sum = 0;
+      hand.forEach(c => sum += (c.score > 9 ? 0 : c.score));
+      return sum % 10;
+    };
+
+    let pVal = handVal(playerHand);
+    let bVal = handVal(bankerHand);
+
+    let natural = false;
+    if (pVal >= 8 || bVal >= 8) {
+      natural = true;
+    } else {
+      if (pVal <= 5) {
+        playerHand.push(deck[idx++]);
+        pVal = handVal(playerHand);
+      }
+      if (bVal <= 5) {
+        bankerHand.push(deck[idx++]);
+        bVal = handVal(bankerHand);
+      }
+    }
+
+    let winner = 'TIE';
+    if (pVal > bVal) winner = 'PLAYER';
+    else if (bVal > pVal) winner = 'BANKER';
+
+    let win = false;
+    let multiplier = 0;
+
+    if (betType === winner) {
+      win = true;
+      if (winner === 'BANKER') multiplier = 1.95;
+      else if (winner === 'PLAYER') multiplier = 2.0;
+      else if (winner === 'TIE') multiplier = 9.0;
+    } else if (winner === 'TIE' && betType !== 'TIE') {
+      multiplier = 1.0;
+      win = true;
+    }
+
+    return {
+      result: { winner, pVal, bVal },
+      details: { playerHand, bankerHand, natural },
+      multiplier,
+      win
+    };
+  },
+
+  /**
+   * 12. ROULETTE ENGINE (European Single Zero)
+   */
+  roulette: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
+    const pocket = ProvablyFair.generateInt(serverSeed, clientSeed, nonce, 0, 36);
+    const betType = params.betType || 'RED';
+    const targetNumber = params.number !== undefined ? params.number : 17;
+
+    const redNumbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
+    let isRed = redNumbers.includes(pocket);
+    let isGreen = pocket === 0;
+
+    let win = false;
+    let multiplier = 0;
+
+    if (betType === 'RED') {
+      win = isRed;
+      multiplier = win ? 2.0 : 0;
+    } else if (betType === 'BLACK') {
+      win = !isRed && !isGreen;
+      multiplier = win ? 2.0 : 0;
+    } else if (betType === 'EVEN') {
+      win = !isGreen && pocket % 2 === 0;
+      multiplier = win ? 2.0 : 0;
+    } else if (betType === 'ODD') {
+      win = !isGreen && pocket % 2 !== 0;
+      multiplier = win ? 2.0 : 0;
+    } else if (betType === 'NUMBER') {
+      win = pocket === targetNumber;
+      multiplier = win ? 36.0 : 0;
+    }
+
+    return {
+      result: { pocket, color: isGreen ? 'GREEN' : (isRed ? 'RED' : 'BLACK') },
+      multiplier,
+      win
+    };
+  },
+
+  /**
+   * 13. CRAPS ENGINE
+   */
+  craps: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
+    const die1 = ProvablyFair.generateInt(serverSeed, clientSeed, nonce, 1, 6);
+    const die2 = ProvablyFair.generateInt(serverSeed, clientSeed, nonce, 2, 6);
+    const roll = die1 + die2;
+    const betType = params.betType || 'PASS';
+
+    let win = false;
+    let multiplier = 0;
+
+    if (betType === 'PASS') {
+      if (roll === 7 || roll === 11) {
+        win = true;
+        multiplier = 2.0;
+      } else if (roll === 2 || roll === 3 || roll === 12) {
+        win = false;
+        multiplier = 0;
+      } else {
+        win = roll % 2 === 0;
+        multiplier = win ? 2.0 : 0;
+      }
+    }
+
+    return {
+      result: { roll, dice: [die1, die2] },
+      multiplier,
+      win
     };
   }
 };
