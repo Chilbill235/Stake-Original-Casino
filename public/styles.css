@@ -107,6 +107,7 @@ body {
   font-size: 0.85rem;
   cursor: pointer;
   transition: filter 0.2s ease, transform 0.1s ease;
+  white-space: nowrap;
 }
 
 .btn-buy-gc:hover {
@@ -124,6 +125,7 @@ body {
   font-size: 0.85rem;
   cursor: pointer;
   transition: filter 0.2s ease, transform 0.1s ease;
+  white-space: nowrap;
 }
 
 .btn-redeem:hover {
@@ -753,21 +755,56 @@ body {
     display: none;
   }
   
+  /* Stack navbar items vertically on mobile to completely prevent crowding */
   .navbar {
-    padding: 10px 16px;
+    height: auto;
+    padding: 12px 16px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
   }
 
   .brand {
-    font-size: 1.1rem;
+    text-align: center;
+    font-size: 1.15rem;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #243542;
   }
 
   .header-actions {
-    gap: 6px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
   }
 
+  /* Force the currency selection/balance display to span the top full row */
+  .wallet-selector {
+    grid-column: span 2;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .wallet-selector select {
+    flex: 1;
+    padding: 10px;
+    font-size: 0.9rem;
+  }
+
+  .wallet-display {
+    flex: 1;
+    justify-content: flex-end;
+    padding: 0 12px;
+  }
+
+  /* Make Buy Coins and Redeem buttons sit side-by-side cleanly below the balance */
   .btn-buy-gc, .btn-redeem {
-    padding: 8px 10px;
-    font-size: 0.75rem;
+    width: 100%;
+    padding: 12px 8px;
+    font-size: 0.85rem;
+    text-align: center;
+    border-radius: 8px;
   }
 
   .content-stage {
@@ -801,14 +838,9 @@ body {
     padding: 12px 14px;
   }
 
-  .slot-reel {
-    width: 70px;
-    height: 100px;
-  }
-  
   .slot-symbol {
-    height: 100px;
-    width: 70px;
-    font-size: 2.3rem;
+    height: 70px;
+    width: 60px;
+    font-size: 2rem;
   }
 }
