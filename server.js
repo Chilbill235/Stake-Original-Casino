@@ -21,11 +21,6 @@ const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'AL'];
 
-// Initialize Stripe API with pinned API version matching production expectations
-const stripe = require('stripe')(STRIPE_SECRET_KEY, {
-  apiVersion: '2025-02-28.acacia',
-});
-
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
 const COIN_PACKAGES = {
   'pack_10': { name: '10,000 GC + 10 Free SC', priceInCents: 1000, gcAmount: 10000, scAmount: 10 },
