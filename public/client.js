@@ -1,6 +1,6 @@
 /**
  * SWEEPSTAKES CASINO FRONTEND CONTROLLER (UPGRADED & FULLY UNIFIED)
- * Integrated State Management, Interactive Games, Provably Fair Suite, Audio SFX, Live Feed & Embedded Payments
+ * Integrated State Management, Interactive Games, Provably Fair Suite, Audio SFX, Live Feed & Embedded Mode Protection
  */
 
 // ==========================================================================
@@ -21,7 +21,8 @@ const state = {
   clientSeed: localStorage.getItem('casino_client_seed') || generateRandomSeed(),
   serverSeedHash: '',
   nonce: 0,
-  sfxEnabled: true
+  sfxEnabled: true,
+  isEmbedded: window.self !== window.top // Detects if running inside an iframe/embed view
 };
 
 // ==========================================================================
@@ -157,10 +158,32 @@ async function initSession() {
   setupGlobalEventListeners();
   initProvablyFairUI();
   injectMobileAndNavigationDOM();
+  applyEmbeddedModeRestrictions();
 }
 
 // ==========================================================================
-// 4. WEBSOCKET REAL-TIME LIVE BETS FEED
+// 4. EMBEDDED MODE RESTRICTIONS (Hiding Balances & Store when Embedded)
+// ==========================================================================
+
+function applyEmbeddedModeRestrictions() {
+  if (!state.isEmbedded) return;
+
+  // Hide store purchase triggers, deposit/coin buying layouts, and coin balances if requested in embed views
+  const storeTriggers = document.querySelectorAll('.store-trigger-btn, .buy-coins-container, #wallet-dropdown-menu');
+  storeTriggers.forEach(el => {
+    el.style.display = 'none';
+  });
+
+  const walletDisplay = document.querySelector('.wallet-selector-container');
+  if (walletDisplay) {
+    walletDisplay.style.filter = 'blur(6px)';
+    walletDisplay.style.pointerEvents = 'none';
+    walletDisplay.title = 'Purchases and balances hidden in embed view';
+  }
+}
+
+// ==========================================================================
+// 5. WEBSOCKET REAL-TIME LIVE BETS FEED
 // ==========================================================================
 
 function connectWebSocket() {
@@ -233,7 +256,7 @@ function renderLiveBetRow(data) {
 }
 
 // ==========================================================================
-// 5. WALLET, SWITCHER & CURRENCY CONTROLLER
+// 6. WALLET, SWITCHER & CURRENCY CONTROLLER
 // ==========================================================================
 
 function updateWalletUI() {
@@ -278,6 +301,7 @@ function updateWalletUI() {
 }
 
 function toggleWalletDropdown(event) {
+  if (state.isEmbedded) return; // Block wallet menu interaction if embedded
   if (event) event.stopPropagation();
   const menu = document.getElementById('wallet-dropdown-menu');
   if (menu) {
@@ -336,7 +360,7 @@ function adjustBet(action) {
 }
 
 // ==========================================================================
-// 6. PROVABLY FAIR CONTROLLER
+// 7. PROVABLY FAIR CONTROLLER
 // ==========================================================================
 
 function generateRandomSeed() {
@@ -373,10 +397,11 @@ function updateProvablyFairHash(hash) {
 }
 
 // ==========================================================================
-// 7. STORE & EMBEDDED CHECKOUT / SWEEPS COINS REDEMPTION
+// 8. STORE & EMBEDDED CHECKOUT / SWEEPS COINS REDEMPTION
 // ==========================================================================
 
 function openStoreModal() {
+  if (state.isEmbedded) return; // Completely block store modal access in embedded mode
   playSound('click');
   document.getElementById('modal-store')?.classList.remove('hidden');
 }
@@ -411,6 +436,7 @@ async function loadStripeSdk() {
 }
 
 async function buyCoinPackage(packageId) {
+  if (state.isEmbedded) return;
   try {
     playSound('click');
     openStoreModal();
@@ -467,10 +493,19 @@ async function buyCoinPackage(packageId) {
   }
 }
 
-function openRedeemModal() { playSound('click'); document.getElementById('modal-redeem')?.classList.remove('hidden'); }
-function closeRedeemModal() { playSound('click'); document.getElementById('modal-redeem')?.classList.add('hidden'); }
+function openRedeemModal() { 
+  if (state.isEmbedded) return;
+  playSound('click'); 
+  document.getElementById('modal-redeem')?.classList.remove('hidden'); 
+}
+
+function closeRedeemModal() { 
+  playSound('click'); 
+  document.getElementById('modal-redeem')?.classList.add('hidden'); 
+}
 
 async function submitRedeem() {
+  if (state.isEmbedded) return;
   const input = document.getElementById('redeem-input');
   const amount = parseFloat(input?.value);
 
@@ -497,7 +532,7 @@ async function submitRedeem() {
 }
 
 // ==========================================================================
-// 8. LOBBY & NAVIGATION ROUTING
+// 9. LOBBY & NAVIGATION ROUTING
 // ==========================================================================
 
 function showLobby() {
@@ -636,7 +671,7 @@ function launchGame(gameId) {
 }
 
 // ==========================================================================
-// 9. PRIMARY ACTION DISPATCHER & GAME ENGINES
+// 10. PRIMARY ACTION DISPATCHER & GAME ENGINES
 // ==========================================================================
 
 function handlePrimaryAction() {
@@ -1078,7 +1113,7 @@ async function executeStandardBet(betAmount) {
 }
 
 // ==========================================================================
-// 10. PROFILE & MODAL CONTROLLERS
+// 11. PROFILE & MODAL CONTROLLERS
 // ==========================================================================
 
 function openProfileModal() {
@@ -1131,7 +1166,7 @@ function injectMobileAndNavigationDOM() {
 }
 
 // ==========================================================================
-// 11. UTILITIES & EVENT BINDINGS
+// 12. UTILITIES & EVENT BINDINGS
 // ==========================================================================
 
 function escapeHTML(str) {
