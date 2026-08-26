@@ -2,126 +2,241 @@ const ProvablyFair = require('./provablyFair');
 
 const SYMBOLS = ['🎰', '💎', '👑', '🔥', '⭐', '🍋', '🍒', '7️⃣'];
 
+// Math helper for combinations nCr
+const nCr = (n, r) => {
+  if (r < 0 || r > n) return 0;
+  if (r === 0 || r === n) return 1;
+  let res = 1;
+  for (let i = 1; i <= r; i++) res = (res * (n - i + 1)) / i;
+  return res;
+};
+
+// Pre-calculated Plinko paytables per row count (Target ~99% RTP)
+const PLINKO_PAYTABLES = {
+  8: [13, 3, 1.3, 0.7, 0.4, 0.7, 1.3, 3, 13],
+  10: [22, 5, 2, 1.4, 0.6, 0.4, 0.6, 1.4, 2, 5, 22],
+  12: [33, 11, 4, 2, 1.1, 0.6, 0.3, 0.6, 1.1, 2, 4, 11, 33],
+  14: [58, 15, 7, 4, 1.9, 1, 0.5, 0.2, 0.5, 1, 1.9, 4, 7, 15, 58],
+  16: [110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3, 0.5, 1, 1.5, 3, 5, 10, 41, 110]
+};
+
 const GAMES = {
-  // 1. Slots Engine (3 Reels)
+  /**
+   * 1. SLOTS ENGINE (3x3 Grid, 5 Paylines)
+   * Evaluates 3 horizontal rows and 2 diagonals.
+   */
   slots: (serverSeed, clientSeed, nonce, betAmount) => {
-    const r1 = SYMBOLS[Math.floor(ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, 1) * SYMBOLS.length)];
-    const r2 = SYMBOLS[Math.floor(ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, 2) * SYMBOLS.length)];
-    const r3 = SYMBOLS[Math.floor(ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, 3) * SYMBOLS.length)];
+    const grid = [];
+    let cursor = 0;
 
-    const grid = [['⭐', '🍋', '🍒'], [r1, r2, r3], ['🔥', '👑', '💎']];
-    let multiplier = 0;
-
-    if (r1 === r2 && r2 === r3) {
-      multiplier = r1 === '7️⃣' ? 50 : 15;
-    } else if (r1 === r2 || r2 === r3 || r1 === r3) {
-      multiplier = 1.5;
+    for (let row = 0; row < 3; row++) {
+      grid[row] = [];
+      for (let col = 0; col < 3; col++) {
+        const float = ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, cursor++);
+        grid[row][col] = SYMBOLS[Math.floor(float * SYMBOLS.length)];
+      }
     }
 
+    const paylines = [
+      grid[0], // Top row
+      grid[1], // Middle row
+      grid[2], // Bottom row
+      [grid[0][0], grid[1][1], grid[2][2]], // Diagonal 1
+      [grid[2][0], grid[1][1], grid[0][2]]  // Diagonal 2
+    ];
+
+    let totalMultiplier = 0;
+    const winningLines = [];
+
+    paylines.forEach((line, idx) => {
+      const [a, b, c] = line;
+      if (a === b && b === c) {
+        const lineMult = a === '7️⃣' ? 25 : a === '💎' ? 10 : 5;
+        totalMultiplier += lineMult;
+        winningLines.push({ line: idx, symbols: line, multiplier: lineMult });
+      } else if (a === b || b === c || a === c) {
+        totalMultiplier += 0.2; // Minor payout for pairs
+      }
+    });
+
+    totalMultiplier = Math.floor(totalMultiplier * 100) / 100;
+
     return {
-      result: [r1, r2, r3],
-      details: { grid },
-      multiplier,
-      win: multiplier > 0
+      result: grid,
+      details: { winningLines },
+      multiplier: totalMultiplier,
+      win: totalMultiplier > 0
     };
   },
 
-  // 2. Dice Engine (0.00 - 99.99 Target)
+  /**
+   * 2. DICE ENGINE (0.00 - 99.99 Target)
+   */
   dice: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const houseEdge = 1.0; // 1% House Edge
-    return ProvablyFair.playDice(serverSeed, clientSeed, nonce, params.target || 50, params.condition || 'OVER', houseEdge);
+    const houseEdge = 1.0;
+    const target = Math.min(98.99, Math.max(0.01, params.target || 50));
+    const condition = params.condition === 'UNDER' ? 'UNDER' : 'OVER';
+
+    return ProvablyFair.playDice(serverSeed, clientSeed, nonce, target, condition, houseEdge);
   },
 
-  // 3. Limbo Engine
+  /**
+   * 3. LIMBO ENGINE
+   */
   limbo: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const houseEdge = 1.0; // 1% House Edge
-    const targetMultiplier = params.targetMultiplier || 2.0;
+    const houseEdge = 1.0;
+    const targetMultiplier = Math.max(1.01, params.targetMultiplier || 2.0);
+
     return ProvablyFair.playLimbo(serverSeed, clientSeed, nonce, targetMultiplier, houseEdge);
   },
 
-  // 4. Plinko Engine (Dynamic Rows 8-16)
+  /**
+   * 4. PLINKO ENGINE (Binomial Path Distribution)
+   * Dynamically maps bucket indices to exact per-row binomial probability curves.
+   */
   plinko: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const rows = Math.min(16, Math.max(8, params.rows || 10));
-    let path = [];
+    const targetRows = params.rows || 10;
+    // Snap to nearest even row count in range [8, 16]
+    const rows = Math.min(16, Math.max(8, Math.round(targetRows / 2) * 2));
+    
+    const path = [];
     let rightTurns = 0;
 
     for (let i = 0; i < rows; i++) {
-      const turn = ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, i) > 0.5 ? 1 : 0;
+      const turn = ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, i) >= 0.5 ? 1 : 0;
       path.push(turn);
       rightTurns += turn;
     }
 
-    // Paytable mapped for 10-row baseline
-    const multipliersByBucket = [13, 3, 1.3, 0.7, 0.4, 0.4, 0.7, 1.3, 3, 13];
-    const bucketIndex = Math.floor((rightTurns / rows) * (multipliersByBucket.length - 1));
-    const multiplier = multipliersByBucket[bucketIndex];
+    const paytable = PLINKO_PAYTABLES[rows];
+    const multiplier = paytable[rightTurns];
 
-    return { result: path, bucket: rightTurns, multiplier, win: multiplier > 1 };
+    return {
+      result: path,
+      bucket: rightTurns,
+      rows,
+      multiplier,
+      win: multiplier > 1.0
+    };
   },
 
-  // 5. Keno Engine (Draws 5 winning tiles from 1-40)
+  /**
+   * 5. KENO ENGINE (10 Draws out of 40)
+   * Uses unbiased Fisher-Yates array selection to pick winning numbers without infinite loops.
+   */
   keno: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const playerPicks = params.selectedNumbers || params.picks || [1, 5, 10, 15, 20];
+    const playerPicks = (params.selectedNumbers || params.picks || [1, 5, 10, 15, 20]).slice(0, 10);
+    const pool = Array.from({ length: 40 }, (_, i) => i + 1);
     const drawn = [];
-    let cursor = 0;
 
-    while (drawn.length < 5) {
-      const num = ProvablyFair.generateInt(serverSeed, clientSeed, nonce, 1, 40, cursor);
-      if (!drawn.includes(num)) drawn.push(num);
-      cursor++;
+    for (let i = 0; i < 10; i++) {
+      const float = ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, i);
+      const randIdx = Math.floor(float * pool.length);
+      drawn.push(pool.splice(randIdx, 1)[0]);
     }
 
     const matches = playerPicks.filter(val => drawn.includes(val)).length;
-    const kenoPaytable = [0, 0, 1.5, 4.5, 12, 45]; // Weighted 1% edge
-    const multiplier = kenoPaytable[matches] || 0;
+    
+    // Dynamic paytable relative to number of picks
+    const paytablesByPicksCount = {
+      1: [0, 3.8],
+      2: [0, 1.7, 5.2],
+      3: [0, 1.0, 2.8, 24],
+      4: [0, 0.5, 2.0, 8.0, 80],
+      5: [0, 0.0, 1.5, 4.5, 12, 45]
+    };
 
-    return { result: drawn, matches, multiplier, win: multiplier > 0 };
+    const activePaytable = paytablesByPicksCount[playerPicks.length] || paytablesByPicksCount[5];
+    const multiplier = activePaytable[matches] || 0;
+
+    return { result: drawn, playerPicks, matches, multiplier, win: multiplier > 0 };
   },
 
-  // 6. Wheel Engine (Weighted Segments)
+  /**
+   * 6. WHEEL ENGINE (Exact Segment Distribution)
+   */
   wheel: (serverSeed, clientSeed, nonce, betAmount) => {
     const float = ProvablyFair.generateFloat(serverSeed, clientSeed, nonce);
 
-    // Probability Weighted Distribution
-    let landed = { color: 'BLACK', mult: 0 };
-    if (float < 0.40) landed = { color: 'GREY', mult: 1.2 };
-    else if (float < 0.70) landed = { color: 'BLUE', mult: 1.8 };
-    else if (float < 0.90) landed = { color: 'GREEN', mult: 3.0 };
-    else if (float < 0.99) landed = { color: 'PURPLE', mult: 5.0 };
-    else landed = { color: 'GOLD', mult: 20.0 };
+    const segments = [
+      { color: 'BLACK', mult: 0.0, prob: 0.40 },
+      { color: 'GREY', mult: 1.2, prob: 0.30 },
+      { color: 'BLUE', mult: 1.8, prob: 0.20 },
+      { color: 'GREEN', mult: 3.0, prob: 0.08 },
+      { color: 'PURPLE', mult: 5.0, prob: 0.019 },
+      { color: 'GOLD', mult: 20.0, prob: 0.001 }
+    ];
+
+    let cumulative = 0;
+    let landed = segments[0];
+
+    for (const segment of segments) {
+      cumulative += segment.prob;
+      if (float < cumulative) {
+        landed = segment;
+        break;
+      }
+    }
 
     return { result: landed.color, multiplier: landed.mult, win: landed.mult > 0 };
   },
 
-  // 7. Hilo Engine
+  /**
+   * 7. HILO ENGINE (Dynamic Probability Multiplier)
+   * Fixes infinite exploitation bugs by calculating exact conditional odds per card rank.
+   */
   hilo: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const currentCard = params.currentCard || 7;
+    const currentCard = Math.min(13, Math.max(1, params.currentCard || 7)); // 1 (Ace) - 13 (King)
+    const guess = params.guess === 'LOWER' ? 'LOWER' : 'HIGHER';
+    const houseEdge = 0.01;
+
     const nextCard = ProvablyFair.generateInt(serverSeed, clientSeed, nonce, 1, 13);
 
+    let winningCards = 0;
     let win = false;
-    if (params.guess === 'HIGHER' && nextCard >= currentCard) win = true;
-    if (params.guess === 'LOWER' && nextCard <= currentCard) win = true;
 
-    // Adjusted for slight 1% house edge scaling
-    const multiplier = win ? 1.96 : 0;
-    return { result: nextCard, currentCard, guess: params.guess, multiplier, win };
+    if (guess === 'HIGHER') {
+      winningCards = 13 - currentCard;
+      win = nextCard > currentCard;
+    } else {
+      winningCards = currentCard - 1;
+      win = nextCard < currentCard;
+    }
+
+    if (winningCards === 0) {
+      return { error: 'Invalid guess for card boundary (e.g., HIGHER on King)', win: false, multiplier: 0 };
+    }
+
+    const winProbability = winningCards / 13;
+    const rawMultiplier = (1 - houseEdge) / winProbability;
+    const multiplier = win ? Math.floor(rawMultiplier * 10000) / 10000 : 0;
+
+    return { result: nextCard, currentCard, guess, multiplier, win };
   },
 
-  // 8. Tower Engine (Ascend Levels)
+  /**
+   * 8. TOWER ENGINE (Multi-Level Difficulty Configuration)
+   */
   tower: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
-    const chosenTile = params.tile || 0; // 0, 1, or 2
+    const chosenTile = Math.min(2, Math.max(0, params.tile || 0)); // 0, 1, or 2
     const deathTile = ProvablyFair.generateInt(serverSeed, clientSeed, nonce, 0, 2);
     const win = chosenTile !== deathTile;
 
-    return { result: { chosenTile, deathTile }, multiplier: win ? 1.47 : 0, win };
+    // 2 safe tiles out of 3 -> Win probability = 2/3
+    const multiplier = win ? 1.47 : 0; // ~98% RTP per level step
+
+    return { result: { chosenTile, deathTile }, multiplier, win };
   },
 
-  // 9. Blackjack Single Hand Engine
-  blackjack: (serverSeed, clientSeed, nonce, betAmount) => {
-    const shuffledDeck = ProvablyFair.shuffleDeck(serverSeed, clientSeed, nonce);
+  /**
+   * 9. BLACKJACK INSTANT ENGINE (Evaluates Dealer Rules to standard >=17)
+   */
+  blackjack: (serverSeed, clientSeed, nonce) => {
+    const deck = ProvablyFair.shuffleDeck(serverSeed, clientSeed, nonce);
+    let cardIdx = 0;
 
-    const playerHand = [shuffledDeck[0], shuffledDeck[2]];
-    const dealerHand = [shuffledDeck[1], shuffledDeck[3]];
+    const playerHand = [deck[cardIdx++], deck[cardIdx++]];
+    const dealerHand = [deck[cardIdx++], deck[cardIdx++]];
 
     const calcScore = (hand) => {
       let score = 0, aces = 0;
@@ -129,41 +244,103 @@ const GAMES = {
         score += c.score;
         if (c.value === 'A') aces++;
       });
-      while (score > 21 && aces > 0) { score -= 10; aces--; }
+      while (score > 21 && aces > 0) {
+        score -= 10;
+        aces--;
+      }
       return score;
     };
 
-    const playerTotal = calcScore(playerHand);
-    const dealerTotal = calcScore(dealerHand);
+    let playerTotal = calcScore(playerHand);
+    let dealerTotal = calcScore(dealerHand);
 
+    const playerBJ = playerTotal === 21 && playerHand.length === 2;
+
+    // Dealer draws continuously to 17 if player did not bust or hit BJ
+    if (!playerBJ && playerTotal <= 21) {
+      while (dealerTotal < 17) {
+        dealerHand.push(deck[cardIdx++]);
+        dealerTotal = calcScore(dealerHand);
+      }
+    }
+
+    const dealerBJ = dealerTotal === 21 && dealerHand.length === 2;
     let win = false;
     let multiplier = 0;
 
-    if (playerTotal <= 21 && (playerTotal > dealerTotal || dealerTotal > 21)) {
-      win = true;
-      multiplier = playerTotal === 21 && playerHand.length === 2 ? 2.5 : 1.98;
-    } else if (playerTotal === dealerTotal) {
-      multiplier = 1.0; // Push
+    if (playerBJ) {
+      if (dealerBJ) {
+        multiplier = 1.0; // Push
+      } else {
+        win = true;
+        multiplier = 2.5; // Standard 3:2 payout
+      }
+    } else if (playerTotal <= 21) {
+      if (dealerTotal > 21 || playerTotal > dealerTotal) {
+        win = true;
+        multiplier = 2.0; // 1:1 payout
+      } else if (playerTotal === dealerTotal) {
+        multiplier = 1.0; // Push
+      }
     }
 
     return {
       result: { playerTotal, dealerTotal },
-      details: { playerHand, dealerHand, dealerScore: dealerTotal, playerScore: playerTotal },
+      details: { playerHand, dealerHand, playerScore: playerTotal, dealerScore: dealerTotal },
       multiplier,
       win
     };
   },
 
-  // 10. Mines Instant Bet Evaluator
+  /**
+   * 10. MINES ENGINE (Combinatorial Multiplier Evaluator)
+   * Supports multi-tile selections and calculates exact risk odds via binomial combinations: nCr(25-M, K) / nCr(25, K)
+   */
   mines: (serverSeed, clientSeed, nonce, betAmount, params = {}) => {
     const mineCount = Math.min(24, Math.max(1, params.mineCount || 3));
-    const float = ProvablyFair.generateFloat(serverSeed, clientSeed, nonce);
+    const revealedTiles = Array.isArray(params.revealedTiles) 
+      ? params.revealedTiles 
+      : [params.tile || 0];
 
-    const hitBomb = float < (mineCount / 25);
-    const safeTilesCount = 25 - mineCount;
-    const multiplier = hitBomb ? 0 : Number((0.99 * (25 / safeTilesCount)).toFixed(2));
+    // Build grid and perform deterministic Fisher-Yates shuffle
+    const grid = Array(25).fill(0);
+    for (let i = 0; i < mineCount; i++) grid[i] = 1;
 
-    return { result: { hitBomb }, multiplier, win: !hitBomb };
+    for (let i = 24; i > 0; i--) {
+      const float = ProvablyFair.generateFloat(serverSeed, clientSeed, nonce, 24 - i);
+      const j = Math.floor(float * (i + 1));
+      [grid[i], grid[j]] = [grid[j], grid[i]];
+    }
+
+    let hitBomb = false;
+    for (const tileIdx of revealedTiles) {
+      if (grid[tileIdx] === 1) {
+        hitBomb = true;
+        break;
+      }
+    }
+
+    // Mathematical probability calculation for K safe choices:
+    // P(Win) = nCr(25 - M, K) / nCr(25, K)
+    const k = revealedTiles.length;
+    const totalComb = nCr(25, k);
+    const safeComb = nCr(25 - mineCount, k);
+    const winProbability = safeComb / totalComb;
+
+    const houseEdge = 0.01;
+    const multiplier = (!hitBomb && winProbability > 0)
+      ? Math.floor(((1 - houseEdge) / winProbability) * 100) / 100
+      : 0;
+
+    return {
+      result: { hitBomb },
+      details: {
+        revealedCount: k,
+        mineLocations: grid.map((v, i) => v === 1 ? i : null).filter(v => v !== null)
+      },
+      multiplier,
+      win: !hitBomb
+    };
   }
 };
 
