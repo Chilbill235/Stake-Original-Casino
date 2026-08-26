@@ -106,6 +106,7 @@ body.dark-theme {
   display: flex;
   align-items: center;
   cursor: pointer;
+  position: relative;
 }
 
 .wallet-selector {
@@ -146,16 +147,47 @@ body.dark-theme {
   white-space: nowrap;
 }
 
-.currency-dropdown {
-  background: var(--bg-card);
-  color: var(--text-primary);
+.wallet-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
-  font-family: inherit;
-  font-size: 0.8rem;
-  font-weight: 600;
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+  z-index: 1100;
+  overflow: hidden;
+}
+
+.wallet-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
   cursor: pointer;
+  transition: var(--transition);
+}
+
+.wallet-option:hover {
+  background-color: var(--bg-card);
+}
+
+.wallet-option-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.opt-name {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.opt-val {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
 /* Action Buttons */
@@ -795,7 +827,7 @@ body.dark-theme {
 }
 
 /* ==========================================================================
-   6. MODALS
+   6. MODALS & FIXED COIN STORE CONTAINMENT
    ========================================================================== */
 .modal-backdrop {
   position: fixed;
@@ -826,10 +858,53 @@ body.dark-theme {
   overflow-y: auto;
 }
 
+/* Specific strict layout constraints for the store modal to fix the clipping bug */
+.store-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.store-modal .package-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 1;
+}
+
+.store-modal .package-list::-webkit-scrollbar {
+  width: 5px;
+}
+.store-modal .package-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.checkout-embed-container {
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.modal-footer-actions {
+  margin-top: auto;
+  padding-top: 8px;
+  flex-shrink: 0;
+}
+
 .modal-header-flex {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .modal-header-flex h3 {
@@ -849,12 +924,7 @@ body.dark-theme {
 .modal-subtitle {
   font-size: 0.85rem;
   color: var(--text-secondary);
-}
-
-.package-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-shrink: 0;
 }
 
 .package-card {
@@ -1022,19 +1092,6 @@ body.dark-theme {
   text-align: center;
 }
 
-/* Backdrop Layer for Mobile Sidebar Overlay */
-.sidebar-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 450;
-  display: none;
-}
-
-.sidebar-backdrop.active {
-  display: block;
-}
-
 /* ==========================================================================
    8. MOBILE RESPONSIVE ADAPTATIONS
    ========================================================================== */
@@ -1120,4 +1177,3 @@ body.dark-theme {
     height: 46px;
   }
 }
-
