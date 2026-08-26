@@ -109,7 +109,17 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
 
   try {
     const res = await fetch(endpoint, config);
-    const data = await res.json();
+    
+    // Safely parse JSON response or handle empty body gracefully
+    let data = {};
+    const text = await res.text();
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (parseErr) {
+        console.warn('[API Parse Warning]: Non-JSON response received', text);
+      }
+    }
 
     if (res.status === 401) {
       localStorage.removeItem('casino_token');
