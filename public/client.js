@@ -1,6 +1,6 @@
 /**
  * SWEEPSTAKES CASINO FRONTEND CONTROLLER (UPGRADED & FULLY UNIFIED)
- * Integrated State Management, Interactive Games, Provably Fair Suite, Audio SFX & Live Feed
+ * Integrated State Management, Interactive Games, Provably Fair Suite, Audio SFX, Live Feed & Embedded Payments
  */
 
 // ==========================================================================
@@ -363,7 +363,7 @@ function updateProvablyFairHash(hash) {
 }
 
 // ==========================================================================
-// 7. STORE & SWEEPS COINS REDEMPTION
+// 7. STORE & EMBEDDED CHECKOUT / SWEEPS COINS REDEMPTION
 // ==========================================================================
 
 function openStoreModal() {
@@ -377,34 +377,100 @@ function closeStoreModal() {
   const container = document.getElementById('checkout-container');
   if (container) container.innerHTML = '';
   if (state.activeCheckoutInstance) {
-    state.activeCheckoutInstance.destroy();
+    try {
+      state.activeCheckoutInstance.destroy();
+    } catch (e) {
+      console.warn('Checkout cleanup warning:', e);
+    }
     state.activeCheckoutInstance = null;
   }
 }
 
+/**
+ * Dynamically loads Stripe.js v3 SDK if not present in window scope.
+ */
+async function loadStripeSdk() {
+  if (window.Stripe) return window.Stripe;
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://js.stripe.com/v3/';
+    script.onload = () => resolve(window.Stripe);
+    script.onerror = () => reject(new Error('Failed to load payment gateway SDK.'));
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Embedded Payment Checkout Integration
+ */
 async function buyCoinPackage(packageId) {
   try {
     playSound('click');
-    const data = await apiRequest('/api/user/buy-coins', 'POST', { packageId });
+    openStoreModal();
 
-    const container = document.getElementById('checkout-container');
-    if (container) container.innerHTML = '';
+    let container = document.getElementById('checkout-container');
+
+    // Auto-create embedded container element inside store modal if missing
+    if (!container) {
+      const modalContent = document.querySelector('#modal-store .modal-content') || document.getElementById('modal-store') || document.body;
+      container = document.createElement('div');
+      container.id = 'checkout-container';
+      container.style.marginTop = '15px';
+      container.style.minHeight = '400px';
+      modalContent.appendChild(container);
+    }
+
+    container.style.display = 'block';
+    container.innerHTML = '<div style="text-align:center; padding:30px; color:#b1bad2; font-weight:600;">Loading secure embedded checkout...</div>';
+
+    // Clean up active checkout instance if running
     if (state.activeCheckoutInstance) {
-      state.activeCheckoutInstance.destroy();
+      try {
+        state.activeCheckoutInstance.destroy();
+      } catch (e) {
+        console.warn('Checkout instance cleanup warning:', e);
+      }
       state.activeCheckoutInstance = null;
     }
 
-    if (window.Stripe) {
-      const stripe = window.Stripe(data.publishableKey);
-      state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
-        clientSecret: data.clientSecret
-      });
-      state.activeCheckoutInstance.mount('#checkout-container');
-    } else {
-      alert('Stripe SDK not loaded.');
+    // 1. Fetch Session Data from API
+    const data = await apiRequest('/api/user/buy-coins', 'POST', { packageId });
+
+    if (!data.publishableKey || !data.clientSecret) {
+      throw new Error(data.error || 'Invalid session configuration returned from server.');
     }
+
+    // 2. Load SDK dynamically & init Stripe
+    const StripeSDK = await loadStripeSdk();
+    const stripe = StripeSDK(data.publishableKey);
+
+    container.innerHTML = ''; // Clear loading text
+
+    // 3. Initialize Embedded Checkout
+    state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
+      clientSecret: data.clientSecret,
+      onComplete: () => {
+        playSound('win');
+        alert('Payment completed successfully! Balance refreshed.');
+        closeStoreModal();
+        initSession();
+      }
+    });
+
+    // 4. Mount Embedded Payment UI directly into the in-page container
+    state.activeCheckoutInstance.mount('#checkout-container');
+
   } catch (err) {
-    alert(err.message || 'Failed to connect to checkout service.');
+    console.error('[Embedded Payment Error]:', err);
+    const container = document.getElementById('checkout-container');
+    if (container) {
+      container.innerHTML = `
+        <div style="color:#ff0055; text-align:center; padding:20px; font-weight:700; border:1px solid #ff0055; border-radius:6px; background:rgba(255,0,85,0.05);">
+          ${escapeHTML(err.message || 'Failed to initialize in-page payment.')}
+        </div>`;
+    } else {
+      alert(err.message || 'Failed to connect to checkout service.');
+    }
   }
 }
 
