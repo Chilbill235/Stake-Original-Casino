@@ -110,7 +110,6 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
   try {
     const res = await fetch(endpoint, config);
     
-    // Safely parse JSON response or handle empty body gracefully
     let data = {};
     const text = await res.text();
     if (text) {
@@ -170,7 +169,8 @@ function connectWebSocket() {
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  state.ws = new WebSocket(`${protocol}//${window.location.host}`);
+  const token = localStorage.getItem('casino_token') || '';
+  state.ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
 
   state.ws.onopen = () => {
     if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
@@ -355,9 +355,9 @@ function initProvablyFairUI() {
 async function rotateServerSeed() {
   try {
     const data = await apiRequest('/api/user/rotate-seed', 'POST');
-    state.serverSeedHash = data.serverSeedHash;
+    state.serverSeedHash = data.newServerSeedHash;
     state.nonce = 0;
-    updateProvablyFairHash(data.serverSeedHash);
+    updateProvablyFairHash(data.newServerSeedHash);
     alert('Server seed rotated successfully!');
   } catch (err) {
     alert('Failed to rotate server seed.');
@@ -443,7 +443,6 @@ async function buyCoinPackage(packageId) {
 
     state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
       clientSecret: data.clientSecret,
-      uiMode: 'embedded_page',
       onComplete: () => {
         playSound('win');
         alert('Payment completed successfully! Balance refreshed.');
@@ -475,8 +474,8 @@ async function submitRedeem() {
   const input = document.getElementById('redeem-input');
   const amount = parseFloat(input?.value);
 
-  if (isNaN(amount) || amount < 100) {
-    return alert('Minimum redemption limit is 100.00 Sweeps Coins (SC).');
+  if (isNaN(amount) || amount < 50) {
+    return alert('Minimum redemption limit is 50.00 Sweeps Coins (SC).');
   }
 
   try {
@@ -689,8 +688,7 @@ async function startMinesGame(betAmount) {
     const data = await apiRequest('/api/play/mines/start', 'POST', {
       currency: state.currency,
       betAmount,
-      mineCount,
-      clientSeed: state.clientSeed
+      mineCount
     });
 
     state.balances = data.balances;
@@ -800,8 +798,7 @@ async function startTowerGame(betAmount) {
     const data = await apiRequest('/api/play/tower/start', 'POST', {
       currency: state.currency,
       betAmount,
-      difficulty,
-      clientSeed: state.clientSeed
+      difficulty
     });
 
     state.balances = data.balances;
@@ -915,8 +912,7 @@ async function executeLimboBet(betAmount) {
     const data = await apiRequest('/api/play/limbo', 'POST', {
       currency: state.currency,
       betAmount,
-      params: { targetMultiplier },
-      clientSeed: state.clientSeed
+      params: { targetMultiplier }
     });
 
     state.balances = data.balances;
@@ -966,7 +962,6 @@ function updateDiceOdds() {
   const target = parseFloat(document.getElementById('dice-target')?.value || 50);
   const winChance = cond === 'OVER' ? (100 - target) : target;
   const multiplier = winChance > 0 ? (99 / winChance) : 0;
-  // Can be rendered if a feedback element exists
 }
 
 async function executeDiceBet(betAmount) {
@@ -979,8 +974,7 @@ async function executeDiceBet(betAmount) {
     const data = await apiRequest('/api/play/dice', 'POST', {
       currency: state.currency,
       betAmount,
-      params: { condition, target },
-      clientSeed: state.clientSeed
+      params: { condition, target }
     });
 
     state.balances = data.balances;
@@ -1056,8 +1050,7 @@ async function executeStandardBet(betAmount) {
     const data = await apiRequest(`/api/play/${state.currentGame}`, 'POST', {
       currency: state.currency,
       betAmount,
-      params,
-      clientSeed: state.clientSeed
+      params
     });
 
     state.balances = data.balances;

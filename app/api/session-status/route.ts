@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2025-02-28.acacia' as any,
+  apiVersion: '2025-02-28.acacia',
 });
 
 export async function GET(req: Request) {
@@ -20,7 +20,9 @@ export async function GET(req: Request) {
       status: session.status,
       customer_email: session.customer_details?.email,
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to retrieve checkout session.';
+    console.error('Error retrieving checkout session:', error);
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

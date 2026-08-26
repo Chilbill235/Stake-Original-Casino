@@ -314,7 +314,7 @@ const GAMES = {
     const winProb = cond === 'OVER' ? (100 - target) : target;
     
     const multiplier = win ? parseFloat(((100 - (HOUSE_EDGE * 100)) / winProb).toFixed(4)) : 0;
-    return { win, multiplier, details: { roll, target, cond } };
+    return { win, multiplier, details: { rolled: roll, target, cond } };
   },
 
   limbo: (floats, params) => {
@@ -322,7 +322,7 @@ const GAMES = {
     const result = parseFloat(rawResult.toFixed(2));
     const target = params.targetMultiplier || 2.0;
     const win = result >= target;
-    return { win, multiplier: win ? target : 0, details: { result, target } };
+    return { win, multiplier: win ? target : 0, details: { resultMultiplier: result, target } };
   },
 
   crash: (floats, params) => {
@@ -452,15 +452,12 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
 app.post('/api/webhooks/kyc', express.json(), (req, res) => {
   const event = req.body;
   
-  // Verify Webhook Signature if secret provided
   if (PERSONA_WEBHOOK_SECRET) {
     const sig = req.headers['persona-signature'];
-    // In production, add HMAC signature verification here
   }
 
   const { event: eventType, data } = event;
-  const inquiryId = data?.id;
-  const referenceId = data?.attributes?.reference_id; // Maps to internal userId
+  const referenceId = data?.attributes?.reference_id;
 
   if (!referenceId) return res.status(400).json({ error: 'Missing reference_id' });
 
@@ -621,11 +618,10 @@ app.post('/api/auth/guest', (req, res) => {
   res.json({ 
     token, 
     user: { id: newUser.id, username: newUser.username, kyc: newUser.kyc }, 
-    balances: { gc: newUser.gc_balance, sc_unplayed: newUser.sc_unplayed, sc_played: newUser.sc_played } 
+    balances: { gc: newUser.gc_balance, sc: newUser.sc_unplayed + newUser.sc_played } 
   });
 });
 
-// Full Profile / Me Endpoint
 app.get('/api/user/me', verifyToken, async (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User profile not found.' });
@@ -647,9 +643,9 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     state: user.state,
     balances: { 
       gc: user.gc_balance, 
+      sc: user.sc_unplayed + user.sc_played,
       sc_unplayed: user.sc_unplayed, 
-      sc_played: user.sc_played,
-      total_sc: user.sc_unplayed + user.sc_played 
+      sc_played: user.sc_played
     },
     kyc: user.kyc || { status: 'UNVERIFIED', tier: 0 },
     vip: {
@@ -668,12 +664,11 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
   });
 });
 
-// Comprehensive, Paginated & Filterable Transaction History
 app.get('/api/user/transactions', verifyToken, (req, res) => {
   const userTransactions = transactions.get(req.user.id) || [];
   
-  const typeFilter = req.query.type; // 'BET', 'WIN', 'PURCHASE', 'WITHDRAWAL', 'BONUS', 'RAKEBACK'
-  const currencyFilter = req.query.currency; // 'GC' | 'SC'
+  const typeFilter = req.query.type;
+  const currencyFilter = req.query.currency;
   const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 20;
 
@@ -703,10 +698,9 @@ app.get('/api/user/transactions', verifyToken, (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 9. STAKE-STYLE KYC VERIFICATION ENDPOINTS
+// 9. STAKE-STYLE KYC VERIFICATION & USER ACTION ENDPOINTS
 // -----------------------------------------------------------------------------
 
-// Initiate or Resume KYC Flow
 app.post('/api/user/kyc/start', verifyToken, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -715,13 +709,11 @@ app.post('/api/user/kyc/start', verifyToken, (req, res) => {
     return res.status(400).json({ error: 'Identity is already fully verified.' });
   }
 
-  // Set pending status and return integration configuration
   user.kyc.status = 'PENDING';
   
   res.json({
     success: true,
     kycStatus: user.kyc.status,
-    // Configuration options passed to frontend SDK (e.g. Persona / Sumsub integration details)
     personaConfig: {
       templateId: process.env.PERSONA_TEMPLATE_ID || 'itmpl_sandbox_default',
       referenceId: user.id.toString(),
@@ -730,7 +722,6 @@ app.post('/api/user/kyc/start', verifyToken, (req, res) => {
   });
 });
 
-// Mock/Sandbox Completion Route for Testing/Local Dev
 app.post('/api/user/kyc/verify-sandbox', verifyToken, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -774,7 +765,7 @@ app.post('/api/user/claim-rakeback', verifyToken, (req, res) => {
   res.json({
     success: true,
     claimed: amount,
-    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+    balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
   });
 });
 
@@ -810,7 +801,7 @@ app.post('/api/user/daily-bonus', verifyToken, (req, res) => {
     success: true,
     claimed: { gc: gcReward, sc: scReward },
     streak: user.dailyStreak,
-    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+    balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
   });
 });
 
@@ -841,7 +832,7 @@ app.post('/api/user/rewarded-ad', verifyToken, (req, res) => {
     success: true,
     adsWatchedToday: user.adsWatchedToday,
     reward: { gc: gcReward, sc: scReward },
-    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+    balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
   });
 });
 
@@ -900,7 +891,6 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
 
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
-  // Mandatory KYC Enforcement before cash redemption
   if (!user.kyc || user.kyc.status !== 'VERIFIED') {
     return res.status(403).json({
       error: 'Identity verification (KYC) is required before redeeming Sweeps Coins for cash.',
@@ -960,7 +950,7 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
       success: true,
       message: `Successfully transferred $${amount.toFixed(2)} USD!`,
       transferId: transfer.id,
-      balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+      balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
     });
   } catch (err) {
     res.status(500).json({ error: 'Payout transfer failed.', details: err.message });
@@ -1033,18 +1023,19 @@ app.post('/api/play/mines/start', verifyToken, enforceJurisdiction, (req, res) =
     if (board[pos] !== 'BOMB') { board[pos] = 'BOMB'; bombs++; }
   }
 
-  activeSessions.set(`${user.id}_mines`, {
-    currency, betAmount, board, revealed: [], mineCount: count, active: true
+  const gameId = `mines_${crypto.randomUUID()}`;
+  activeSessions.set(gameId, {
+    userId: user.id, currency, betAmount, board, revealed: [], mineCount: count, active: true
   });
 
   logTransaction(user.id, 'BET', `Placed bet on Mines (${count} mines)`, currency === 'GC' ? -betAmount : 0, currency === 'SC' ? -betAmount : 0);
 
-  res.json({ balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }, status: 'ACTIVE' });
+  res.json({ gameId, balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }, status: 'ACTIVE' });
 });
 
 app.post('/api/play/mines/reveal', verifyToken, (req, res) => {
-  const { tileIndex } = req.body;
-  const session = activeSessions.get(`${req.user.id}_mines`);
+  const { gameId, tileIndex } = req.body;
+  const session = activeSessions.get(gameId || `${req.user.id}_mines`);
   if (!session || !session.active) return res.status(400).json({ error: 'No active Mines game found.' });
   if (session.revealed.includes(tileIndex)) return res.status(400).json({ error: 'Tile already revealed.' });
 
@@ -1065,7 +1056,8 @@ app.post('/api/play/mines/reveal', verifyToken, (req, res) => {
 });
 
 app.post('/api/play/mines/cashout', verifyToken, (req, res) => {
-  const session = activeSessions.get(`${req.user.id}_mines`);
+  const { gameId } = req.body;
+  const session = activeSessions.get(gameId || `${req.user.id}_mines`);
   if (!session || !session.active || session.revealed.length === 0) return res.status(400).json({ error: 'Cannot cashout.' });
 
   let mult = 1;
@@ -1090,11 +1082,100 @@ app.post('/api/play/mines/cashout', verifyToken, (req, res) => {
     username: user.username, game: 'MINES', betAmount: session.betAmount, currency: session.currency, multiplier: mult, win: true, payout
   });
 
-  res.json({ win: true, payout, multiplier: parseFloat(mult.toFixed(2)), balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played } });
+  res.json({ win: true, payout, multiplier: parseFloat(mult.toFixed(2)), balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played } });
 });
 
 // -----------------------------------------------------------------------------
-// 11. GENERAL GAMES EXECUTION ENDPOINT
+// 11. TOWER GAME ENDPOINTS
+// -----------------------------------------------------------------------------
+app.post('/api/play/tower/start', verifyToken, enforceJurisdiction, (req, res) => {
+  const { currency, betAmount, difficulty } = req.body;
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  if (currency === 'GC') {
+    if (user.gc_balance < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient GC balance.' });
+    user.gc_balance -= betAmount;
+    updateVipAndRakeback(user, 0, betAmount);
+  } else {
+    const totalSC = user.sc_unplayed + user.sc_played;
+    if (totalSC < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient SC balance.' });
+    
+    let remainingBet = betAmount;
+    if (user.sc_unplayed >= remainingBet) {
+      user.sc_unplayed -= remainingBet;
+    } else {
+      remainingBet -= user.sc_unplayed;
+      user.sc_unplayed = 0;
+      user.sc_played -= remainingBet;
+    }
+    updateVipAndRakeback(user, betAmount, 0);
+  }
+
+  const seedPair = getUserSeedPair(user.id);
+  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, 8);
+  
+  const rows = [];
+  const safeCount = difficulty === 'EASY' ? 2 : (difficulty === 'HARD' ? 1 : 1); // Simplified safety configuration
+  for (let i = 0; i < 8; i++) {
+    const winningTile = Math.floor(floats[i] * 3);
+    rows.push(winningTile);
+  }
+
+  const gameId = `tower_${crypto.randomUUID()}`;
+  activeSessions.set(gameId, {
+    userId: user.id, currency, betAmount, rows, currentFloor: 0, active: true, multiplier: 1.00
+  });
+
+  logTransaction(user.id, 'BET', `Placed bet on Tower (${difficulty})`, currency === 'GC' ? -betAmount : 0, currency === 'SC' ? -betAmount : 0);
+
+  res.json({ gameId, balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }, status: 'ACTIVE' });
+});
+
+app.post('/api/play/tower/pick', verifyToken, (req, res) => {
+  const { gameId, tile } = req.body;
+  const session = activeSessions.get(gameId);
+  if (!session || !session.active) return res.status(400).json({ error: 'No active Tower game found.' });
+
+  const winningTile = session.rows[session.currentFloor];
+  if (tile !== winningTile) {
+    session.active = false;
+    return res.json({ win: false, multiplier: 0 });
+  }
+
+  session.currentFloor++;
+  const mult = parseFloat((Math.pow(1.5, session.currentFloor) * (1 - HOUSE_EDGE)).toFixed(2));
+  session.multiplier = mult;
+
+  res.json({ win: true, multiplier: mult, currentFloor: session.currentFloor });
+});
+
+app.post('/api/play/tower/cashout', verifyToken, (req, res) => {
+  const { gameId } = req.body;
+  const session = activeSessions.get(gameId);
+  if (!session || !session.active || session.currentFloor === 0) return res.status(400).json({ error: 'Cannot cash out Tower.' });
+
+  const user = users.get(req.user.id);
+  const payout = session.multiplier * session.betAmount;
+
+  if (session.currency === 'GC') {
+    user.gc_balance += payout;
+  } else {
+    user.sc_played += payout;
+  }
+
+  session.active = false;
+  logTransaction(user.id, 'WIN', `Cashed out Tower @ ${session.multiplier}x`, session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
+
+  broadcastLiveBet({
+    username: user.username, game: 'TOWER', betAmount: session.betAmount, currency: session.currency, multiplier: session.multiplier, win: true, payout
+  });
+
+  res.json({ win: true, payout, multiplier: session.multiplier, balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played } });
+});
+
+// -----------------------------------------------------------------------------
+// 12. GENERAL GAMES EXECUTION ENDPOINT
 // -----------------------------------------------------------------------------
 app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
   const { gameId } = req.params;
@@ -1158,12 +1239,12 @@ app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
       clientSeed: seedPair.clientSeed,
       nonce: seedPair.nonce - 1
     },
-    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+    balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
   });
 });
 
 // -----------------------------------------------------------------------------
-// 12. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
+// 13. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
 // -----------------------------------------------------------------------------
 server.listen(PORT, () => {
   console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
