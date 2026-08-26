@@ -1120,3 +1120,65 @@ body.dark-theme {
     height: 46px;
   }
 }
+
+/* --- CENTERED MODAL OVERLAY STYLES --- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+  padding: 1rem;
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+.modal-backdrop.hidden {
+  display: none !important;
+}
+
+/* Modal Content Box */
+.modal-box {
+  width: 100%;
+  max-width: 420px;
+  background: #0f1923;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 1.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+  padding: 1.5rem;
+  position: relative;
+  color: #fff;
+}
+
+/* --- WALLET CONTAINER WRAPPER FIX --- */
+.wallet-selector-container {
+  position: relative; /* Crucial so absolute dropdown aligns correctly if kept as dropdown */
+  display: inline-block;
+}
+
+/* If you want the wallet selector to trigger a proper centered modal instead of a broken dropdown, use these styles */
+.wallet-modal-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 1rem;
+  background: #15232d;
+  border: 1px solid #243542;
+  border-radius: 12px;
+  margin-bottom: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wallet-modal-option:hover {
+  border-color: #10b981;
+  background: #1a2c38;
+}
+
+.wallet-modal-option.active {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+}
