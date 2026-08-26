@@ -2,1078 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stake Originals — Premium Casino Experience</title>
-  <!-- Google Fonts -->
+  <link rel="stylesheet" href="styles.css">
+  <!-- Google Fonts: Plus Jakarta Sans for dark-mode gaming aesthetic -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <!-- Stripe.js SDK -->
   <script src="https://js.stripe.com/v3/"></script>
-
-  <style>
-    /* ==========================================================================
-       1. GLOBAL THEME & VARIABLES
-       ========================================================================== */
-    :root {
-      --bg-dark: #0f212e;
-      --bg-surface: #1a2c38;
-      --bg-card: #213743;
-      --bg-input: #0f212e;
-      --border-color: #2f4553;
-      --border-hover: #557086;
-      --accent-green: #00e701;
-      --accent-green-hover: #00c201;
-      --accent-blue: #1475e1;
-      --accent-gold: #ffb700;
-      --accent-purple: #9d4edd;
-      --text-main: #ffffff;
-      --text-muted: #b1bad2;
-      --font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --sidebar-width: 240px;
-      --bets-sidebar-width: 280px;
-      --header-height: 64px;
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 16px;
-      --shadow-glow: 0 0 20px rgba(0, 231, 1, 0.2);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      user-select: none;
-    }
-
-    body.dark-theme {
-      background-color: var(--bg-dark);
-      color: var(--text-main);
-      font-family: var(--font-family);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow-x: hidden;
-    }
-
-    button, input, select {
-      font-family: inherit;
-      outline: none;
-      border: none;
-    }
-
-    button {
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    /* Scrollbar Styling */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: var(--bg-dark);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: var(--border-color);
-      border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: var(--border-hover);
-    }
-
-    /* ==========================================================================
-       2. TOP NAVIGATION BAR
-       ========================================================================== */
-    .navbar {
-      height: var(--header-height);
-      background-color: var(--bg-surface);
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 16px;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    .navbar-left, .navbar-center, .navbar-right {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .sidebar-toggle-btn {
-      background: transparent;
-      color: var(--text-muted);
-      padding: 8px;
-      border-radius: var(--radius-sm);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .sidebar-toggle-btn:hover {
-      color: var(--text-main);
-      background-color: var(--bg-card);
-    }
-
-    .brand {
-      font-weight: 900;
-      font-size: 1.25rem;
-      letter-spacing: 0.5px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .brand .highlight {
-      color: var(--accent-green);
-    }
-
-    /* Wallet Switcher */
-    .wallet-selector-container {
-      background-color: var(--bg-dark);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-md);
-      padding: 4px 8px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .wallet-selector {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      position: relative;
-    }
-
-    .currency-badge-icon {
-      background: var(--accent-gold);
-      color: #000;
-      font-weight: 800;
-      font-size: 0.75rem;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-
-    .wallet-balance-wrapper {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      line-height: 1.1;
-    }
-
-    .balance-label {
-      font-size: 0.65rem;
-      font-weight: 700;
-      color: var(--text-muted);
-      letter-spacing: 0.5px;
-    }
-
-    .balance-amount {
-      font-size: 0.95rem;
-      font-weight: 800;
-      color: var(--text-main);
-    }
-
-    .currency-dropdown {
-      background: var(--bg-card);
-      color: var(--text-main);
-      padding: 6px 10px;
-      border-radius: var(--radius-sm);
-      font-weight: 600;
-      font-size: 0.8rem;
-      cursor: pointer;
-      border: 1px solid var(--border-color);
-    }
-
-    /* Action Buttons */
-    .btn-action {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 14px;
-      border-radius: var(--radius-sm);
-      font-weight: 700;
-      font-size: 0.85rem;
-    }
-
-    .btn-buy-gc {
-      background-color: var(--accent-blue);
-      color: #fff;
-    }
-    .btn-buy-gc:hover {
-      background-color: #1162bd;
-    }
-
-    .btn-redeem {
-      background-color: var(--bg-card);
-      color: var(--text-main);
-      border: 1px solid var(--border-color);
-    }
-    .btn-redeem:hover {
-      border-color: var(--border-hover);
-      background-color: var(--border-color);
-    }
-
-    .user-profile-badge {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 36px;
-      background-color: var(--bg-card);
-      border-radius: 50%;
-      border: 1px solid var(--border-color);
-      cursor: pointer;
-    }
-
-    /* ==========================================================================
-       3. MAIN APPLICATION LAYOUT
-       ========================================================================== */
-    .main-layout {
-      display: flex;
-      flex: 1;
-      height: calc(100vh - var(--header-height));
-      overflow: hidden;
-      position: relative;
-    }
-
-    /* Sidebar Navigation */
-    .sidebar {
-      width: var(--sidebar-width);
-      background-color: var(--bg-surface);
-      border-right: 1px solid var(--border-color);
-      display: flex;
-      flex-direction: column;
-      padding: 16px 8px;
-      gap: 6px;
-      overflow-y: auto;
-      transition: margin-left 0.3s ease;
-      flex-shrink: 0;
-    }
-
-    .sidebar.collapsed {
-      margin-left: calc(-1 * var(--sidebar-width));
-    }
-
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
-      border-radius: var(--radius-sm);
-      color: var(--text-muted);
-      font-weight: 600;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .nav-item:hover, .nav-item.active {
-      background-color: var(--bg-card);
-      color: var(--text-main);
-    }
-
-    .nav-section-header {
-      font-size: 0.7rem;
-      font-weight: 800;
-      color: var(--text-muted);
-      letter-spacing: 0.8px;
-      margin: 16px 12px 6px;
-    }
-
-    .slot-highlight-nav {
-      background: linear-gradient(90deg, rgba(157, 78, 221, 0.2), transparent);
-      border-left: 3px solid var(--accent-purple);
-    }
-
-    .badge-hot {
-      background-color: #ff3366;
-      color: #fff;
-      font-size: 0.65rem;
-      font-weight: 800;
-      padding: 2px 6px;
-      border-radius: 10px;
-      margin-left: auto;
-    }
-
-    .sidebar-footer {
-      margin-top: auto;
-      padding: 12px;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .online-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      font-weight: 600;
-    }
-
-    .pulse-dot {
-      width: 8px;
-      height: 8px;
-      background-color: var(--accent-green);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--accent-green);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.9); }
-      100% { opacity: 1; transform: scale(1); }
-    }
-
-    /* Center Content Stage */
-    .content-stage {
-      flex: 1;
-      overflow-y: auto;
-      padding: 24px;
-      background-color: var(--bg-dark);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    .game-view {
-      width: 100%;
-      max-width: 1100px;
-    }
-
-    .hidden {
-      display: none !important;
-    }
-
-    /* Hero Banner */
-    .hero-slot-banner {
-      background: linear-gradient(135deg, #2b1055, #7597de);
-      border-radius: var(--radius-lg);
-      padding: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 28px;
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-    }
-
-    .hero-content {
-      max-width: 60%;
-      z-index: 2;
-    }
-
-    .hero-badge {
-      background-color: rgba(255,255,255,0.2);
-      color: #fff;
-      font-size: 0.75rem;
-      font-weight: 800;
-      padding: 4px 10px;
-      border-radius: 20px;
-      display: inline-block;
-      margin-bottom: 12px;
-      backdrop-filter: blur(4px);
-    }
-
-    .hero-content h1 {
-      font-size: 2.2rem;
-      font-weight: 900;
-      line-height: 1.1;
-      margin-bottom: 8px;
-      color: #fff;
-    }
-
-    .hero-content p {
-      color: rgba(255,255,255,0.85);
-      font-size: 0.95rem;
-      margin-bottom: 20px;
-      font-weight: 500;
-    }
-
-    .btn-hero-spin {
-      background-color: var(--accent-green);
-      color: #000;
-      font-weight: 800;
-      padding: 12px 24px;
-      border-radius: var(--radius-md);
-      font-size: 1rem;
-      box-shadow: var(--shadow-glow);
-    }
-    .btn-hero-spin:hover {
-      background-color: var(--accent-green-hover);
-      transform: translateY(-2px);
-    }
-
-    .hero-graphic {
-      font-size: 8rem;
-      position: relative;
-      z-index: 1;
-      line-height: 1;
-    }
-
-    .section-title {
-      font-size: 1.25rem;
-      font-weight: 800;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    /* Game Cards Grid */
-    .games-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-      gap: 16px;
-      margin-bottom: 32px;
-    }
-
-    .game-card {
-      background-color: var(--bg-surface);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-md);
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      position: relative;
-    }
-
-    .game-card:hover {
-      transform: translateY(-4px);
-      border-color: var(--border-hover);
-      background-color: var(--bg-card);
-      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
-    }
-
-    .game-card-icon-wrapper {
-      font-size: 3rem;
-      margin-bottom: 10px;
-    }
-
-    .game-card h4 {
-      font-size: 0.95rem;
-      font-weight: 800;
-      margin-bottom: 4px;
-    }
-
-    .game-subtext {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      font-weight: 600;
-    }
-
-    .card-badge {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      background: var(--accent-gold);
-      color: #000;
-      font-size: 0.6rem;
-      font-weight: 800;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-
-    /* Active Game View Stage */
-    .game-header-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-      width: 100%;
-    }
-
-    .btn-back {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-color);
-      color: var(--text-muted);
-      padding: 8px 14px;
-      border-radius: var(--radius-sm);
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .btn-back:hover {
-      color: var(--text-main);
-      background-color: var(--bg-card);
-    }
-
-    .active-game-title {
-      font-size: 1.4rem;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .btn-pf-info {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-color);
-      color: var(--text-muted);
-      padding: 8px 12px;
-      border-radius: var(--radius-sm);
-      font-weight: 700;
-      font-size: 0.8rem;
-    }
-    .btn-pf-info:hover {
-      color: var(--text-main);
-      border-color: var(--border-hover);
-    }
-
-    .game-stage {
-      background-color: var(--bg-surface);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-lg);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      width: 100%;
-    }
-
-    .game-display {
-      min-height: 380px;
-      background-color: var(--bg-dark);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      padding: 20px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .game-control-deck {
-      background-color: var(--bg-surface);
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .game-controls-options {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .bet-bar {
-      display: flex;
-      gap: 12px;
-      align-items: flex-end;
-    }
-
-    .bet-input-wrapper {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .bet-label {
-      font-size: 0.7rem;
-      font-weight: 800;
-      color: var(--text-muted);
-      letter-spacing: 0.5px;
-    }
-
-    .bet-input-group {
-      display: flex;
-      background-color: var(--bg-input);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-    }
-
-    .bet-input {
-      background: transparent;
-      color: var(--text-main);
-      padding: 10px 12px;
-      font-weight: 700;
-      font-size: 1rem;
-      width: 100%;
-    }
-
-    .quick-bet-buttons {
-      display: flex;
-    }
-
-    .btn-quick-bet {
-      background: var(--bg-card);
-      color: var(--text-muted);
-      padding: 0 12px;
-      font-weight: 800;
-      font-size: 0.75rem;
-      border-left: 1px solid var(--border-color);
-    }
-    .btn-quick-bet:hover {
-      background: var(--border-color);
-      color: var(--text-main);
-    }
-
-    .btn-play {
-      background-color: var(--accent-green);
-      color: #000;
-      font-weight: 800;
-      font-size: 1.05rem;
-      padding: 12px 28px;
-      border-radius: var(--radius-sm);
-      min-width: 160px;
-      height: 48px;
-      box-shadow: var(--shadow-glow);
-    }
-    .btn-play:hover {
-      background-color: var(--accent-green-hover);
-    }
-    .btn-play:disabled {
-      background-color: var(--border-color);
-      color: var(--text-muted);
-      cursor: not-allowed;
-      box-shadow: none;
-    }
-
-    .pf-verifier-footer {
-      padding: 10px 20px;
-      background-color: rgba(0,0,0,0.2);
-      border-top: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.75rem;
-    }
-
-    .pf-label {
-      color: var(--text-muted);
-      font-weight: 600;
-    }
-
-    .pf-hash-code {
-      font-family: monospace;
-      color: var(--accent-blue);
-      word-break: break-all;
-    }
-
-    /* Right Sidebar: Global Bets Feed */
-    .bets-sidebar {
-      width: var(--bets-sidebar-width);
-      background-color: var(--bg-surface);
-      border-left: 1px solid var(--border-color);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-    }
-
-    .bets-header {
-      padding: 16px;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .bets-header h3 {
-      font-size: 0.95rem;
-      font-weight: 800;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .live-tag {
-      background-color: rgba(0, 231, 1, 0.15);
-      color: var(--accent-green);
-      font-size: 0.65rem;
-      font-weight: 800;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-
-    .bets-feed-container {
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      overflow: hidden;
-    }
-
-    .bets-feed-header {
-      display: flex;
-      justify-content: space-between;
-      padding: 8px 16px;
-      font-size: 0.7rem;
-      font-weight: 800;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--border-color);
-      background-color: rgba(0,0,0,0.1);
-    }
-
-    .bets-feed {
-      flex: 1;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .bet-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 16px;
-      font-size: 0.8rem;
-      border-bottom: 1px solid rgba(255,255,255,0.03);
-      animation: fadeIn 0.3s ease;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(-4px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .bet-user-info {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .bet-username {
-      font-weight: 700;
-      color: var(--text-main);
-    }
-
-    .bet-game-name {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-    }
-
-    .bet-mult {
-      font-weight: 800;
-      padding: 2px 8px;
-      border-radius: 4px;
-      background-color: var(--bg-dark);
-    }
-
-    .bet-mult.win {
-      color: var(--accent-green);
-      background-color: rgba(0, 231, 1, 0.1);
-    }
-
-    .bet-mult.loss {
-      color: var(--text-muted);
-    }
-
-    /* ==========================================================================
-       4. MODALS
-       ========================================================================== */
-    .modal-backdrop {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background-color: rgba(0,0,0,0.7);
-      backdrop-filter: blur(4px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-
-    .modal-box {
-      background-color: var(--bg-surface);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-lg);
-      width: 90%;
-      max-width: 480px;
-      padding: 24px;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-      position: relative;
-    }
-
-    .modal-header-flex {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
-
-    .modal-header-flex h3 {
-      font-size: 1.2rem;
-      font-weight: 800;
-    }
-
-    .x-close {
-      background: transparent;
-      color: var(--text-muted);
-      font-size: 1.5rem;
-      line-height: 1;
-    }
-    .x-close:hover {
-      color: var(--text-main);
-    }
-
-    .modal-subtitle {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      margin-bottom: 20px;
-    }
-
-    .package-list {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-
-    .package-card {
-      background-color: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-md);
-      padding: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      cursor: pointer;
-      position: relative;
-    }
-    .package-card:hover {
-      border-color: var(--accent-blue);
-      background-color: var(--bg-input);
-    }
-
-    .package-details {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .pkg-gc {
-      font-weight: 800;
-      font-size: 0.95rem;
-    }
-
-    .pkg-sc {
-      font-size: 0.75rem;
-      color: var(--accent-green);
-      font-weight: 700;
-    }
-
-    .package-badge {
-      position: absolute;
-      top: -8px;
-      right: 12px;
-      background: var(--accent-blue);
-      color: #fff;
-      font-size: 0.6rem;
-      font-weight: 800;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-    .package-badge.best-value {
-      background: var(--accent-gold);
-      color: #000;
-    }
-
-    .btn-price {
-      background-color: var(--accent-green);
-      color: #000;
-      font-weight: 800;
-      padding: 8px 16px;
-      border-radius: var(--radius-sm);
-
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 16px;
-    }
-
-    .form-label {
-      font-size: 0.75rem;
-      font-weight: 800;
-      color: var(--text-muted);
-    }
-
-    .form-input {
-      background-color: var(--bg-input);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      color: var(--text-main);
-      padding: 10px 12px;
-      font-weight: 600;
-    }
-
-    .input-with-symbol {
-      display: flex;
-      align-items: center;
-      background-color: var(--bg-input);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-    }
-
-    .input-symbol {
-      padding: 0 12px;
-      font-weight: 800;
-      color: var(--accent-gold);
-      font-size: 0.85rem;
-    }
-
-    .input-with-symbol .form-input {
-      border: none;
-      width: 100%;
-    }
-
-    .modal-actions-flex {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-top: 8px;
-    }
-
-    .btn-secondary-action {
-      background-color: transparent;
-      color: var(--text-muted);
-      border: 1px solid var(--border-color);
-      padding: 10px;
-      border-radius: var(--radius-sm);
-      font-weight: 700;
-    }
-    .btn-secondary-action:hover {
-      background-color: var(--bg-card);
-      color: var(--text-main);
-    }
-
-    .btn-full {
-      width: 100%;
-    }
-
-    /* Mini-Game Elements */
-    .game-interactive-container {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-    }
-
-    .dice-slider-container {
-      width: 80%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .dice-result-box {
-      font-size: 3rem;
-      font-weight: 900;
-      color: var(--text-main);
-      background: var(--bg-surface);
-      padding: 10px 30px;
-      border-radius: var(--radius-md);
-      border: 2px solid var(--border-color);
-      min-width: 160px;
-      text-align: center;
-    }
-
-    .dice-slider {
-      width: 100%;
-      height: 12px;
-      accent-color: var(--accent-green);
-    }
-
-    .mines-grid {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 8px;
-      max-width: 320px;
-      width: 100%;
-    }
-
-    .mine-tile {
-      aspect-ratio: 1;
-      background-color: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .mine-tile:hover {
-      background-color: var(--border-color);
-    }
-    .mine-tile.revealed-gem {
-      background-color: rgba(0, 231, 1, 0.2);
-      border-color: var(--accent-green);
-    }
-    .mine-tile.revealed-bomb {
-      background-color: rgba(255, 51, 102, 0.2);
-      border-color: #ff3366;
-    }
-
-    .cards-flex {
-      display: flex;
-      gap: 16px;
-      align-items: center;
-    }
-
-    .playing-card {
-      width: 80px;
-      height: 120px;
-      background: white;
-      color: black;
-      border-radius: var(--radius-sm);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-      font-weight: 800;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-    }
-    .playing-card.red {
-      color: #e63946;
-    }
-
-    .custom-select-control {
-      background: var(--bg-input);
-      color: var(--text-main);
-      border: 1px solid var(--border-color);
-      padding: 8px 12px;
-      border-radius: var(--radius-sm);
-      font-weight: 700;
-    }
-
-    @media (max-width: 900px) {
-      .bets-sidebar {
-        display: none;
-      }
-      .sidebar {
-        position: fixed;
-        top: var(--header-height);
-        bottom: 0;
-        z-index: 90;
-      }
-    }
-  </style>
 </head>
 <body class="dark-theme">
 
@@ -1082,7 +19,7 @@
        ========================================================================== -->
   <header class="navbar">
     <div class="navbar-left">
-      <button class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle Sidebar" onclick="toggleSidebar()">
+      <button class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle Sidebar">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
       </button>
       <div class="brand" onclick="showLobby()">
@@ -1091,6 +28,7 @@
     </div>
 
     <div class="navbar-center">
+      <!-- Wallet & Currency Switcher Container -->
       <div class="wallet-selector-container">
         <div class="wallet-selector">
           <div class="currency-badge-icon" id="curr-tag">GC</div>
@@ -1098,7 +36,7 @@
             <span class="balance-label">BALANCE</span>
             <span id="balance-val" class="balance-amount">10,000.00</span>
           </div>
-          <select id="currency-select" class="currency-dropdown" onchange="switchCurrency(this.value)">
+          <select id="currency-select" class="currency-dropdown" aria-label="Select Currency" onchange="switchCurrency(this.value)">
             <option value="GC">Gold Coins (GC)</option>
             <option value="SC">Sweeps Coins (SC)</option>
           </select>
@@ -1126,12 +64,13 @@
        ========================================================================== -->
   <div class="main-layout">
     
-    <!-- LEFT SIDEBAR -->
+    <!-- LEFT SIDEBAR: Game Categories & Originals Navigation -->
     <aside class="sidebar" id="main-sidebar">
       <div class="nav-item active" id="nav-lobby" onclick="showLobby()">
         <span class="nav-icon">🏠</span> <span class="nav-label">Lobby</span>
       </div>
       
+      <!-- Featured Category -->
       <div class="nav-section-header">⭐ FEATURED SLOT</div>
       <div class="nav-item slot-highlight-nav" onclick="launchGame('slots')">
         <span class="nav-icon">🎰</span> <span class="nav-label">Stake Gates</span>
@@ -1165,6 +104,8 @@
       
       <!-- A. LOBBY VIEW -->
       <div id="view-lobby" class="game-view">
+        
+        <!-- Hero Slot Banner -->
         <div class="hero-slot-banner" onclick="launchGame('slots')">
           <div class="hero-content">
             <div class="hero-badge">FEATURED SLOT</div>
@@ -1173,6 +114,7 @@
             <button class="btn-hero-spin">SPIN REELS NOW 🎰</button>
           </div>
           <div class="hero-graphic">
+            <div class="glow-orb"></div>
             <span class="hero-big-icon">🎰</span>
           </div>
         </div>
@@ -1180,6 +122,7 @@
         <h2 class="section-title">🔥 Stake Originals & Games</h2>
         
         <div class="games-grid">
+          <!-- Featured Slot Card -->
           <div class="game-card slot-featured-card" onclick="launchGame('slots')">
             <div class="card-badge">POPULAR</div>
             <div class="game-card-icon-wrapper">🎰</div>
@@ -1263,13 +206,18 @@
         </div>
 
         <div class="game-stage">
+          <!-- Interactive Game Render Screen -->
           <div class="game-display" id="game-display-area">
             <div class="game-placeholder-text">Select a game to begin</div>
           </div>
 
+          <!-- Control Options & Betting Deck -->
           <div class="game-control-deck">
+            
+            <!-- Game Specific Parameter Selectors -->
             <div id="game-controls-options" class="game-controls-options"></div>
 
+            <!-- Unified Bet Controls Bar -->
             <div class="bet-bar" id="bet-bar">
               <div class="bet-input-wrapper">
                 <label for="bet-input" class="bet-label">BET AMOUNT</label>
@@ -1283,13 +231,14 @@
                 </div>
               </div>
 
-              <button class="btn-play" id="btn-primary-action" onclick="handlePrimaryAction()">PLACE BET</button>
+              <button class="btn-play" id="btn-primary-action">PLACE BET</button>
             </div>
           </div>
 
+          <!-- Quick Provably Fair Hash Footer -->
           <div class="pf-verifier-footer">
             <span class="pf-label">Active Server Seed Hash:</span>
-            <code id="pf-hash" class="pf-hash-code">e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</code>
+            <code id="pf-hash" class="pf-hash-code">Unverified</code>
           </div>
         </div>
       </div>
@@ -1307,7 +256,7 @@
           <span>MULT.</span>
         </div>
         <div class="bets-feed" id="bets-feed">
-          <!-- Real-time bet rows -->
+          <!-- Real-time bet rows prepended dynamically via WebSocket/JS -->
         </div>
       </div>
     </aside>
@@ -1317,7 +266,7 @@
        3. MODAL DIALOGS
        ========================================================================== -->
 
-  <!-- Store Modal -->
+  <!-- Store Modal (Gold Coins Package Purchase via Stripe) -->
   <div id="modal-store" class="modal-backdrop hidden" aria-modal="true" role="dialog">
     <div class="modal-box store-modal">
       <div class="modal-header-flex">
@@ -1333,7 +282,7 @@
             <span class="pkg-gc">10,000 Gold Coins</span>
             <span class="pkg-sc">+ FREE 10.00 Sweeps Coins</span>
           </div>
-          <button class="btn-price">$10.00</button>
+          <button type="button" class="btn-price">$10.00</button>
         </div>
 
         <div class="package-card" id="card-pack_20" onclick="buyCoinPackage('pack_20')">
@@ -1342,7 +291,7 @@
             <span class="pkg-gc">25,000 Gold Coins</span>
             <span class="pkg-sc">+ FREE 20.00 Sweeps Coins</span>
           </div>
-          <button class="btn-price">$20.00</button>
+          <button type="button" class="btn-price">$20.00</button>
         </div>
 
         <div class="package-card" id="card-pack_50" onclick="buyCoinPackage('pack_50')">
@@ -1350,26 +299,27 @@
             <span class="pkg-gc">60,000 Gold Coins</span>
             <span class="pkg-sc">+ FREE 50.00 Sweeps Coins</span>
           </div>
-          <button class="btn-price">$50.00</button>
+          <button type="button" class="btn-price">$50.00</button>
         </div>
       </div>
 
+      <!-- Target Container for Stripe Embedded Checkout -->
       <div id="checkout-container" class="checkout-embed-container"></div>
 
       <div class="modal-footer-actions">
-        <button onclick="closeStoreModal()" class="btn-secondary-action btn-full">Close</button>
+        <button type="button" onclick="closeStoreModal()" class="btn-secondary-action">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- Redemption Modal -->
+  <!-- Redemption Modal (Sweeps Coins Cashout) -->
   <div id="modal-redeem" class="modal-backdrop hidden" aria-modal="true" role="dialog">
     <div class="modal-box redeem-modal">
       <div class="modal-header-flex">
         <h3>💸 Redeem Sweeps Coins</h3>
         <button class="x-close" onclick="closeRedeemModal()" aria-label="Close Modal">×</button>
       </div>
-      <p class="modal-subtitle">Minimum redemption: <strong>100.00 SC</strong> (1 SC = $1.00 USD cash rate).</p>
+      <p class="modal-subtitle">Minimum redemption: <strong>100.00 SC</strong> (1 SC = $1.00 USD cash redemption rate).</p>
 
       <div class="form-group">
         <label for="redeem-input" class="form-label">Amount to Redeem (SC)</label>
@@ -1390,8 +340,8 @@
       </div>
 
       <div class="modal-actions-flex">
-        <button onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
-        <button onclick="closeRedeemModal()" class="btn-secondary-action">Cancel</button>
+        <button type="button" onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
+        <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action">Cancel</button>
       </div>
     </div>
   </div>
@@ -1403,572 +353,25 @@
         <h3>🛡️ Provably Fair Verification</h3>
         <button class="x-close" onclick="closeProvablyFairModal()" aria-label="Close Modal">×</button>
       </div>
-      <p class="modal-subtitle">All game outcomes are cryptographically generated using SHA-256 algorithms.</p>
+      <p class="modal-subtitle">All game outcomes are cryptographically generated using SHA-256 HMAC algorithms.</p>
       
       <div class="form-group">
-        <label class="form-label">Active Server Seed (Hashed)</label>
-        <input type="text" id="pf-modal-server-hash" class="form-input" readonly value="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855">
+        <label for="pf-modal-server-hash" class="form-label">Active Server Seed (Hashed)</label>
+        <input type="text" id="pf-modal-server-hash" class="form-input" readonly value="Unverified">
       </div>
 
       <div class="form-group">
-        <label class="form-label">Client Seed</label>
+        <label for="pf-modal-client-seed" class="form-label">Client Seed</label>
         <input type="text" id="pf-modal-client-seed" class="form-input" value="client_seed_default_stake">
       </div>
 
       <div class="modal-actions-flex">
-        <button onclick="closeProvablyFairModal()" class="btn-secondary-action btn-full">Close</button>
+        <button type="button" onclick="closeProvablyFairModal()" class="btn-secondary-action btn-full">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- ==========================================================================
-       4. APPLICATION CONTROLLER SCRIPT (FULL ENGINE)
-       ========================================================================== -->
-  <script>
-    // App State
-    const state = {
-      currency: 'GC',
-      balances: {
-        GC: 10000.00,
-        SC: 50.00
-      },
-      activeGame: null,
-      gameState: {}
-    };
-
-    // Games Metadata
-    const games = [
-      'slots', 'blackjack', 'baccarat', 'dice', 'limbo',
-      'plinko', 'mines', 'keno', 'wheel', 'hilo', 'tower'
-    ];
-
-    // Initialize Page
-    document.addEventListener('DOMContentLoaded', () => {
-      updateBalanceDisplay();
-      startLiveBetsTicker();
-      generateNewServerHash();
-    });
-
-    // UI Helpers & Navigation
-    function toggleSidebar() {
-      const sidebar = document.getElementById('main-sidebar');
-      sidebar.classList.toggle('collapsed');
-    }
-
-    function switchCurrency(val) {
-      state.currency = val;
-      document.getElementById('curr-tag').textContent = val;
-      updateBalanceDisplay();
-    }
-
-    function updateBalanceDisplay() {
-      const bal = state.balances[state.currency];
-      document.getElementById('balance-val').textContent = bal.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-    }
-
-    function showLobby() {
-      document.getElementById('view-lobby').classList.remove('hidden');
-      document.getElementById('view-game').classList.add('hidden');
-      state.activeGame = null;
-      
-      // Update sidebar active states
-      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-      document.getElementById('nav-lobby')?.classList.add('active');
-    }
-
-    function launchGame(gameId) {
-      state.activeGame = gameId;
-      document.getElementById('view-lobby').classList.add('hidden');
-      document.getElementById('view-game').classList.remove('hidden');
-      document.getElementById('active-game-title').textContent = gameId.toUpperCase();
-
-      renderGameUI(gameId);
-    }
-
-    function getBetAmount() {
-      const val = parseFloat(document.getElementById('bet-input').value);
-      return isNaN(val) || val <= 0 ? 0 : val;
-    }
-
-    function adjustBet(type) {
-      const input = document.getElementById('bet-input');
-      let current = parseFloat(input.value) || 0;
-      const max = state.balances[state.currency];
-
-      if (type === 'HALF') current = Math.max(0.01, current / 2);
-      if (type === 'DOUBLE') current = Math.min(max, current * 2);
-      if (type === 'MAX') current = max;
-
-      input.value = current.toFixed(2);
-    }
-
-    // Modal Controls
-    function openStoreModal() {
-      document.getElementById('modal-store').classList.remove('hidden');
-    }
-    function closeStoreModal() {
-      document.getElementById('modal-store').classList.add('hidden');
-    }
-
-    function buyCoinPackage(packId) {
-      if (packId === 'pack_10') {
-        state.balances.GC += 10000;
-        state.balances.SC += 10;
-      } else if (packId === 'pack_20') {
-        state.balances.GC += 25000;
-        state.balances.SC += 20;
-      } else if (packId === 'pack_50') {
-        state.balances.GC += 60000;
-        state.balances.SC += 50;
-      }
-      updateBalanceDisplay();
-      alert('Package purchased successfully!');
-      closeStoreModal();
-    }
-
-    function openRedeemModal() {
-      document.getElementById('modal-redeem').classList.remove('hidden');
-    }
-    function closeRedeemModal() {
-      document.getElementById('modal-redeem').classList.add('hidden');
-    }
-
-    function submitRedeem() {
-      const amt = parseFloat(document.getElementById('redeem-input').value);
-      if (amt < 100) {
-        alert('Minimum redemption amount is 100.00 SC.');
-        return;
-      }
-      if (state.balances.SC < amt) {
-        alert('Insufficient SC balance.');
-        return;
-      }
-      state.balances.SC -= amt;
-      updateBalanceDisplay();
-      alert('Redemption request submitted successfully!');
-      closeRedeemModal();
-    }
-
-    function openProvablyFairModal() {
-      const hash = document.getElementById('pf-hash').textContent;
-      document.getElementById('pf-modal-server-hash').value = hash;
-      document.getElementById('modal-pf').classList.remove('hidden');
-    }
-    function closeProvablyFairModal() {
-      document.getElementById('modal-pf').classList.add('hidden');
-    }
-
-    function generateNewServerHash() {
-      const randomSeed = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      let hash = 0;
-      for (let i = 0; i < randomSeed.length; i++) {
-        hash = (hash << 5) - hash + randomSeed.charCodeAt(i);
-        hash |= 0;
-      }
-      const fullHash = Array.from(new Uint8Array(32), (_, i) => Math.abs(hash + i * 13) % 16)
-        .map(b => b.toString(16)).join('') + "8f9a2b";
-      document.getElementById('pf-hash').textContent = fullHash;
-    }
-
-    /* ==========================================================================
-       5. GAME ENGINES & RENDERING LOGIC
-       ========================================================================== */
-    function renderGameUI(gameId) {
-      const display = document.getElementById('game-display-area');
-      const options = document.getElementById('game-controls-options');
-      const actionBtn = document.getElementById('btn-primary-action');
-
-      display.innerHTML = '';
-      options.innerHTML = '';
-      actionBtn.textContent = 'PLACE BET';
-      actionBtn.disabled = false;
-
-      state.gameState = {};
-
-      switch (gameId) {
-        case 'dice':
-          renderDiceUI(display, options);
-          break;
-        case 'limbo':
-          renderLimboUI(display, options);
-          break;
-        case 'mines':
-          renderMinesUI(display, options, actionBtn);
-          break;
-        case 'slots':
-          renderSlotsUI(display, options);
-          break;
-        case 'hilo':
-          renderHiloUI(display, options, actionBtn);
-          break;
-        default:
-          renderGenericUI(display, gameId);
-      }
-    }
-
-    function handlePrimaryAction() {
-      const bet = getBetAmount();
-      if (bet <= 0 || bet > state.balances[state.currency]) {
-        alert('Invalid or insufficient bet amount.');
-        return;
-      }
-
-      const game = state.activeGame;
-      if (game === 'dice') playDice(bet);
-      else if (game === 'limbo') playLimbo(bet);
-      else if (game === 'mines') playMines(bet);
-      else if (game === 'slots') playSlots(bet);
-      else if (game === 'hilo') playHilo(bet);
-      else playGenericGame(game, bet);
-
-      generateNewServerHash();
-    }
-
-    /* --- DICE --- */
-    function renderDiceUI(display, options) {
-      state.gameState.target = 50.00;
-
-      display.innerHTML = `
-        <div class="game-interactive-container">
-          <div class="dice-result-box" id="dice-result">50.00</div>
-          <div class="dice-slider-container">
-            <input type="range" min="2" max="98" value="50" class="dice-slider" id="dice-target-slider" oninput="updateDiceTarget(this.value)">
-            <div style="display:flex; justify-size: space-between; width:100%; color: var(--text-muted); font-weight:700; font-size:0.8rem;">
-              <span>0</span><span>50</span><span>100</span>
-            </div>
-          </div>
-        </div>
-      `;
-
-      options.innerHTML = `
-        <div style="display:flex; gap:12px; align-items:center;">
-          <span style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">MULTIPLIER: <strong id="dice-mult" style="color:var(--text-main)">1.98x</strong></span>
-          <span style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">WIN CHANCE: <strong id="dice-chance" style="color:var(--accent-green)">50.00%</strong></span>
-        </div>
-      `;
-    }
-
-    function updateDiceTarget(val) {
-      state.gameState.target = parseFloat(val);
-      const chance = 100 - state.gameState.target;
-      const mult = (99 / chance).toFixed(4);
-      
-      document.getElementById('dice-result').textContent = parseFloat(val).toFixed(2);
-      document.getElementById('dice-chance').textContent = chance.toFixed(2) + '%';
-      document.getElementById('dice-mult').textContent = mult + 'x';
-    }
-
-    function playDice(bet) {
-      state.balances[state.currency] -= bet;
-      const roll = (Math.random() * 100).toFixed(2);
-      const win = parseFloat(roll) > state.gameState.target;
-      const chance = 100 - state.gameState.target;
-      const mult = 99 / chance;
-
-      document.getElementById('dice-result').textContent = roll;
-      
-      if (win) {
-        const payout = bet * mult;
-        state.balances[state.currency] += payout;
-        document.getElementById('dice-result').style.color = 'var(--accent-green)';
-      } else {
-        document.getElementById('dice-result').style.color = '#ff3366';
-      }
-
-      updateBalanceDisplay();
-      addLiveBetRow('You', 'Dice', mult, win);
-    }
-
-    /* --- LIMBO --- */
-    function renderLimboUI(display, options) {
-      state.gameState.targetMult = 2.00;
-
-      display.innerHTML = `
-        <div class="game-interactive-container">
-          <div class="dice-result-box" id="limbo-result" style="font-size: 4rem;">1.00x</div>
-        </div>
-      `;
-
-      options.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:4px;">
-          <label class="bet-label">TARGET MULTIPLIER</label>
-          <input type="number" id="limbo-target-input" value="2.00" min="1.01" step="0.1" class="custom-select-control" onchange="state.gameState.targetMult = parseFloat(this.value)">
-        </div>
-      `;
-    }
-
-    function playLimbo(bet) {
-      state.balances[state.currency] -= bet;
-      const target = parseFloat(document.getElementById('limbo-target-input').value) || 2.0;
-      
-      // Random result weighted towards low numbers
-      const result = Math.max(1.00, (0.99 / (1 - Math.random()))).toFixed(2);
-      const win = parseFloat(result) >= target;
-
-      document.getElementById('limbo-result').textContent = result + 'x';
-
-      if (win) {
-        const payout = bet * target;
-        state.balances[state.currency] += payout;
-        document.getElementById('limbo-result').style.color = 'var(--accent-green)';
-      } else {
-        document.getElementById('limbo-result').style.color = '#ff3366';
-      }
-
-      updateBalanceDisplay();
-      addLiveBetRow('You', 'Limbo', target, win);
-    }
-
-    /* --- MINES --- */
-    function renderMinesUI(display, options, actionBtn) {
-      state.gameState.minesCount = 3;
-      state.gameState.active = false;
-      state.gameState.gemsFound = 0;
-
-      let gridHtml = '<div class="mines-grid" id="mines-grid">';
-      for (let i = 0; i < 25; i++) {
-        gridHtml += `<div class="mine-tile" onclick="clickMineTile(${i})">❓</div>`;
-      }
-      gridHtml += '</div>';
-
-      display.innerHTML = gridHtml;
-
-      options.innerHTML = `
-        <div style="display:flex; flex-direction:column; gap:4px;">
-          <label class="bet-label">MINES COUNT</label>
-          <select class="custom-select-control" onchange="state.gameState.minesCount = parseInt(this.value)">
-            <option value="1">1 Mine</option>
-            <option value="3" selected>3 Mines</option>
-            <option value="5">5 Mines</option>
-            <option value="10">10 Mines</option>
-          </select>
-        </div>
-      `;
-    }
-
-    function playMines(bet) {
-      if (state.gameState.active) {
-        // Cashout logic
-        const mult = 1 + (state.gameState.gemsFound * 0.25);
-        const payout = bet * mult;
-        state.balances[state.currency] += payout;
-        updateBalanceDisplay();
-        alert(`Cashed out ${payout.toFixed(2)} (${mult.toFixed(2)}x)!`);
-        resetMinesGrid();
-        addLiveBetRow('You', 'Mines', mult, true);
-        return;
-      }
-
-      state.balances[state.currency] -= bet;
-      updateBalanceDisplay();
-
-      state.gameState.active = true;
-      state.gameState.gemsFound = 0;
-      
-      // Place bombs
-      const bombs = new Set();
-      while (bombs.size < state.gameState.minesCount) {
-        bombs.add(Math.floor(Math.random() * 25));
-      }
-      state.gameState.bombs = bombs;
-
-      document.getElementById('btn-primary-action').textContent = 'CASHOUT';
-      
-      // Reset visual grid
-      const tiles = document.querySelectorAll('.mine-tile');
-      tiles.forEach(t => {
-        t.className = 'mine-tile';
-        t.textContent = '❓';
-      });
-    }
-
-    function clickMineTile(idx) {
-      if (!state.gameState.active) return;
-
-      const tiles = document.querySelectorAll('.mine-tile');
-      const tile = tiles[idx];
-
-      if (tile.classList.contains('revealed-gem') || tile.classList.contains('revealed-bomb')) return;
-
-      if (state.gameState.bombs.has(idx)) {
-        // Hit Bomb
-        tile.classList.add('revealed-bomb');
-        tile.textContent = '💣';
-        alert('BOOM! You hit a mine.');
-        resetMinesGrid();
-        addLiveBetRow('You', 'Mines', 0, false);
-      } else {
-        // Hit Gem
-        tile.classList.add('revealed-gem');
-        tile.textContent = '💎';
-        state.gameState.gemsFound++;
-        const currentMult = (1 + (state.gameState.gemsFound * 0.25)).toFixed(2);
-        document.getElementById('btn-primary-action').textContent = `CASHOUT (${currentMult}x)`;
-      }
-    }
-
-    function resetMinesGrid() {
-      state.gameState.active = false;
-      document.getElementById('btn-primary-action').textContent = 'PLACE BET';
-    }
-
-    /* --- SLOTS --- */
-    function renderSlotsUI(display, options) {
-      display.innerHTML = `
-        <div class="game-interactive-container">
-          <div style="display:flex; gap:16px; background:var(--bg-card); padding:20px; border-radius:var(--radius-md); border:2px solid var(--border-color);">
-            <div id="slot-1" style="font-size:4rem;">🎰</div>
-            <div id="slot-2" style="font-size:4rem;">🎰</div>
-            <div id="slot-3" style="font-size:4rem;">🎰</div>
-          </div>
-        </div>
-      `;
-    }
-
-    function playSlots(bet) {
-      state.balances[state.currency] -= bet;
-      const symbols = ['⚡', '💎', '🔔', '🍋', '🍒', '7️⃣'];
-      
-      const s1 = symbols[Math.floor(Math.random() * symbols.length)];
-      const s2 = symbols[Math.floor(Math.random() * symbols.length)];
-      const s3 = symbols[Math.floor(Math.random() * symbols.length)];
-
-      document.getElementById('slot-1').textContent = s1;
-      document.getElementById('slot-2').textContent = s2;
-      document.getElementById('slot-3').textContent = s3;
-
-      let mult = 0;
-      if (s1 === s2 && s2 === s3) mult = 10.0;
-      else if (s1 === s2 || s2 === s3 || s1 === s3) mult = 1.5;
-
-      const win = mult > 0;
-      if (win) {
-        state.balances[state.currency] += (bet * mult);
-      }
-
-      updateBalanceDisplay();
-      addLiveBetRow('You', 'Stake Gates', mult, win);
-    }
-
-    /* --- HILO --- */
-    function renderHiloUI(display, options, actionBtn) {
-      state.gameState.currentCard = Math.floor(Math.random() * 13) + 1;
-
-      display.innerHTML = `
-        <div class="game-interactive-container">
-          <div class="cards-flex">
-            <div class="playing-card" id="hilo-card">${getCardDisplay(state.gameState.currentCard)}</div>
-          </div>
-        </div>
-      `;
-
-      options.innerHTML = `
-        <button class="btn-secondary-action" onclick="guessHilo('HIGHER')">HIGHER ⬆️</button>
-        <button class="btn-secondary-action" onclick="guessHilo('LOWER')">LOWER ⬇️</button>
-      `;
-    }
-
-    function getCardDisplay(val) {
-      const suits = ['♠️', '♥️', '♣️', '♦️'];
-      const suit = suits[Math.floor(Math.random() * suits.length)];
-      const names = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
-      return `${names[val] || val}<br>${suit}`;
-    }
-
-    function playHilo(bet) {
-      alert('Choose Higher or Lower to play Hilo!');
-    }
-
-    function guessHilo(type) {
-      const bet = getBetAmount();
-      if (bet <= 0 || bet > state.balances[state.currency]) {
-        alert('Invalid bet.');
-        return;
-      }
-
-      state.balances[state.currency] -= bet;
-      const nextCard = Math.floor(Math.random() * 13) + 1;
-      let win = false;
-
-      if (type === 'HIGHER' && nextCard >= state.gameState.currentCard) win = true;
-      if (type === 'LOWER' && nextCard <= state.gameState.currentCard) win = true;
-
-      state.gameState.currentCard = nextCard;
-      document.getElementById('hilo-card').innerHTML = getCardDisplay(nextCard);
-
-      const mult = 1.85;
-      if (win) {
-        state.balances[state.currency] += (bet * mult);
-      }
-
-      updateBalanceDisplay();
-      addLiveBetRow('You', 'Hilo', mult, win);
-    }
-
-    /* --- GENERIC FALLBACK FOR OTHER GAMES --- */
-    function renderGenericUI(display, gameId) {
-      display.innerHTML = `
-        <div class="game-interactive-container">
-          <div style="font-size:5rem;">🎰</div>
-          <h3>${gameId.toUpperCase()}</h3>
-          <p style="color:var(--text-muted); font-size:0.9rem;">Place a bet to initiate outcome simulation.</p>
-        </div>
-      `;
-    }
-
-    function playGenericGame(gameId, bet) {
-      state.balances[state.currency] -= bet;
-      const win = Math.random() > 0.5;
-      const mult = win ? (1.5 + Math.random() * 2).toFixed(2) : 0;
-
-      if (win) {
-        state.balances[state.currency] += (bet * mult);
-        alert(`You won ${bet * mult} (${mult}x)!`);
-      } else {
-        alert('Better luck next time!');
-      }
-
-      updateBalanceDisplay();
-      addLiveBetRow('You', gameId, mult, win);
-    }
-
-    /* ==========================================================================
-       6. REAL-TIME TICKER & GLOBAL BETS SIMULATION
-       ========================================================================== */
-    function addLiveBetRow(user, game, mult, isWin) {
-      const feed = document.getElementById('bets-feed');
-      const row = document.createElement('div');
-      row.className = 'bet-row';
-
-      row.innerHTML = `
-        <div class="bet-user-info">
-          <span class="bet-username">${user}</span>
-          <span class="bet-game-name">${game}</span>
-        </div>
-        <span class="bet-mult ${isWin ? 'win' : 'loss'}">${parseFloat(mult).toFixed(2)}x</span>
-      `;
-
-      feed.prepend(row);
-      if (feed.children.length > 20) {
-        feed.removeChild(feed.lastChild);
-      }
-    }
-
-    function startLiveBetsTicker() {
-      const fakeUsers = ['User_892', 'CryptoKing', 'LuckyDuck', 'AlphaGamer', 'HighRoller', 'StakeGod'];
-      
-      setInterval(() => {
-        const randomUser = fakeUsers[Math.floor(Math.random() * fakeUsers.length)];
-        const randomGame = games[Math.floor(Math.random() * games.length)];
-        const isWin = Math.random() > 0.55;
-        const mult = isWin ? (1.1 + Math.random() * 10).toFixed(2) : 0.00;
-
-        addLiveBetRow(randomUser, randomGame, mult, isWin);
-      }, 2500);
-    }
-  </script>
+  <!-- Application Controller Script -->
+  <script src="client.js"></script>
 </body>
 </html>
