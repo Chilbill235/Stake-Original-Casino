@@ -12,14 +12,18 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+
+// Safe WebSocket initialization (handles serverless environments gracefully)
+let wss;
+try {
+  wss = new WebSocket.Server({ server });
+} catch (e) {
+  wss = { clients: [] };
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const HOUSE_EDGE = 0.01; // 1% House Edge (99% RTP)
-
-// Use your Ngrok HTTPS base URL for all Stripe redirects in live mode
-const BASE_URL = 'https://lurk-gleeful-deviator.ngrok-free.dev';
 
 // In-Memory Database (Store connected Stripe accounts per user)
 const users = new Map();
@@ -341,7 +345,7 @@ app.post('/api/user/claim-gc', verifyToken, (req, res) => {
   res.json({ balances: { gc: user.gc_balance, sc: user.sc_balance } });
 });
 
-// Create Stripe Embedded Checkout Session
+// Create Stripe Embedded Checkout Session (Dynamic Host Detection for Vercel)
 app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
   const { packageId } = req.body;
   const pkg = COIN_PACKAGES[packageId || 'pack_10'];
@@ -349,6 +353,8 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
   if (!pkg) {
     return res.status(400).json({ error: 'Invalid coin package selected.' });
   }
+
+  const host = req.headers.origin || `https://${req.headers.host}`;
 
   try {
     const session = await stripe.checkout.sessions.create({
@@ -365,7 +371,7 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
         },
       ],
       mode: 'payment',
-      return_url: `${BASE_URL}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      return_url: `${host}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         userId: req.user.id.toString(),
         gcAmount: pkg.gcAmount.toString(),
@@ -382,10 +388,11 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
   }
 });
 
-// Withdraw SC Endpoint generates a Stripe Connect Onboarding Link via HTTPS
+// Withdraw SC Endpoint with Dynamic URLs
 app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
   const { amount } = req.body;
   const user = users.get(req.user.id) || users.get(1);
+  const host = req.headers.origin || `https://${req.headers.host}`;
 
   if (isNaN(amount) || amount < 100) {
     return res.status(400).json({ error: 'Minimum redemption limit is 100.00 Sweeps Coins (SC).' });
@@ -396,7 +403,6 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
   }
 
   try {
-    // 1. Create Stripe Express Account if user doesn't have one
     if (!user.stripeAccountId) {
       const account = await stripe.accounts.create({
         type: 'express',
@@ -408,16 +414,14 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
       user.stripeAccountId = account.id;
     }
 
-    // 2. Check if the account has active transfers capability
     const accountCheck = await stripe.accounts.retrieve(user.stripeAccountId);
     const transfersEnabled = accountCheck.capabilities?.transfers === 'active';
 
     if (!transfersEnabled) {
-      // Generate an Account Link for Stripe Onboarding using HTTPS Ngrok URL
       const accountLink = await stripe.accountLinks.create({
         account: user.stripeAccountId,
-        refresh_url: `${BASE_URL}/?setup=retry`,
-        return_url: `${BASE_URL}/?setup=complete`,
+        refresh_url: `${host}/?setup=retry`,
+        return_url: `${host}/?setup=complete`,
         type: 'account_onboarding',
       });
 
@@ -428,7 +432,6 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
       });
     }
 
-    // 3. Execute Stripe Transfer payout securely once capabilities are active
     const amountInCents = Math.round(amount * 100);
     const transfer = await stripe.transfers.create({
       amount: amountInCents,
@@ -522,7 +525,9 @@ app.post('/api/play/mines/cashout', verifyToken, (req, res) => {
     type: 'LIVE_BET', username: user.username, game: 'MINES',
     betAmount: session.betAmount, currency: session.currency, multiplier: mult, win: true, payout
   });
-  wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(broadcastData); });
+  if (wss.clients) {
+    wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(broadcastData); });
+  }
 
   res.json({ win: true, payout, multiplier: parseFloat(mult.toFixed(2)), balances: { gc: user.gc_balance, sc: user.sc_balance } });
 });
@@ -555,7 +560,9 @@ app.post('/api/play/:gameId', verifyToken, (req, res) => {
     type: 'LIVE_BET', username: user.username, game: gameId.toUpperCase(),
     betAmount, currency, multiplier: outcome.multiplier, win: outcome.win, payout
   });
-  wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(broadcastData); });
+  if (wss.clients) {
+    wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(broadcastData); });
+  }
 
   res.json({
     ...outcome,
@@ -567,5 +574,5 @@ app.post('/api/play/:gameId', verifyToken, (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🎰 STAKE CASINO ENGINE ACTIVE: ${BASE_URL}`);
+  console.log(`🎰 STAKE CASINO ENGINE ACTIVE: Port ${PORT}`);
 });

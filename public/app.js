@@ -152,12 +152,10 @@ function closeRedeemModal() { document.getElementById('modal-redeem').classList.
 
 async function submitRedeem() {
   const amount = parseFloat(document.getElementById('redeem-input').value);
-  const accountNumber = document.getElementById('bank-account-input')?.value;
-  const routingNumber = document.getElementById('bank-routing-input')?.value;
   const token = localStorage.getItem('casino_token');
 
-  if (!accountNumber || !routingNumber) {
-    alert('Please enter your payout bank details.');
+  if (isNaN(amount) || amount < 100) {
+    alert('Minimum redemption limit is 100.00 Sweeps Coins (SC).');
     return;
   }
 
@@ -167,11 +165,17 @@ async function submitRedeem() {
       'Content-Type': 'application/json', 
       'Authorization': `Bearer ${token}` 
     },
-    body: JSON.stringify({ amount, accountNumber, routingNumber })
+    body: JSON.stringify({ amount })
   });
 
   const data = await res.json();
   if (!res.ok) return alert(data.error || 'Withdrawal failed');
+
+  // If Stripe Connect Onboarding is required
+  if (data.requiresOnboarding && data.onboardingUrl) {
+    window.location.href = data.onboardingUrl;
+    return;
+  }
 
   userBalances = data.balances;
   updateWalletUI();
