@@ -147,6 +147,7 @@ async function initSession() {
   connectWebSocket();
   setupGlobalEventListeners();
   initProvablyFairUI();
+  injectMobileAndNavigationDOM();
 }
 
 // ==========================================================================
@@ -229,6 +230,12 @@ function updateWalletUI() {
   const optionSc = document.getElementById('wallet-opt-sc');
   const balanceGcMenu = document.getElementById('menu-bal-gc');
   const balanceScMenu = document.getElementById('menu-bal-sc');
+  
+  // Mobile elements
+  const mobTag = document.getElementById('mob-curr-tag');
+  const mobVal = document.getElementById('mob-balance-val');
+  const mobBalanceGcMenu = document.getElementById('mob-menu-bal-gc');
+  const mobBalanceScMenu = document.getElementById('mob-menu-bal-sc');
 
   const formattedGc = Number(state.balances.gc || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -241,6 +248,8 @@ function updateWalletUI() {
 
   if (balanceGcMenu) balanceGcMenu.textContent = formattedGc;
   if (balanceScMenu) balanceScMenu.textContent = formattedSc;
+  if (mobBalanceGcMenu) mobBalanceGcMenu.textContent = formattedGc;
+  if (mobBalanceScMenu) mobBalanceScMenu.textContent = formattedSc;
 
   if (state.currency === 'GC') {
     if (tag) {
@@ -248,6 +257,12 @@ function updateWalletUI() {
       tag.className = 'currency-badge-icon badge-gc';
     }
     if (val) val.textContent = formattedGc;
+    if (mobTag) {
+      mobTag.textContent = 'GC';
+      mobTag.className = 'currency-badge-icon badge-gc';
+    }
+    if (mobVal) mobVal.textContent = formattedGc;
+
     if (optionGc) optionGc.classList.add('active');
     if (optionSc) optionSc.classList.remove('active');
   } else {
@@ -256,6 +271,12 @@ function updateWalletUI() {
       tag.className = 'currency-badge-icon badge-sc';
     }
     if (val) val.textContent = formattedSc;
+    if (mobTag) {
+      mobTag.textContent = 'SC';
+      mobTag.className = 'currency-badge-icon badge-sc';
+    }
+    if (mobVal) mobVal.textContent = formattedSc;
+
     if (optionSc) optionSc.classList.add('active');
     if (optionGc) optionGc.classList.remove('active');
   }
@@ -272,9 +293,20 @@ function toggleWalletDropdown(event) {
   }
 }
 
+function toggleMobileWalletDropdown(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('mob-wallet-dropdown-menu');
+  if (menu) {
+    menu.classList.toggle('hidden');
+    playSound('click');
+  }
+}
+
 function closeWalletDropdown() {
   const menu = document.getElementById('wallet-dropdown-menu');
   if (menu) menu.classList.add('hidden');
+  const mobMenu = document.getElementById('mob-wallet-dropdown-menu');
+  if (mobMenu) mobMenu.classList.add('hidden');
 }
 
 function switchCurrency(currency) {
@@ -1614,7 +1646,102 @@ function closeProvablyFairModal() {
 }
 
 // ==========================================================================
-// 13. UTILITY & EVENT BINDINGS
+// 13. MOBILE & NAVIGATION DOM INJECTION / UPGRADE HELPERS
+// ==========================================================================
+
+function injectMobileAndNavigationDOM() {
+  // Check and inject mobile navigation / wallet switcher / modal structures if missing
+  if (!document.getElementById('mobile-nav-bar')) {
+    const navContainer = document.createElement('div');
+    navContainer.id = 'mobile-nav-bar';
+    navContainer.className = 'mobile-nav-bar-container';
+    navContainer.innerHTML = `
+      <button class="nav-item-btn" onclick="showLobby()">🏠 Lobby</button>
+      <button class="nav-item-btn" onclick="openStoreModal()">🪙 Deposit</button>
+      <button class="nav-item-btn" onclick="openRedeemModal()">💸 Redeem</button>
+      <button class="nav-item-btn" onclick="openProfileModal()">👤 Profile</button>
+    `;
+    document.body.appendChild(navContainer);
+  }
+
+  // Ensure store modal exists in DOM
+  if (!document.getElementById('modal-store')) {
+    const storeModal = document.createElement('div');
+    storeModal.id = 'modal-store';
+    storeModal.className = 'modal-backdrop hidden';
+    storeModal.innerHTML = `
+      <div class="modal-box" style="max-width: 500px;">
+        <div class="modal-header-flex">
+          <h3>🪙 Buy Gold Coins & Get Sweeps Coins</h3>
+          <button class="x-close" onclick="closeStoreModal()">×</button>
+        </div>
+        <p class="modal-subtitle">Select a package below to proceed with secure payment:</p>
+        <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 15px 0;">
+          <button class="game-btn-action" onclick="buyCoinPackage('pkg_10')">$10 - 10,000 GC + 10 SC</button>
+          <button class="game-btn-action" onclick="buyCoinPackage('pkg_25')">$25 - 25,000 GC + 25.5 SC</button>
+          <button class="game-btn-action" onclick="buyCoinPackage('pkg_50')">$50 - 50,000 GC + 52 SC</button>
+          <button class="game-btn-action" onclick="buyCoinPackage('pkg_100')">$100 - 100,000 GC + 105 SC</button>
+        </div>
+        <div id="checkout-container" style="margin-top:15px; display:none;"></div>
+      </div>
+    `;
+    document.body.appendChild(storeModal);
+  }
+
+  // Ensure redeem modal exists in DOM
+  if (!document.getElementById('modal-redeem')) {
+    const redeemModal = document.createElement('div');
+    redeemModal.id = 'modal-redeem';
+    redeemModal.className = 'modal-backdrop hidden';
+    redeemModal.innerHTML = `
+      <div class="modal-box" style="max-width: 400px;">
+        <div class="modal-header-flex">
+          <h3>💸 Redeem Sweeps Coins (SC)</h3>
+          <button class="x-close" onclick="closeRedeemModal()">×</button>
+        </div>
+        <p class="modal-subtitle">Minimum redemption: 100.00 SC (1 SC = $1 USD)</p>
+        <div class="form-group" style="margin: 15px 0;">
+          <label class="form-label">Amount to Redeem</label>
+          <input type="number" id="redeem-input" class="form-input" placeholder="100.00" min="100" step="1">
+        </div>
+        <div class="modal-actions-flex" style="margin-top: 20px;">
+          <button type="button" onclick="submitRedeem()" class="btn-play btn-full">Submit Redemption</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(redeemModal);
+  }
+
+  // Ensure Provably Fair modal exists
+  if (!document.getElementById('modal-pf')) {
+    const pfModal = document.createElement('div');
+    pfModal.id = 'modal-pf';
+    pfModal.className = 'modal-backdrop hidden';
+    pfModal.innerHTML = `
+      <div class="modal-box" style="max-width: 450px;">
+        <div class="modal-header-flex">
+          <h3>🔒 Provably Fair Verification</h3>
+          <button class="x-close" onclick="closeProvablyFairModal()">×</button>
+        </div>
+        <div class="form-group" style="margin: 10px 0;">
+          <label class="form-label">Active Server Seed Hash</label>
+          <input type="text" id="pf-modal-server-hash" class="form-input" readonly>
+        </div>
+        <div class="form-group" style="margin: 10px 0;">
+          <label class="form-label">Your Client Seed</label>
+          <input type="text" id="pf-modal-client-seed" class="form-input" onchange="state.clientSeed=this.value; localStorage.setItem('casino_client_seed', this.value);">
+        </div>
+        <div style="margin-top: 15px;">
+          <button class="btn-secondary-action btn-full" onclick="rotateServerSeed()">Rotate Server Seed</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(pfModal);
+  }
+}
+
+// ==========================================================================
+// 14. UTILITY & EVENT BINDINGS
 // ==========================================================================
 
 function renderCards(hand) {
