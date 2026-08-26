@@ -8,16 +8,16 @@
 // ==========================================================================
 
 const state = {
-  currency: localStorage.getItem('casino_currency') || 'GC', // Persistent currency choice
+  currency: localStorage.getItem('casino_currency') || 'GC',
   currentGame: null,
   balances: { gc: 10000.0, sc: 10.0 },
   selectedKenoNumbers: [],
-  activeGameState: null, // Persistent multi-step state (Mines, Blackjack, Hilo, Tower)
-  isProcessing: false,   // In-flight request lock
+  activeGameState: null,
+  isProcessing: false,
   activeCheckoutInstance: null,
   ws: null,
   wsReconnectTimer: null,
-  feedFilter: 'ALL',     // 'ALL', 'MY_BETS', 'HIGH_ROLLERS'
+  feedFilter: 'ALL',
   clientSeed: localStorage.getItem('casino_client_seed') || generateRandomSeed(),
   serverSeedHash: '',
   nonce: 0,
@@ -25,7 +25,7 @@ const state = {
 };
 
 // ==========================================================================
-// 2. SYNTHESIZED WEB AUDIO SFX ENGINE (Zero External Files)
+// 2. SYNTHESIZED WEB AUDIO SFX ENGINE
 // ==========================================================================
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -181,7 +181,7 @@ function connectWebSocket() {
     state.wsReconnectTimer = setTimeout(connectWebSocket, 3000);
   };
 
-  state.ws.onerror = (err) => {
+  state.ws.onerror = () => {
     state.ws.close();
   };
 }
@@ -209,8 +209,11 @@ function renderLiveBetRow(data) {
   const row = document.createElement('div');
   row.className = `bet-row ${isMyBet ? 'my-bet' : ''}`;
   row.innerHTML = `
-    <span><strong>${escapeHTML(data.username || 'Anonymous')}</strong> (${escapeHTML(data.game)})</span>
-    <span style="color: ${data.win ? '#00e701' : '#ff0055'}; font-weight:700;">
+    <div class="bet-user-game">
+      <span class="bet-user">${escapeHTML(data.username || 'Anonymous')}</span>
+      <span class="bet-game">${escapeHTML(data.game)}</span>
+    </div>
+    <span class="bet-mult ${data.win ? 'win' : 'loss'}">
       ${Number(data.multiplier).toFixed(2)}x (${Number(data.payout || 0).toFixed(2)} ${data.currency || 'GC'})
     </span>
   `;
@@ -230,12 +233,6 @@ function updateWalletUI() {
   const optionSc = document.getElementById('wallet-opt-sc');
   const balanceGcMenu = document.getElementById('menu-bal-gc');
   const balanceScMenu = document.getElementById('menu-bal-sc');
-  
-  // Mobile elements
-  const mobTag = document.getElementById('mob-curr-tag');
-  const mobVal = document.getElementById('mob-balance-val');
-  const mobBalanceGcMenu = document.getElementById('mob-menu-bal-gc');
-  const mobBalanceScMenu = document.getElementById('mob-menu-bal-sc');
 
   const formattedGc = Number(state.balances.gc || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -248,35 +245,21 @@ function updateWalletUI() {
 
   if (balanceGcMenu) balanceGcMenu.textContent = formattedGc;
   if (balanceScMenu) balanceScMenu.textContent = formattedSc;
-  if (mobBalanceGcMenu) mobBalanceGcMenu.textContent = formattedGc;
-  if (mobBalanceScMenu) mobBalanceScMenu.textContent = formattedSc;
 
   if (state.currency === 'GC') {
     if (tag) {
       tag.textContent = 'GC';
-      tag.className = 'currency-badge-icon badge-gc';
+      tag.className = 'currency-badge-icon';
     }
     if (val) val.textContent = formattedGc;
-    if (mobTag) {
-      mobTag.textContent = 'GC';
-      mobTag.className = 'currency-badge-icon badge-gc';
-    }
-    if (mobVal) mobVal.textContent = formattedGc;
-
     if (optionGc) optionGc.classList.add('active');
     if (optionSc) optionSc.classList.remove('active');
   } else {
     if (tag) {
       tag.textContent = 'SC';
-      tag.className = 'currency-badge-icon badge-sc';
+      tag.className = 'currency-badge-icon sc-active';
     }
     if (val) val.textContent = formattedSc;
-    if (mobTag) {
-      mobTag.textContent = 'SC';
-      mobTag.className = 'currency-badge-icon badge-sc';
-    }
-    if (mobVal) mobVal.textContent = formattedSc;
-
     if (optionSc) optionSc.classList.add('active');
     if (optionGc) optionGc.classList.remove('active');
   }
@@ -293,20 +276,9 @@ function toggleWalletDropdown(event) {
   }
 }
 
-function toggleMobileWalletDropdown(event) {
-  if (event) event.stopPropagation();
-  const menu = document.getElementById('mob-wallet-dropdown-menu');
-  if (menu) {
-    menu.classList.toggle('hidden');
-    playSound('click');
-  }
-}
-
 function closeWalletDropdown() {
   const menu = document.getElementById('wallet-dropdown-menu');
   if (menu) menu.classList.add('hidden');
-  const mobMenu = document.getElementById('mob-wallet-dropdown-menu');
-  if (mobMenu) mobMenu.classList.add('hidden');
 }
 
 function switchCurrency(currency) {
@@ -348,10 +320,6 @@ function adjustBet(action) {
     currentBet = Math.min(maxBalance, currentBet * 2);
   } else if (action === 'MAX') {
     currentBet = Math.max(0.01, maxBalance);
-  } else if (action === '25%') {
-    currentBet = Math.max(0.01, maxBalance * 0.25);
-  } else if (action === '50%') {
-    currentBet = Math.max(0.01, maxBalance * 0.5);
   }
 
   input.value = currentBet.toFixed(2);
@@ -407,7 +375,10 @@ function closeStoreModal() {
   playSound('click');
   document.getElementById('modal-store')?.classList.add('hidden');
   const container = document.getElementById('checkout-container');
-  if (container) container.innerHTML = '';
+  if (container) {
+    container.innerHTML = '';
+    container.style.display = 'none';
+  }
   if (state.activeCheckoutInstance) {
     try {
       state.activeCheckoutInstance.destroy();
@@ -418,9 +389,6 @@ function closeStoreModal() {
   }
 }
 
-/**
- * Dynamically loads Stripe.js v3 SDK if not present in window scope.
- */
 async function loadStripeSdk() {
   if (window.Stripe) return window.Stripe;
   return new Promise((resolve, reject) => {
@@ -432,30 +400,17 @@ async function loadStripeSdk() {
   });
 }
 
-/**
- * Embedded Payment Checkout Integration
- */
 async function buyCoinPackage(packageId) {
   try {
     playSound('click');
     openStoreModal();
 
     let container = document.getElementById('checkout-container');
-
-    // Auto-create embedded container element inside store modal if missing
-    if (!container) {
-      const modalContent = document.querySelector('#modal-store .modal-content') || document.getElementById('modal-store') || document.body;
-      container = document.createElement('div');
-      container.id = 'checkout-container';
-      container.style.marginTop = '15px';
-      container.style.minHeight = '400px';
-      modalContent.appendChild(container);
-    }
+    if (!container) return;
 
     container.style.display = 'block';
     container.innerHTML = '<div style="text-align:center; padding:30px; color:#b1bad2; font-weight:600;">Loading secure embedded checkout...</div>';
 
-    // Clean up active checkout instance if running
     if (state.activeCheckoutInstance) {
       try {
         state.activeCheckoutInstance.destroy();
@@ -465,20 +420,17 @@ async function buyCoinPackage(packageId) {
       state.activeCheckoutInstance = null;
     }
 
-    // 1. Fetch Session Data from API
     const data = await apiRequest('/api/user/buy-coins', 'POST', { packageId });
 
     if (!data.publishableKey || !data.clientSecret) {
       throw new Error(data.error || 'Invalid session configuration returned from server.');
     }
 
-    // 2. Load SDK dynamically & init Stripe
     const StripeSDK = await loadStripeSdk();
     const stripe = StripeSDK(data.publishableKey);
 
-    container.innerHTML = ''; // Clear loading text
+    container.innerHTML = '';
 
-    // 3. Initialize Embedded Checkout using fixed 'embedded_page' ui_mode
     state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
       clientSecret: data.clientSecret,
       uiMode: 'embedded_page',
@@ -490,7 +442,6 @@ async function buyCoinPackage(packageId) {
       }
     });
 
-    // 4. Mount Embedded Payment UI directly into the in-page container
     state.activeCheckoutInstance.mount('#checkout-container');
 
   } catch (err) {
@@ -498,7 +449,7 @@ async function buyCoinPackage(packageId) {
     const container = document.getElementById('checkout-container');
     if (container) {
       container.innerHTML = `
-        <div style="color:#ff0055; text-align:center; padding:20px; font-weight:700; border:1px solid #ff0055; border-radius:6px; background:rgba(255,0,85,0.05);">
+        <div style="color:#ff4d4d; text-align:center; padding:20px; font-weight:700; border:1px solid #ff4d4d; border-radius:6px; background:rgba(255,77,77,0.05);">
           ${escapeHTML(err.message || 'Failed to initialize in-page payment.')}
         </div>`;
     } else {
@@ -537,7 +488,7 @@ async function submitRedeem() {
 }
 
 // ==========================================================================
-// 8. LOBBY, SEARCH & CATEGORY FILTERING
+// 8. LOBBY & NAVIGATION ROUTING
 // ==========================================================================
 
 function showLobby() {
@@ -574,10 +525,6 @@ function searchLobbyGames(query) {
   });
 }
 
-// ==========================================================================
-// 9. GAME LAUNCH ROUTER
-// ==========================================================================
-
 function launchGame(gameId) {
   playSound('click');
   state.currentGame = gameId;
@@ -597,70 +544,64 @@ function launchGame(gameId) {
   actionBtn.disabled = false;
 
   switch (gameId) {
-    case 'baccarat':
-      options.innerHTML = `
-        <label style="font-weight:700;">Target: </label>
-        <select id="baccarat-target" class="game-select">
-          <option value="PLAYER">PLAYER (1.98x)</option>
-          <option value="BANKER">BANKER (1.93x)</option>
-          <option value="TIE">TIE (8.00x)</option>
-        </select>`;
-      break;
-
     case 'dice':
       options.innerHTML = `
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <select id="dice-cond" class="game-select" onchange="updateDiceOdds()">
+        <div class="control-group">
+          <label class="control-label">Condition</label>
+          <select id="dice-cond" class="control-select" onchange="updateDiceOdds()">
             <option value="OVER">OVER</option>
             <option value="UNDER">UNDER</option>
           </select>
-          <input type="number" id="dice-target" value="50.00" step="0.01" min="0.01" max="98.99" class="game-input" oninput="updateDiceOdds()">
-          <span id="dice-win-chance" style="color:#00e701; font-weight:700;">Chance: 49.50%</span>
+        </div>
+        <div class="control-group">
+          <label class="control-label">Target Number</label>
+          <input type="number" id="dice-target" value="50.00" step="0.01" min="0.01" max="98.99" class="control-input" oninput="updateDiceOdds()">
         </div>`;
       setTimeout(updateDiceOdds, 50);
       break;
 
     case 'limbo':
       options.innerHTML = `
-        <label style="font-weight:700;">Target Multiplier: </label>
-        <input type="number" id="limbo-target" value="2.00" step="0.1" min="1.01" max="10000" class="game-input">`;
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <label class="control-label">Target Multiplier</label>
+          <input type="number" id="limbo-target" value="2.00" step="0.1" min="1.01" max="10000" class="control-input">
+        </div>`;
       break;
 
     case 'plinko':
       options.innerHTML = `
-        <label style="font-weight:700;">Rows: </label>
-        <select id="plinko-rows" class="game-select">
-          <option value="8">8 Rows</option>
-          <option value="10" selected>10 Rows</option>
-          <option value="12">12 Rows</option>
-          <option value="14">14 Rows</option>
-          <option value="16">16 Rows</option>
-        </select>`;
-      break;
-
-    case 'hilo':
-      options.innerHTML = `
-        <label style="font-weight:700;">Start Level: </label>
-        <span style="color:#b1bad2;">Guess Higher or Lower continuously to build multiplier</span>`;
-      actionBtn.textContent = 'START HILO';
-      break;
-
-    case 'tower':
-      options.innerHTML = `
-        <label style="font-weight:700;">Difficulty: </label>
-        <select id="tower-difficulty" class="game-select">
-          <option value="EASY">Easy (2/3 Safe)</option>
-          <option value="MEDIUM" selected>Medium (1/2 Safe)</option>
-          <option value="HARD">Hard (1/3 Safe)</option>
-        </select>`;
-      actionBtn.textContent = 'START TOWER';
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <label class="control-label">Row Count</label>
+          <select id="plinko-rows" class="control-select">
+            <option value="8">8 Rows</option>
+            <option value="10" selected>10 Rows</option>
+            <option value="12">12 Rows</option>
+            <option value="14">14 Rows</option>
+            <option value="16">16 Rows</option>
+          </select>
+        </div>`;
       break;
 
     case 'mines':
       options.innerHTML = `
-        <label style="font-weight:700;">Mines Count: </label>
-        <input type="number" id="mines-count" value="3" min="1" max="24" class="game-input">`;
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <label class="control-label">Mines Count</label>
+          <input type="number" id="mines-count" value="3" min="1" max="24" class="control-input">
+        </div>`;
       actionBtn.textContent = 'START MINES';
+      break;
+
+    case 'tower':
+      options.innerHTML = `
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <label class="control-label">Difficulty Level</label>
+          <select id="tower-difficulty" class="control-select">
+            <option value="EASY">Easy (2/3 Safe)</option>
+            <option value="MEDIUM" selected>Medium (1/2 Safe)</option>
+            <option value="HARD">Hard (1/3 Safe)</option>
+          </select>
+        </div>`;
+      actionBtn.textContent = 'START TOWER';
       break;
 
     case 'keno':
@@ -675,17 +616,6 @@ function launchGame(gameId) {
     case 'slots':
       actionBtn.textContent = 'SPIN REELS';
       break;
-
-    case 'wheel':
-      options.innerHTML = `
-        <label style="font-weight:700;">Risk: </label>
-        <select id="wheel-risk" class="game-select">
-          <option value="LOW">Low</option>
-          <option value="MEDIUM" selected>Medium</option>
-          <option value="HIGH">High</option>
-        </select>`;
-      actionBtn.textContent = 'SPIN WHEEL';
-      break;
   }
 
   if (!['mines', 'hilo', 'tower', 'blackjack', 'slots', 'wheel'].includes(gameId)) {
@@ -693,13 +623,11 @@ function launchGame(gameId) {
   }
 
   document.getElementById('game-display-area').innerHTML = `
-    <div style="color:#b1bad2; font-weight:700; text-align:center; padding: 40px; font-size:1.1rem;">
-      Place your bet to begin.
-    </div>`;
+    <div class="game-placeholder-text">Place your bet to begin.</div>`;
 }
 
 // ==========================================================================
-// 10. PRIMARY ACTION DISPATCHER
+// 9. PRIMARY ACTION DISPATCHER & GAME ENGINES
 // ==========================================================================
 
 function handlePrimaryAction() {
@@ -711,7 +639,6 @@ function handlePrimaryAction() {
 
   if (state.activeGameState) {
     if (state.currentGame === 'mines') return cashoutMines();
-    if (state.currentGame === 'hilo') return cashoutHilo();
     if (state.currentGame === 'tower') return cashoutTower();
   }
 
@@ -724,20 +651,8 @@ function handlePrimaryAction() {
   }
 
   switch (state.currentGame) {
-    case 'blackjack':
-      startBlackjackRound(betAmount);
-      break;
-    case 'baccarat':
-      executeBaccaratRound(betAmount);
-      break;
-    case 'slots':
-      executeAnimatedSlots(betAmount);
-      break;
     case 'mines':
       startMinesGame(betAmount);
-      break;
-    case 'hilo':
-      startHiloGame(betAmount);
       break;
     case 'tower':
       startTowerGame(betAmount);
@@ -748,126 +663,10 @@ function handlePrimaryAction() {
     case 'dice':
       executeDiceBet(betAmount);
       break;
-    case 'wheel':
-      executeWheelBet(betAmount);
-      break;
     default:
       executeStandardBet(betAmount);
       break;
   }
-}
-
-// ==========================================================================
-// 11. INTERACTIVE GAME ENGINES
-// ==========================================================================
-
-/* --- BLACKJACK --- */
-async function startBlackjackRound(betAmount) {
-  state.isProcessing = true;
-  playSound('chip');
-  const actionBtn = document.getElementById('btn-primary-action');
-  actionBtn.disabled = true;
-
-  try {
-    const data = await apiRequest('/api/play/blackjack/deal', 'POST', {
-      currency: state.currency,
-      betAmount,
-      clientSeed: state.clientSeed
-    });
-
-    state.balances = data.balances;
-    updateWalletUI();
-    state.nonce++;
-
-    if (data.isFinished) {
-      state.activeGameState = null;
-      renderBlackjackBoard(data, false);
-      if (data.win) playSound('win'); else playSound('loss');
-    } else {
-      state.activeGameState = { id: data.gameId, betAmount };
-      renderBlackjackBoard(data, true);
-    }
-  } catch (err) {
-    alert(err.message || 'Blackjack initialization failed');
-  } finally {
-    state.isProcessing = false;
-    actionBtn.disabled = false;
-  }
-}
-
-async function handleBlackjackAction(action) {
-  if (state.isProcessing || !state.activeGameState) return;
-
-  state.isProcessing = true;
-  playSound('click');
-
-  try {
-    const data = await apiRequest(`/api/play/blackjack/${action}`, 'POST', {
-      gameId: state.activeGameState.id
-    });
-
-    if (data.balances) {
-      state.balances = data.balances;
-      updateWalletUI();
-    }
-
-    if (data.isFinished) {
-      state.activeGameState = null;
-      renderBlackjackBoard(data, false);
-      if (data.win) playSound('win'); else playSound('loss');
-    } else {
-      renderBlackjackBoard(data, true);
-    }
-  } catch (err) {
-    alert(err.message || 'Blackjack action failed');
-  } finally {
-    state.isProcessing = false;
-  }
-}
-
-function renderBlackjackBoard(data, inProgress) {
-  const display = document.getElementById('game-display-area');
-  const options = document.getElementById('game-controls-options');
-  const actionBtn = document.getElementById('btn-primary-action');
-
-  let statusText = 'GAME IN PROGRESS';
-  let statusClass = 'text-info';
-
-  if (!inProgress) {
-    statusClass = data.win ? 'text-win' : (data.multiplier === 1 ? 'text-push' : 'text-loss');
-    statusText = data.win 
-      ? `YOU WIN! (${data.multiplier.toFixed(2)}x)` 
-      : (data.multiplier === 1 ? 'PUSH (TIE)' : 'HOUSE WINS');
-  }
-
-  display.innerHTML = `
-    <div class="bj-table-grid">
-      <div class="round-outcome-banner ${statusClass}">${statusText}</div>
-      <div class="bj-hand-section">
-        <span class="bj-label">Dealer Hand (${inProgress ? '?' : data.details.dealerScore})</span>
-        ${renderCards(data.details.dealerHand)}
-      </div>
-      <div class="bj-hand-section">
-        <span class="bj-label">Your Hand (${data.details.playerScore})</span>
-        ${renderCards(data.details.playerHand)}
-      </div>
-    </div>`;
-
-  if (inProgress) {
-    actionBtn.style.display = 'none';
-    options.innerHTML = `
-      <div style="display:flex; gap:8px; width:100%; justify-content:center;">
-        <button class="game-btn-action" onclick="handleBlackjackAction('hit')">HIT</button>
-        <button class="game-btn-action" onclick="handleBlackjackAction('stand')">STAND</button>
-        <button class="game-btn-action" onclick="handleBlackjackAction('double')" ${data.details.canDouble ? '' : 'disabled'}>DOUBLE</button>
-      </div>`;
-  } else {
-    actionBtn.style.display = 'block';
-    actionBtn.textContent = 'DEAL HAND';
-    options.innerHTML = '';
-  }
-
-  updateProvablyFairHash(data.provablyFair?.serverSeedHash);
 }
 
 /* --- MINES ENGINE --- */
@@ -908,9 +707,9 @@ async function startMinesGame(betAmount) {
 }
 
 function renderMinesGrid() {
-  let boardHtml = '<div class="mines-grid" id="mines-board">';
+  let boardHtml = '<div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; max-width:320px; margin:auto;" id="mines-board">';
   for (let i = 0; i < 25; i++) {
-    boardHtml += `<button class="mine-tile" id="mine-tile-${i}" onclick="revealMineTile(${i})">?</button>`;
+    boardHtml += `<button class="game-btn-action" style="padding:16px; font-weight:700;" id="mine-tile-${i}" onclick="revealMineTile(${i})">?</button>`;
   }
   boardHtml += '</div>';
   document.getElementById('game-display-area').innerHTML = boardHtml;
@@ -935,7 +734,7 @@ async function revealMineTile(tileIndex) {
     if (data.hitBomb) {
       playSound('loss');
       if (tile) {
-        tile.style.background = '#ff0055';
+        tile.style.background = '#ff4d4d';
         tile.textContent = '💣';
       }
       alert('BOMB HIT! Game Over.');
@@ -981,110 +780,6 @@ async function cashoutMines() {
   }
 }
 
-/* --- HILO ENGINE --- */
-async function startHiloGame(betAmount) {
-  state.isProcessing = true;
-  playSound('chip');
-
-  try {
-    const data = await apiRequest('/api/play/hilo/start', 'POST', {
-      currency: state.currency,
-      betAmount,
-      clientSeed: state.clientSeed
-    });
-
-    state.balances = data.balances;
-    updateWalletUI();
-    state.nonce++;
-
-    state.activeGameState = {
-      gameId: data.gameId,
-      currentCard: data.card,
-      currentMultiplier: 1.00
-    };
-
-    renderHiloBoard(data.card, 1.00, true);
-  } catch (err) {
-    alert(err.message || 'Hilo start failed');
-  } finally {
-    state.isProcessing = false;
-  }
-}
-
-async function guessHilo(guess) {
-  if (state.isProcessing || !state.activeGameState) return;
-
-  state.isProcessing = true;
-  playSound('click');
-
-  try {
-    const data = await apiRequest('/api/play/hilo/guess', 'POST', {
-      gameId: state.activeGameState.gameId,
-      guess
-    });
-
-    if (data.win) {
-      playSound('win');
-      state.activeGameState.currentCard = data.nextCard;
-      state.activeGameState.currentMultiplier = data.multiplier;
-      renderHiloBoard(data.nextCard, data.multiplier, true);
-    } else {
-      playSound('loss');
-      alert(`Wrong guess! Drawn card was ${data.nextCard.value}${data.nextCard.suit}.`);
-      state.activeGameState = null;
-      launchGame('hilo');
-    }
-  } catch (err) {
-    alert(err.message || 'Hilo guess failed');
-  } finally {
-    state.isProcessing = false;
-  }
-}
-
-async function cashoutHilo() {
-  if (state.isProcessing || !state.activeGameState) return;
-  state.isProcessing = true;
-  playSound('win');
-
-  try {
-    const data = await apiRequest('/api/play/hilo/cashout', 'POST', {
-      gameId: state.activeGameState.gameId
-    });
-
-    state.balances = data.balances;
-    updateWalletUI();
-    alert(`Cashed out for ${data.payout.toFixed(2)} ${state.currency}!`);
-    state.activeGameState = null;
-    launchGame('hilo');
-  } catch (err) {
-    alert(err.message || 'Hilo cashout failed');
-  } finally {
-    state.isProcessing = false;
-  }
-}
-
-function renderHiloBoard(card, multiplier, inProgress) {
-  const display = document.getElementById('game-display-area');
-  const options = document.getElementById('game-controls-options');
-  const actionBtn = document.getElementById('btn-primary-action');
-
-  display.innerHTML = `
-    <div style="text-align:center; padding: 20px;">
-      <div class="round-outcome-banner text-win" style="margin-bottom:12px;">Multiplier: ${multiplier.toFixed(2)}x</div>
-      <div style="font-size: 1.2rem; margin-bottom: 10px; color:#b1bad2;">Current Card:</div>
-      ${renderCards([card])}
-    </div>`;
-
-  if (inProgress) {
-    actionBtn.textContent = `CASHOUT (${multiplier.toFixed(2)}x)`;
-    options.innerHTML = `
-      <div style="display:flex; gap:10px; justify-content:center;">
-        <button class="game-btn-action" onclick="guessHilo('HIGHER')">HIGHER OR EQUAL ▲</button>
-        <button class="game-btn-action" onclick="guessHilo('LOWER')">LOWER OR EQUAL ▼</button>
-      </div>`;
-  }
-}
-
 /* --- TOWER ENGINE --- */
 async function startTowerGame(betAmount) {
   state.isProcessing = true;
@@ -1123,7 +818,7 @@ function renderTowerBoard() {
   const actionBtn = document.getElementById('btn-primary-action');
   actionBtn.textContent = `CASHOUT (${state.activeGameState.multiplier.toFixed(2)}x)`;
 
-  let html = '<div class="tower-grid" style="display:flex; flex-direction:column-reverse; gap:8px; max-width:280px; margin:auto;">';
+  let html = '<div style="display:flex; flex-direction:column-reverse; gap:8px; max-width:280px; margin:auto;">';
   for (let floor = 0; floor < 8; floor++) {
     const isCurrent = floor === state.activeGameState.currentFloor;
     const isPassed = floor < state.activeGameState.currentFloor;
@@ -1196,72 +891,6 @@ async function cashoutTower() {
   }
 }
 
-/* --- ANIMATED SLOTS ENGINE --- */
-async function executeAnimatedSlots(betAmount) {
-  state.isProcessing = true;
-  playSound('chip');
-  const actionBtn = document.getElementById('btn-primary-action');
-  const display = document.getElementById('game-display-area');
-  actionBtn.disabled = true;
-
-  try {
-    const data = await apiRequest('/api/play/slots', 'POST', {
-      currency: state.currency,
-      betAmount,
-      clientSeed: state.clientSeed
-    });
-
-    state.balances = data.balances;
-    updateWalletUI();
-    state.nonce++;
-
-    display.innerHTML = `
-      <div class="slot-container">
-        <div class="slot-reel blur-spin" id="reel-0"><span>🍒</span></div>
-        <div class="slot-reel blur-spin" id="reel-1"><span>🍋</span></div>
-        <div class="slot-reel blur-spin" id="reel-2"><span>💎</span></div>
-      </div>`;
-
-    let spinInterval = setInterval(() => playSound('spin'), 100);
-
-    setTimeout(() => {
-      const r0 = document.getElementById('reel-0');
-      if (r0) { r0.classList.remove('blur-spin'); r0.innerHTML = `<span>${data.result[1][0]}</span>`; }
-    }, 400);
-
-    setTimeout(() => {
-      const r1 = document.getElementById('reel-1');
-      if (r1) { r1.classList.remove('blur-spin'); r1.innerHTML = `<span>${data.result[1][1]}</span>`; }
-    }, 800);
-
-    setTimeout(() => {
-      clearInterval(spinInterval);
-      const r2 = document.getElementById('reel-2');
-      if (r2) { r2.classList.remove('blur-spin'); r2.innerHTML = `<span>${data.result[1][2]}</span>`; }
-
-      setTimeout(() => {
-        if (data.win) playSound('win'); else playSound('loss');
-        const statusClass = data.win ? 'text-win' : 'text-loss';
-        display.innerHTML = `
-          <div style="text-align:center;">
-            <div class="round-outcome-banner ${statusClass}" style="margin-bottom: 12px;">${data.multiplier.toFixed(2)}x Payout</div>
-            <div class="slot-container">
-              ${data.result[1].map(s => `<div class="slot-reel"><span>${s}</span></div>`).join('')}
-            </div>
-          </div>`;
-        actionBtn.disabled = false;
-        state.isProcessing = false;
-        updateProvablyFairHash(data.provablyFair?.serverSeedHash);
-      }, 300);
-    }, 1200);
-
-  } catch (err) {
-    alert(err.message || 'Slots spin failed');
-    actionBtn.disabled = false;
-    state.isProcessing = false;
-  }
-}
-
 /* --- LIMBO ENGINE --- */
 async function executeLimboBet(betAmount) {
   state.isProcessing = true;
@@ -1296,7 +925,7 @@ async function executeLimboBet(betAmount) {
 
       display.innerHTML = `
         <div style="text-align:center; padding: 30px;">
-          <div style="font-size: 3.5rem; font-weight: 800; color: ${progress === 1 ? (data.win ? '#00e701' : '#ff0055') : '#fff'};">
+          <div style="font-size: 3.5rem; font-weight: 800; color: ${progress === 1 ? (data.win ? '#00e701' : '#ff4d4d') : '#fff'};">
             ${current.toFixed(2)}x
           </div>
           <div style="color:#b1bad2; font-weight:600;">Target: ${targetMultiplier.toFixed(2)}x</div>
@@ -1327,11 +956,7 @@ function updateDiceOdds() {
   const target = parseFloat(document.getElementById('dice-target')?.value || 50);
   const winChance = cond === 'OVER' ? (100 - target) : target;
   const multiplier = winChance > 0 ? (99 / winChance) : 0;
-
-  const label = document.getElementById('dice-win-chance');
-  if (label) {
-    label.textContent = `Chance: ${Math.max(0, winChance).toFixed(2)}% (${multiplier.toFixed(2)}x)`;
-  }
+  // Can be rendered if a feedback element exists
 }
 
 async function executeDiceBet(betAmount) {
@@ -1355,15 +980,13 @@ async function executeDiceBet(betAmount) {
     if (data.win) playSound('win'); else playSound('loss');
 
     const display = document.getElementById('game-display-area');
-    const statusClass = data.win ? 'text-win' : 'text-loss';
-
     display.innerHTML = `
       <div style="text-align:center; padding: 20px;">
-        <div class="round-outcome-banner ${statusClass}" style="margin-bottom: 12px; font-size:2rem;">
+        <div style="font-size:2.5rem; font-weight:800; color:${data.win ? '#00e701' : '#ff4d4d'}; margin-bottom: 12px;">
           Rolled: ${data.details.rolled.toFixed(2)}
         </div>
-        <p style="font-weight: 600; font-size: 1.1rem; color: #b1bad2;">
-          ${data.win ? 'WIN' : 'LOSS'} - Target: ${condition} ${target.toFixed(2)} (${data.multiplier.toFixed(2)}x)
+        <p style="font-weight: 600; color: #b1bad2;">
+          ${data.win ? 'WIN' : 'LOSS'} (${data.multiplier.toFixed(2)}x)
         </p>
       </div>`;
 
@@ -1371,127 +994,6 @@ async function executeDiceBet(betAmount) {
   } catch (err) {
     alert(err.message || 'Dice bet failed');
   } finally {
-    state.isProcessing = false;
-  }
-}
-
-/* --- WHEEL ENGINE --- */
-async function executeWheelBet(betAmount) {
-  state.isProcessing = true;
-  playSound('chip');
-  const risk = document.getElementById('wheel-risk')?.value || 'MEDIUM';
-
-  try {
-    const data = await apiRequest('/api/play/wheel', 'POST', {
-      currency: state.currency,
-      betAmount,
-      params: { risk },
-      clientSeed: state.clientSeed
-    });
-
-    state.balances = data.balances;
-    updateWalletUI();
-    state.nonce++;
-
-    if (data.win) playSound('win'); else playSound('loss');
-
-    const display = document.getElementById('game-display-area');
-    const statusClass = data.win ? 'text-win' : 'text-loss';
-
-    display.innerHTML = `
-      <div style="text-align:center; padding: 20px;">
-        <div class="round-outcome-banner ${statusClass}" style="margin-bottom: 12px; font-size:2rem;">
-          ${data.multiplier.toFixed(2)}x
-        </div>
-        <p style="font-weight: 600; font-size: 1.1rem; color: #b1bad2;">
-          Landed on Segment: ${data.details.segment}
-        </p>
-      </div>`;
-
-    updateProvablyFairHash(data.provablyFair?.serverSeedHash);
-  } catch (err) {
-    alert(err.message || 'Wheel bet failed');
-  } finally {
-    state.isProcessing = false;
-  }
-}
-
-/* --- BACCARAT ENGINE --- */
-async function executeBaccaratRound(betAmount) {
-  state.isProcessing = true;
-  playSound('chip');
-  const target = document.getElementById('baccarat-target')?.value || 'PLAYER';
-  const actionBtn = document.getElementById('btn-primary-action');
-  const display = document.getElementById('game-display-area');
-
-  actionBtn.disabled = true;
-
-  try {
-    const data = await apiRequest('/api/play/baccarat', 'POST', {
-      currency: state.currency,
-      betAmount,
-      params: { target },
-      clientSeed: state.clientSeed
-    });
-
-    state.balances = data.balances;
-    updateWalletUI();
-    state.nonce++;
-
-    display.innerHTML = `<p style="color:#00e701; font-weight:600; text-align:center; padding:20px;">Dealing Cards...</p>`;
-
-    setTimeout(() => {
-      display.innerHTML = `
-        <div class="bj-table-grid">
-          <div class="bj-hand-section">
-            <span class="bj-label">Player Hand</span>
-            ${renderCards([data.details.playerHand[0]])}
-          </div>
-          <div class="bj-hand-section">
-            <span class="bj-label">Banker Hand</span>
-            <div class="cards-row"><div class="card-ui hidden-card">🎴</div></div>
-          </div>
-        </div>`;
-    }, 400);
-
-    setTimeout(() => {
-      display.innerHTML = `
-        <div class="bj-table-grid">
-          <div class="bj-hand-section">
-            <span class="bj-label">Player Hand</span>
-            ${renderCards(data.details.playerHand)}
-          </div>
-          <div class="bj-hand-section">
-            <span class="bj-label">Banker Hand</span>
-            ${renderCards([data.details.bankerHand[0]])}
-          </div>
-        </div>`;
-    }, 800);
-
-    setTimeout(() => {
-      if (data.win) playSound('win'); else playSound('loss');
-      const statusClass = data.win ? 'text-win' : 'text-loss';
-      display.innerHTML = `
-        <div class="bj-table-grid">
-          <div class="round-outcome-banner ${statusClass}">${data.multiplier.toFixed(2)}x - ${data.details.outcome} WIN</div>
-          <div class="bj-hand-section">
-            <span class="bj-label">Player (${data.details.pScore})</span>
-            ${renderCards(data.details.playerHand)}
-          </div>
-          <div class="bj-hand-section">
-            <span class="bj-label">Banker (${data.details.bScore})</span>
-            ${renderCards(data.details.bankerHand)}
-          </div>
-        </div>`;
-
-      actionBtn.disabled = false;
-      state.isProcessing = false;
-      updateProvablyFairHash(data.provablyFair?.serverSeedHash);
-    }, 1200);
-
-  } catch (err) {
-    alert(err.message || 'Baccarat failed');
-    actionBtn.disabled = false;
     state.isProcessing = false;
   }
 }
@@ -1529,7 +1031,6 @@ async function executeStandardBet(betAmount) {
   actionBtn.disabled = true;
 
   const params = {};
-
   if (state.currentGame === 'plinko') {
     params.rows = parseInt(document.getElementById('plinko-rows')?.value || 10);
   } else if (state.currentGame === 'keno') {
@@ -1556,21 +1057,15 @@ async function executeStandardBet(betAmount) {
     if (data.win) playSound('win'); else playSound('loss');
 
     const display = document.getElementById('game-display-area');
-    const statusClass = data.win ? 'text-win' : 'text-loss';
-
-    let html = `
+    display.innerHTML = `
       <div style="text-align:center; padding: 20px;">
-        <div class="round-outcome-banner ${statusClass}" style="margin-bottom: 12px; display:inline-block;">
+        <div style="font-size:2rem; font-weight:800; color:${data.win ? '#00e701' : '#ff4d4d'}; margin-bottom: 12px;">
           ${data.multiplier.toFixed(2)}x
         </div>
-        <p style="font-weight: 600; font-size: 1rem; color: #b1bad2; margin-bottom: 4px;">
-          Payout: ${data.payout ? data.payout.toFixed(2) : '0.00'} ${state.currency}
-        </p>
+        <p style="font-weight: 600; color: #b1bad2;">Payout: ${data.payout ? data.payout.toFixed(2) : '0.00'} ${state.currency}</p>
       </div>`;
 
-    display.innerHTML = html;
     updateProvablyFairHash(data.provablyFair?.serverSeedHash);
-
   } catch (err) {
     alert(err.message || `${state.currentGame} failed`);
   } finally {
@@ -1580,47 +1075,12 @@ async function executeStandardBet(betAmount) {
 }
 
 // ==========================================================================
-// 12. PROFILE, AUXILIARY & MODAL CONTROLLERS
+// 10. PROFILE & MODAL CONTROLLERS
 // ==========================================================================
 
 function openProfileModal() {
   playSound('click');
-  let modal = document.getElementById('modal-profile');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-profile';
-    modal.className = 'modal-backdrop';
-    modal.innerHTML = `
-      <div class="modal-box" style="max-width: 400px;">
-        <div class="modal-header-flex">
-          <h3>👤 User Profile</h3>
-          <button class="x-close" onclick="closeProfileModal()">×</button>
-        </div>
-        <p class="modal-subtitle">Manage your account settings and preferences.</p>
-        <div class="form-group" style="margin: 15px 0;">
-          <label class="form-label">Username / Session Token</label>
-          <input type="text" class="form-input" readonly value="${localStorage.getItem('casino_token') ? 'Authenticated Guest' : 'Standard Guest'}">
-        </div>
-        <div class="form-group" style="margin: 15px 0;">
-          <label class="form-label">Sound FX</label>
-          <button id="btn-toggle-sfx-modal" class="btn-secondary-action btn-full" style="margin-top:5px;">
-            ${state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF'}
-          </button>
-        </div>
-        <div class="modal-actions-flex" style="margin-top: 20px;">
-          <button type="button" onclick="closeProfileModal()" class="btn-play btn-full">Close</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-
-    document.getElementById('btn-toggle-sfx-modal').addEventListener('click', () => {
-      state.sfxEnabled = !state.sfxEnabled;
-      document.getElementById('btn-toggle-sfx-modal').textContent = state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF';
-      const mainAudioBtn = document.getElementById('btn-toggle-sfx');
-      if (mainAudioBtn) mainAudioBtn.textContent = state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF';
-    });
-  }
-  modal.classList.remove('hidden');
+  document.getElementById('modal-profile')?.classList.remove('hidden');
 }
 
 function closeProfileModal() {
@@ -1635,8 +1095,6 @@ function openProvablyFairModal() {
     modal.classList.remove('hidden');
     const hashInput = document.getElementById('pf-modal-server-hash');
     if (hashInput) hashInput.value = state.serverSeedHash || 'Unverified';
-    const clientInput = document.getElementById('pf-modal-client-seed');
-    if (clientInput) clientInput.value = state.clientSeed;
   }
 }
 
@@ -1645,115 +1103,33 @@ function closeProvablyFairModal() {
   document.getElementById('modal-pf')?.classList.add('hidden');
 }
 
-// ==========================================================================
-// 13. MOBILE & NAVIGATION DOM INJECTION / UPGRADE HELPERS
-// ==========================================================================
-
 function injectMobileAndNavigationDOM() {
-  // Check and inject mobile navigation / wallet switcher / modal structures if missing
-  if (!document.getElementById('mobile-nav-bar')) {
-    const navContainer = document.createElement('div');
-    navContainer.id = 'mobile-nav-bar';
-    navContainer.className = 'mobile-nav-bar-container';
-    navContainer.innerHTML = `
-      <button class="nav-item-btn" onclick="showLobby()">🏠 Lobby</button>
-      <button class="nav-item-btn" onclick="openStoreModal()">🪙 Deposit</button>
-      <button class="nav-item-btn" onclick="openRedeemModal()">💸 Redeem</button>
-      <button class="nav-item-btn" onclick="openProfileModal()">👤 Profile</button>
-    `;
-    document.body.appendChild(navContainer);
-  }
-
-  // Ensure store modal exists in DOM
-  if (!document.getElementById('modal-store')) {
-    const storeModal = document.createElement('div');
-    storeModal.id = 'modal-store';
-    storeModal.className = 'modal-backdrop hidden';
-    storeModal.innerHTML = `
-      <div class="modal-box" style="max-width: 500px;">
-        <div class="modal-header-flex">
-          <h3>🪙 Buy Gold Coins & Get Sweeps Coins</h3>
-          <button class="x-close" onclick="closeStoreModal()">×</button>
-        </div>
-        <p class="modal-subtitle">Select a package below to proceed with secure payment:</p>
-        <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 15px 0;">
-          <button class="game-btn-action" onclick="buyCoinPackage('pkg_10')">$10 - 10,000 GC + 10 SC</button>
-          <button class="game-btn-action" onclick="buyCoinPackage('pkg_25')">$25 - 25,000 GC + 25.5 SC</button>
-          <button class="game-btn-action" onclick="buyCoinPackage('pkg_50')">$50 - 50,000 GC + 52 SC</button>
-          <button class="game-btn-action" onclick="buyCoinPackage('pkg_100')">$100 - 100,000 GC + 105 SC</button>
-        </div>
-        <div id="checkout-container" style="margin-top:15px; display:none;"></div>
-      </div>
-    `;
-    document.body.appendChild(storeModal);
-  }
-
-  // Ensure redeem modal exists in DOM
-  if (!document.getElementById('modal-redeem')) {
-    const redeemModal = document.createElement('div');
-    redeemModal.id = 'modal-redeem';
-    redeemModal.className = 'modal-backdrop hidden';
-    redeemModal.innerHTML = `
+  if (!document.getElementById('modal-profile')) {
+    const profileModal = document.createElement('div');
+    profileModal.id = 'modal-profile';
+    profileModal.className = 'modal-backdrop hidden';
+    profileModal.innerHTML = `
       <div class="modal-box" style="max-width: 400px;">
         <div class="modal-header-flex">
-          <h3>💸 Redeem Sweeps Coins (SC)</h3>
-          <button class="x-close" onclick="closeRedeemModal()">×</button>
+          <h3>👤 User Profile</h3>
+          <button class="x-close" onclick="closeProfileModal()">×</button>
         </div>
-        <p class="modal-subtitle">Minimum redemption: 100.00 SC (1 SC = $1 USD)</p>
+        <p class="modal-subtitle">Manage your account settings and preferences.</p>
         <div class="form-group" style="margin: 15px 0;">
-          <label class="form-label">Amount to Redeem</label>
-          <input type="number" id="redeem-input" class="form-input" placeholder="100.00" min="100" step="1">
+          <label class="form-label">Session Status</label>
+          <input type="text" class="form-input" readonly value="Authenticated Guest">
         </div>
         <div class="modal-actions-flex" style="margin-top: 20px;">
-          <button type="button" onclick="submitRedeem()" class="btn-play btn-full">Submit Redemption</button>
+          <button type="button" onclick="closeProfileModal()" class="btn-play btn-full">Close</button>
         </div>
-      </div>
-    `;
-    document.body.appendChild(redeemModal);
-  }
-
-  // Ensure Provably Fair modal exists
-  if (!document.getElementById('modal-pf')) {
-    const pfModal = document.createElement('div');
-    pfModal.id = 'modal-pf';
-    pfModal.className = 'modal-backdrop hidden';
-    pfModal.innerHTML = `
-      <div class="modal-box" style="max-width: 450px;">
-        <div class="modal-header-flex">
-          <h3>🔒 Provably Fair Verification</h3>
-          <button class="x-close" onclick="closeProvablyFairModal()">×</button>
-        </div>
-        <div class="form-group" style="margin: 10px 0;">
-          <label class="form-label">Active Server Seed Hash</label>
-          <input type="text" id="pf-modal-server-hash" class="form-input" readonly>
-        </div>
-        <div class="form-group" style="margin: 10px 0;">
-          <label class="form-label">Your Client Seed</label>
-          <input type="text" id="pf-modal-client-seed" class="form-input" onchange="state.clientSeed=this.value; localStorage.setItem('casino_client_seed', this.value);">
-        </div>
-        <div style="margin-top: 15px;">
-          <button class="btn-secondary-action btn-full" onclick="rotateServerSeed()">Rotate Server Seed</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(pfModal);
+      </div>`;
+    document.body.appendChild(profileModal);
   }
 }
 
 // ==========================================================================
-// 14. UTILITY & EVENT BINDINGS
+// 11. UTILITIES & EVENT BINDINGS
 // ==========================================================================
-
-function renderCards(hand) {
-  if (!Array.isArray(hand)) return '';
-  let html = `<div class="cards-row">`;
-  hand.forEach((c) => {
-    const isRed = c.suit === '♥' || c.suit === '♦';
-    html += `<div class="card-ui ${isRed ? 'red' : ''}">${escapeHTML(String(c.value))}${escapeHTML(c.suit)}</div>`;
-  });
-  html += `</div>`;
-  return html;
-}
 
 function escapeHTML(str) {
   return String(str).replace(/[&<>'"]/g, 
@@ -1768,22 +1144,6 @@ function setupGlobalEventListeners() {
     primaryBtn.addEventListener('click', handlePrimaryAction);
   }
 
-  // Bind profile badge click
-  const userBadge = document.getElementById('user-badge');
-  if (userBadge) {
-    userBadge.style.cursor = 'pointer';
-    userBadge.removeEventListener('click', openProfileModal);
-    userBadge.addEventListener('click', openProfileModal);
-  }
-
-  const clientSeedInput = document.getElementById('pf-client-seed');
-  if (clientSeedInput) {
-    clientSeedInput.addEventListener('change', (e) => {
-      state.clientSeed = e.target.value || generateRandomSeed();
-      localStorage.setItem('casino_client_seed', state.clientSeed);
-    });
-  }
-
   const audioBtn = document.getElementById('btn-toggle-sfx');
   if (audioBtn) {
     audioBtn.addEventListener('click', () => {
@@ -1792,7 +1152,6 @@ function setupGlobalEventListeners() {
     });
   }
 
-  // Dismiss wallet menu on outside click
   document.addEventListener('click', (e) => {
     const container = document.querySelector('.wallet-selector-container');
     if (container && !container.contains(e.target)) {
