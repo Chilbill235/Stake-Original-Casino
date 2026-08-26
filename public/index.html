@@ -30,16 +30,31 @@
     <div class="navbar-center">
       <!-- Wallet & Currency Switcher Container -->
       <div class="wallet-selector-container">
-        <div class="wallet-selector">
+        <div class="wallet-selector" onclick="toggleWalletDropdown(event)">
           <div class="currency-badge-icon" id="curr-tag">GC</div>
           <div class="wallet-balance-wrapper">
             <span class="balance-label">BALANCE</span>
             <span id="balance-val" class="balance-amount">10,000.00</span>
           </div>
-          <select id="currency-select" class="currency-dropdown" aria-label="Select Currency" onchange="switchCurrency(this.value)">
-            <option value="GC">Gold Coins (GC)</option>
-            <option value="SC">Sweeps Coins (SC)</option>
-          </select>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="#b1bad2" style="margin-left: 8px;"><path d="M7 10l5 5 5-5z"/></svg>
+        </div>
+
+        <!-- Dropdown Menu -->
+        <div class="wallet-dropdown-menu hidden" id="wallet-dropdown-menu">
+          <div class="wallet-option" id="wallet-opt-gc" onclick="switchCurrency('GC')">
+            <span class="currency-badge-icon badge-gc">GC</span>
+            <div class="wallet-option-info">
+              <span class="opt-name">Gold Coins</span>
+              <span class="opt-val" id="menu-bal-gc">10,000.00</span>
+            </div>
+          </div>
+          <div class="wallet-option" id="wallet-opt-sc" onclick="switchCurrency('SC')">
+            <span class="currency-badge-icon badge-sc">SC</span>
+            <div class="wallet-option-info">
+              <span class="opt-name">Sweeps Coins</span>
+              <span class="opt-val" id="menu-bal-sc">10.00</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -53,6 +68,7 @@
         <span class="btn-icon">💸</span>
         <span class="btn-text">REDEEM</span>
       </button>
+      <button id="btn-toggle-sfx" class="btn-action" style="background:#14222d; color:#b1bad2; border:1px solid #243542; padding:6px 10px; font-size:0.8rem;">🔊 SFX ON</button>
       <div class="user-profile-badge" id="user-badge" title="User Profile & Settings" onclick="openProfileModal()">
         <div class="avatar-circle">👤</div>
       </div>
@@ -119,74 +135,87 @@
           </div>
         </div>
 
-        <h2 class="section-title">🔥 Stake Originals & Games</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+          <h2 class="section-title" style="margin:0;">🔥 Stake Originals & Games</h2>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" placeholder="Search games..." oninput="searchLobbyGames(this.value)" class="form-input" style="padding:6px 12px; font-size:0.85rem; width:180px;">
+          </div>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+          <button class="btn-secondary-action cat-tab-btn active" data-category="ALL" onclick="filterLobbyGames('ALL')">All Games</button>
+          <button class="btn-secondary-action cat-tab-btn" data-category="ORIGINALS" onclick="filterLobbyGames('ORIGINALS')">Originals</button>
+          <button class="btn-secondary-action cat-tab-btn" data-category="TABLE" onclick="filterLobbyGames('TABLE')">Table Games</button>
+          <button class="btn-secondary-action cat-tab-btn" data-category="SLOTS" onclick="filterLobbyGames('SLOTS')">Slots</button>
+        </div>
         
         <div class="games-grid">
           <!-- Featured Slot Card -->
-          <div class="game-card slot-featured-card" onclick="launchGame('slots')">
+          <div class="game-card slot-featured-card" data-category="SLOTS" onclick="launchGame('slots')">
             <div class="card-badge">POPULAR</div>
             <div class="game-card-icon-wrapper">🎰</div>
-            <h4>Stake Gates</h4>
+            <h4 class="game-card-title">Stake Gates</h4>
             <span class="game-subtext">Multipliers up to 5,000x</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('blackjack')">
+          <div class="game-card" data-category="TABLE" onclick="launchGame('blackjack')">
             <div class="game-card-icon-wrapper">♠️</div>
-            <h4>Blackjack</h4>
+            <h4 class="game-card-title">Blackjack</h4>
             <span class="game-subtext">House Edge 0.5%</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('baccarat')">
+          <div class="game-card" data-category="TABLE" onclick="launchGame('baccarat')">
             <div class="game-card-icon-wrapper">🎴</div>
-            <h4>Baccarat</h4>
+            <h4 class="game-card-title">Baccarat</h4>
             <span class="game-subtext">Player / Banker / Tie</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('dice')">
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('dice')">
             <div class="game-card-icon-wrapper">🎲</div>
-            <h4>Dice</h4>
+            <h4 class="game-card-title">Dice</h4>
             <span class="game-subtext">99% RTP</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('limbo')">
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('limbo')">
             <div class="game-card-icon-wrapper">🚀</div>
-            <h4>Limbo</h4>
+            <h4 class="game-card-title">Limbo</h4>
             <span class="game-subtext">Target up to 1,000,000x</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('plinko')">
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('plinko')">
             <div class="game-card-icon-wrapper">⚪</div>
-            <h4>Plinko</h4>
+            <h4 class="game-card-title">Plinko</h4>
             <span class="game-subtext">Dynamic Row Physics</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('mines')">
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('mines')">
             <div class="game-card-icon-wrapper">💣</div>
-            <h4>Mines</h4>
+            <h4 class="game-card-title">Mines</h4>
             <span class="game-subtext">Grid Cashout Game</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('keno')">
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('keno')">
             <div class="game-card-icon-wrapper">🔢</div>
-            <h4>Keno</h4>
+            <h4 class="game-card-title">Keno</h4>
             <span class="game-subtext">Select up to 10 Numbers</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('wheel')">
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('wheel')">
             <div class="game-card-icon-wrapper">🎡</div>
-            <h4>Wheel</h4>
+            <h4 class="game-card-title">Wheel</h4>
             <span class="game-subtext">Risk Segment Multipliers</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('hilo')">
+          <div class="game-card" data-category="TABLE" onclick="launchGame('hilo')">
             <div class="game-card-icon-wrapper">🃏</div>
-            <h4>Hilo</h4>
+            <h4 class="game-card-title">Hilo</h4>
             <span class="game-subtext">Higher or Lower</span>
           </div>
 
-          <div class="game-card" onclick="launchGame('tower')">
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('tower')">
             <div class="game-card-icon-wrapper">🏰</div>
-            <h4>Tower</h4>
+            <h4 class="game-card-title">Tower</h4>
             <span class="game-subtext">Climb to Max Multiplier</span>
           </div>
         </div>
@@ -239,6 +268,8 @@
           <div class="pf-verifier-footer">
             <span class="pf-label">Active Server Seed Hash:</span>
             <code id="pf-hash" class="pf-hash-code">Unverified</code>
+            <span class="pf-label" style="margin-left:15px;">Nonce:</span>
+            <code id="pf-nonce" class="pf-hash-code">0</code>
           </div>
         </div>
       </div>
@@ -249,6 +280,12 @@
       <div class="bets-header">
         <h3>⚡ Global Bets</h3>
         <span class="live-tag">LIVE</span>
+      </div>
+      <!-- Feed Filter Tabs -->
+      <div style="display:flex; gap:4px; padding:8px 12px; background:#0f171e; border-bottom:1px solid #243542;">
+        <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter('ALL')" style="font-size:0.75rem; padding:4px 8px;">All</button>
+        <button class="btn-secondary-action feed-tab-btn" data-filter="MY_BETS" onclick="setFeedFilter('MY_BETS')" style="font-size:0.75rem; padding:4px 8px;">My Bets</button>
+        <button class="btn-secondary-action feed-tab-btn" data-filter="HIGH_ROLLERS" onclick="setFeedFilter('HIGH_ROLLERS')" style="font-size:0.75rem; padding:4px 8px;">High Rollers</button>
       </div>
       <div class="bets-feed-container">
         <div class="bets-feed-header">
@@ -361,11 +398,15 @@
       </div>
 
       <div class="form-group">
-        <label for="pf-modal-client-seed" class="form-label">Client Seed</label>
-        <input type="text" id="pf-modal-client-seed" class="form-input" value="client_seed_default_stake">
+        <label for="pf-client-seed" class="form-label">Client Seed</label>
+        <input type="text" id="pf-client-seed" class="form-input" value="client_seed_default_stake">
       </div>
 
-      <div class="modal-actions-flex">
+      <div style="margin-top: 15px;">
+        <button type="button" onclick="rotateServerSeed()" class="btn-secondary-action btn-full">Rotate Server Seed</button>
+      </div>
+
+      <div class="modal-actions-flex" style="margin-top: 15px;">
         <button type="button" onclick="closeProvablyFairModal()" class="btn-secondary-action btn-full">Close</button>
       </div>
     </div>
