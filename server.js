@@ -146,6 +146,87 @@ function updateVipAndRakeback(user, scWagered, gcWagered) {
   else user.vipTier = 'Bronze';
 }
 
+/**
+ * Validates a wager end-to-end (currency whitelist, numeric bet, rounding,
+ * balance check). Returns { user, currency, amount } or sends an error
+ * response and returns null.
+ */
+function validateWager(req, res) {
+  const { currency, betAmount } = req.body || {};
+
+  const user = users.get(req.user.id);
+  if (!user) { res.status(404).json({ error: 'User not found.' }); return null; }
+
+  if (currency !== 'GC' && currency !== 'SC') {
+    res.status(400).json({ error: "Invalid currency. Must be 'GC' or 'SC'." });
+    return null;
+  }
+
+  const amount = Number(betAmount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: 'Bet amount must be a positive number.' });
+    return null;
+  }
+
+  const rounded = Math.round(amount * 100) / 100;
+  const balance = currency === 'GC'
+    ? user.gc_balance
+    : user.sc_unplayed + user.sc_played;
+
+  if (rounded > balance) {
+    res.status(400).json({ error: `Insufficient ${currency} balance.` });
+    return null;
+  }
+
+  return { user, currency, amount: rounded };
+}
+
+/** Debits a stake from the correct currency bucket and accrues VIP/rakeback. */
+function debitBet(user, currency, amount) {
+  if (currency === 'GC') {
+    user.gc_balance -= amount;
+    updateVipAndRakeback(user, 0, amount);
+  } else {
+    let remaining = amount;
+    if (user.sc_unplayed >= remaining) {
+      user.sc_unplayed -= remaining;
+    } else {
+      remaining -= user.sc_unplayed;
+      user.sc_unplayed = 0;
+      user.sc_played = Math.max(0, user.sc_played - remaining);
+    }
+    updateVipAndRakeback(user, amount, 0);
+  }
+}
+
+/** Credits winnings to the correct currency bucket. */
+function creditWin(user, currency, amount) {
+  if (currency === 'GC') user.gc_balance += amount;
+  else user.sc_played += amount;
+}
+
+function balancesOf(user) {
+  return { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played };
+}
+
+/**
+ * Loads an ACTIVE game session owned by this user.
+ * Sends the appropriate error response and returns null when invalid.
+ */
+function getOwnedSession(req, res, gameId) {
+  const session = activeSessions.get(gameId);
+  if (!session || !session.active) {
+    res.status(400).json({ error: 'No active game round found for this game ID.' });
+    return null;
+  }
+  if (session.userId !== req.user.id) {
+    res.status(403).json({ error: 'This game session belongs to another player.' });
+    return null;
+  }
+  return session;
+}
+
+
 function getBaccaratCardValue(card) {
   if (['10', 'J', 'Q', 'K'].includes(card.value)) return 0;
   if (card.value === 'A') return 1;
@@ -188,203 +269,7 @@ function getHandScore(hand) {
 // -----------------------------------------------------------------------------
 // 5. GAME ENGINES
 // -----------------------------------------------------------------------------
-const GAMES = {
-  slots: (floats) => {
-    const symbols = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣'];
-    const weights = [0.40, 0.25, 0.18, 0.10, 0.05, 0.02];
-    const grid = [];
-    let idx = 0;
-    
-    for (let r = 0; r < 3; r++) {
-      const row = [];
-      for (let c = 0; c < 3; c++) {
-        const rand = floats[idx++];
-        let sum = 0, sym = symbols[0];
-        for (let i = 0; i < symbols.length; i++) {
-          sum += weights[i];
-          if (rand <= sum) { sym = symbols[i]; break; }
-        }
-        row.push(sym);
-      }
-      grid.push(row);
-    }
-    
-    const lines = [
-      [grid[0][0], grid[0][1], grid[0][2]],
-      [grid[1][0], grid[1][1], grid[1][2]],
-      [grid[2][0], grid[2][1], grid[2][2]],
-      [grid[0][0], grid[1][1], grid[2][2]],
-      [grid[2][0], grid[1][1], grid[0][2]]
-    ];
-    
-    let rawMult = 0;
-    const payouts = { '🍒': 1.5, '🍋': 3, '🍇': 5, '🔔': 10, '💎': 25, '7️⃣': 75 };
-    lines.forEach(line => {
-      if (line[0] === line[1] && line[1] === line[2]) rawMult += payouts[line[0]];
-    });
-
-    const multiplier = parseFloat((rawMult * (1 - HOUSE_EDGE)).toFixed(2));
-    return { win: multiplier > 0, multiplier, details: { grid } };
-  },
-
-  blackjack: (floats) => {
-    const deck = createDeck();
-    for (let i = deck.length - 1; i > 0; i--) {
-      const j = Math.floor(floats[i % floats.length] * (i + 1));
-      [deck[i], deck[j]] = [deck[j], deck[i]];
-    }
-    
-    const playerHand = [deck.pop(), deck.pop()];
-    const dealerHand = [deck.pop(), deck.pop()];
-    
-    let playerScore = getHandScore(playerHand);
-    let dealerScore = getHandScore(dealerHand);
-    
-    while (dealerScore < 17 && deck.length > 0) {
-      dealerHand.push(deck.pop());
-      dealerScore = getHandScore(dealerHand);
-    }
-
-    let multiplier = 0;
-    if (playerScore === 21 && playerHand.length === 2) {
-      multiplier = 2.5 * (1 - HOUSE_EDGE);
-    } else if (playerScore <= 21 && (dealerScore > 21 || playerScore > dealerScore)) {
-      multiplier = 2.0 * (1 - HOUSE_EDGE);
-    } else if (playerScore <= 21 && playerScore === dealerScore) {
-      multiplier = 1.0;
-    }
-
-    return { win: multiplier > 1.0, multiplier: parseFloat(multiplier.toFixed(2)), details: { playerHand, dealerHand, playerScore, dealerScore } };
-  },
-
-  baccarat: (floats, params) => {
-    const betOn = params.target || 'PLAYER';
-    const deck = createDeck();
-    for (let i = deck.length - 1; i > 0; i--) {
-      const j = Math.floor(floats[i % floats.length] * (i + 1));
-      [deck[i], deck[j]] = [deck[j], deck[i]];
-    }
-
-    const playerHand = [deck.pop(), deck.pop()];
-    const bankerHand = [deck.pop(), deck.pop()];
-    let pScore = getBaccaratHandScore(playerHand);
-    let bScore = getBaccaratHandScore(bankerHand);
-
-    if (pScore < 8 && bScore < 8) {
-      let playerThirdVal = null;
-      if (pScore <= 5) {
-        const p3 = deck.pop();
-        playerHand.push(p3);
-        playerThirdVal = getBaccaratCardValue(p3);
-        pScore = getBaccaratHandScore(playerHand);
-      }
-
-      if (playerHand.length === 2) {
-        if (bScore <= 5) bankerHand.push(deck.pop());
-      } else {
-        if (bScore <= 2) bankerHand.push(deck.pop());
-        else if (bScore === 3 && playerThirdVal !== 8) bankerHand.push(deck.pop());
-        else if (bScore === 4 && [2,3,4,5,6,7].includes(playerThirdVal)) bankerHand.push(deck.pop());
-        else if (bScore === 5 && [4,5,6,7].includes(playerThirdVal)) bankerHand.push(deck.pop());
-        else if (bScore === 6 && [6,7].includes(playerThirdVal)) bankerHand.push(deck.pop());
-      }
-      bScore = getBaccaratHandScore(bankerHand);
-    }
-
-    let outcome = 'TIE';
-    if (pScore > bScore) outcome = 'PLAYER';
-    else if (bScore > pScore) outcome = 'BANKER';
-
-    let win = outcome === betOn;
-    let multiplier = 0;
-    if (win) {
-      if (betOn === 'PLAYER') multiplier = 2.0 * (1 - HOUSE_EDGE);
-      if (betOn === 'BANKER') multiplier = 1.95 * (1 - HOUSE_EDGE);
-      if (betOn === 'TIE') multiplier = 8.0;
-    }
-
-    return { win, multiplier: parseFloat(multiplier.toFixed(2)), details: { playerHand, bankerHand, pScore, bScore, outcome } };
-  },
-
-  dice: (floats, params) => {
-    const roll = parseFloat((floats[0] * 100).toFixed(2));
-    const target = params.target || 50;
-    const cond = params.condition || 'OVER';
-    const win = cond === 'OVER' ? roll > target : roll < target;
-    const winProb = cond === 'OVER' ? (100 - target) : target;
-    
-    const multiplier = win ? parseFloat(((100 - (HOUSE_EDGE * 100)) / winProb).toFixed(4)) : 0;
-    return { win, multiplier, details: { rolled: roll, target, cond } };
-  },
-
-  limbo: (floats, params) => {
-    const rawResult = (1 - HOUSE_EDGE) / (1 - floats[0]);
-    const result = parseFloat(rawResult.toFixed(2));
-    const target = params.targetMultiplier || 2.0;
-    const win = result >= target;
-    return { win, multiplier: win ? target : 0, details: { resultMultiplier: result, target } };
-  },
-
-  crash: (floats, params) => {
-    const e = Math.pow(2, 52);
-    const h = Math.floor(floats[0] * e);
-    let crashPoint = 1.0;
-    if (h % 33 !== 0) {
-      crashPoint = parseFloat(((e - h / 50) / (e - h) * (1 - HOUSE_EDGE)).toFixed(2));
-    }
-    const target = params.targetMultiplier || 1.5;
-    const win = crashPoint >= target;
-    return { win, multiplier: win ? target : 0, details: { crashPoint, target } };
-  },
-
-  hilo: (floats, params) => {
-    const deck = createDeck();
-    const currentCardIdx = Math.floor(floats[0] * deck.length);
-    const nextCardIdx = Math.floor(floats[1] * deck.length);
-    const currentCard = deck[currentCardIdx];
-    const nextCard = deck[nextCardIdx];
-
-    const guess = params.guess || 'HIGHER';
-    let win = false;
-    if (guess === 'HIGHER') win = nextCard.score >= currentCard.score;
-    if (guess === 'LOWER') win = nextCard.score <= currentCard.score;
-
-    const multiplier = win ? parseFloat((1.95 * (1 - HOUSE_EDGE)).toFixed(2)) : 0;
-    return { win, multiplier: parseFloat(multiplier.toFixed(2)), details: { currentCard, nextCard, guess } };
-  },
-
-  plinko: (floats) => {
-    let position = 0;
-    for (let r = 0; r < 16; r++) {
-      if (floats[r] > 0.5) position++;
-    }
-    const mults = [100, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3, 0.5, 1, 1.5, 3, 5, 10, 41, 100];
-    const multiplier = parseFloat((mults[position] * (1 - HOUSE_EDGE)).toFixed(2));
-    return { win: multiplier >= 1.0, multiplier, details: { position } };
-  },
-
-  keno: (floats, params) => {
-    const picked = params.selectedNumbers || [1, 5, 10, 15, 20];
-    const pool = Array.from({ length: 40 }, (_, i) => i + 1);
-    const drawn = [];
-    for (let i = 0; i < 10; i++) {
-      const choice = Math.floor(floats[i] * pool.length);
-      drawn.push(pool.splice(choice, 1)[0]);
-    }
-    const matches = picked.filter(n => drawn.includes(n)).length;
-    const payouts = [0, 0, 1.5, 4.0, 10.0, 50.0];
-    const multiplier = parseFloat(((payouts[matches] || 0) * (1 - HOUSE_EDGE)).toFixed(2));
-    return { win: multiplier > 0, multiplier, details: { drawn, matches } };
-  },
-
-  wheel: (floats) => {
-    const segments = [0, 1.5, 1.2, 2.0, 0, 3.0, 1.2, 5.0, 0, 1.5, 2.0, 10.0];
-    const index = Math.floor(floats[0] * segments.length);
-    const multiplier = parseFloat((segments[index] * (1 - HOUSE_EDGE)).toFixed(2));
-    return { win: multiplier > 0, multiplier, details: { index } };
-  }
-};
-
+const { GAMES, GAME_FLOAT_COUNTS } = require('./engine/serverGames');
 // -----------------------------------------------------------------------------
 // 6. EXPRESS APP & MIDDLEWARES
 // -----------------------------------------------------------------------------
@@ -984,265 +869,95 @@ app.post('/api/provably-fair/rotate-seed', verifyToken, (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 10. MINES GAME ENDPOINTS
+// 10. SESSION-BASED GAMES (MINES / TOWER / HILO / BLACKJACK)
 // -----------------------------------------------------------------------------
-app.post('/api/play/mines/start', verifyToken, enforceJurisdiction, (req, res) => {
-  const { currency, betAmount, mineCount } = req.body;
-  const user = users.get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  if (currency === 'GC') {
-    if (user.gc_balance < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient GC balance.' });
-    user.gc_balance -= betAmount;
-    updateVipAndRakeback(user, 0, betAmount);
-  } else {
-    const totalSC = user.sc_unplayed + user.sc_played;
-    if (totalSC < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient SC balance.' });
-    
-    let remainingBet = betAmount;
-    if (user.sc_unplayed >= remainingBet) {
-      user.sc_unplayed -= remainingBet;
-    } else {
-      remainingBet -= user.sc_unplayed;
-      user.sc_unplayed = 0;
-      user.sc_played -= remainingBet;
-    }
-    updateVipAndRakeback(user, betAmount, 0);
-  }
-
-  const seedPair = getUserSeedPair(user.id);
-  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, 25);
-  
-  const board = Array(25).fill('GEM');
-  let bombs = 0;
-  let idx = 0;
-  const count = Math.min(Math.max(mineCount || 3, 1), 24);
-
-  while (bombs < count) {
-    const pos = Math.floor(floats[idx++] * 25);
-    if (board[pos] !== 'BOMB') { board[pos] = 'BOMB'; bombs++; }
-  }
-
-  const gameId = `mines_${crypto.randomUUID()}`;
-  activeSessions.set(gameId, {
-    userId: user.id, currency, betAmount, board, revealed: [], mineCount: count, active: true
-  });
-
-  logTransaction(user.id, 'BET', `Placed bet on Mines (${count} mines)`, currency === 'GC' ? -betAmount : 0, currency === 'SC' ? -betAmount : 0);
-
-  res.json({ gameId, balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }, status: 'ACTIVE' });
+require('./engine/sessionGames').register(app, {
+  HOUSE_EDGE,
+  ProvablyFair,
+  users,
+  activeSessions,
+  getUserSeedPair,
+  logTransaction,
+  broadcastLiveBet,
+  debitBet,
+  creditWin,
+  balancesOf,
+  validateWager,
+  verifyToken
 });
-
-app.post('/api/play/mines/reveal', verifyToken, (req, res) => {
-  const { gameId, tileIndex } = req.body;
-  const session = activeSessions.get(gameId || `${req.user.id}_mines`);
-  if (!session || !session.active) return res.status(400).json({ error: 'No active Mines game found.' });
-  if (session.revealed.includes(tileIndex)) return res.status(400).json({ error: 'Tile already revealed.' });
-
-  if (session.board[tileIndex] === 'BOMB') {
-    session.active = false;
-    return res.json({ win: false, hitBomb: true, board: session.board, multiplier: 0, payout: 0 });
-  }
-
-  session.revealed.push(tileIndex);
-  const gemsFound = session.revealed.length;
-  let mult = 1;
-  for (let i = 0; i < gemsFound; i++) {
-    mult *= (25 - i) / (25 - session.mineCount - i);
-  }
-  mult *= (1 - HOUSE_EDGE);
-
-  res.json({ win: true, hitBomb: false, tileIndex, multiplier: parseFloat(mult.toFixed(2)), gemsFound });
-});
-
-app.post('/api/play/mines/cashout', verifyToken, (req, res) => {
-  const { gameId } = req.body;
-  const session = activeSessions.get(gameId || `${req.user.id}_mines`);
-  if (!session || !session.active || session.revealed.length === 0) return res.status(400).json({ error: 'Cannot cashout.' });
-
-  let mult = 1;
-  for (let i = 0; i < session.revealed.length; i++) {
-    mult *= (25 - i) / (25 - session.mineCount - i);
-  }
-  mult *= (1 - HOUSE_EDGE);
-
-  const user = users.get(req.user.id);
-  const payout = mult * session.betAmount;
-
-  if (session.currency === 'GC') {
-    user.gc_balance += payout;
-  } else {
-    user.sc_played += payout;
-  }
-
-  session.active = false;
-  logTransaction(user.id, 'WIN', `Cashed out Mines @ ${mult.toFixed(2)}x`, session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
-
-  broadcastLiveBet({
-    username: user.username, game: 'MINES', betAmount: session.betAmount, currency: session.currency, multiplier: mult, win: true, payout
-  });
-
-  res.json({ win: true, payout, multiplier: parseFloat(mult.toFixed(2)), balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played } });
-});
-
-// -----------------------------------------------------------------------------
-// 11. TOWER GAME ENDPOINTS
-// -----------------------------------------------------------------------------
-app.post('/api/play/tower/start', verifyToken, enforceJurisdiction, (req, res) => {
-  const { currency, betAmount, difficulty } = req.body;
-  const user = users.get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  if (currency === 'GC') {
-    if (user.gc_balance < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient GC balance.' });
-    user.gc_balance -= betAmount;
-    updateVipAndRakeback(user, 0, betAmount);
-  } else {
-    const totalSC = user.sc_unplayed + user.sc_played;
-    if (totalSC < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient SC balance.' });
-    
-    let remainingBet = betAmount;
-    if (user.sc_unplayed >= remainingBet) {
-      user.sc_unplayed -= remainingBet;
-    } else {
-      remainingBet -= user.sc_unplayed;
-      user.sc_unplayed = 0;
-      user.sc_played -= remainingBet;
-    }
-    updateVipAndRakeback(user, betAmount, 0);
-  }
-
-  const seedPair = getUserSeedPair(user.id);
-  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, 8);
-  
-  const rows = [];
-  const safeCount = difficulty === 'EASY' ? 2 : (difficulty === 'HARD' ? 1 : 1); // Simplified safety configuration
-  for (let i = 0; i < 8; i++) {
-    const winningTile = Math.floor(floats[i] * 3);
-    rows.push(winningTile);
-  }
-
-  const gameId = `tower_${crypto.randomUUID()}`;
-  activeSessions.set(gameId, {
-    userId: user.id, currency, betAmount, rows, currentFloor: 0, active: true, multiplier: 1.00
-  });
-
-  logTransaction(user.id, 'BET', `Placed bet on Tower (${difficulty})`, currency === 'GC' ? -betAmount : 0, currency === 'SC' ? -betAmount : 0);
-
-  res.json({ gameId, balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }, status: 'ACTIVE' });
-});
-
-app.post('/api/play/tower/pick', verifyToken, (req, res) => {
-  const { gameId, tile } = req.body;
-  const session = activeSessions.get(gameId);
-  if (!session || !session.active) return res.status(400).json({ error: 'No active Tower game found.' });
-
-  const winningTile = session.rows[session.currentFloor];
-  if (tile !== winningTile) {
-    session.active = false;
-    return res.json({ win: false, multiplier: 0 });
-  }
-
-  session.currentFloor++;
-  const mult = parseFloat((Math.pow(1.5, session.currentFloor) * (1 - HOUSE_EDGE)).toFixed(2));
-  session.multiplier = mult;
-
-  res.json({ win: true, multiplier: mult, currentFloor: session.currentFloor });
-});
-
-app.post('/api/play/tower/cashout', verifyToken, (req, res) => {
-  const { gameId } = req.body;
-  const session = activeSessions.get(gameId);
-  if (!session || !session.active || session.currentFloor === 0) return res.status(400).json({ error: 'Cannot cash out Tower.' });
-
-  const user = users.get(req.user.id);
-  const payout = session.multiplier * session.betAmount;
-
-  if (session.currency === 'GC') {
-    user.gc_balance += payout;
-  } else {
-    user.sc_played += payout;
-  }
-
-  session.active = false;
-  logTransaction(user.id, 'WIN', `Cashed out Tower @ ${session.multiplier}x`, session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
-
-  broadcastLiveBet({
-    username: user.username, game: 'TOWER', betAmount: session.betAmount, currency: session.currency, multiplier: session.multiplier, win: true, payout
-  });
-
-  res.json({ win: true, payout, multiplier: session.multiplier, balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played } });
-});
-
 // -----------------------------------------------------------------------------
 // 12. GENERAL GAMES EXECUTION ENDPOINT
 // -----------------------------------------------------------------------------
 app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
   const { gameId } = req.params;
-  const { currency, betAmount, params } = req.body;
-  const user = users.get(req.user.id);
 
-  if (!user) return res.status(404).json({ error: 'User not found.' });
   if (!GAMES[gameId]) return res.status(404).json({ error: `Game engine '${gameId}' not supported.` });
-  
-  if (currency === 'GC') {
-    if (user.gc_balance < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient GC balance.' });
-    user.gc_balance -= betAmount;
-    updateVipAndRakeback(user, 0, betAmount);
-  } else {
-    const totalSC = user.sc_unplayed + user.sc_played;
-    if (totalSC < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient SC balance.' });
 
-    let remainingBet = betAmount;
-    if (user.sc_unplayed >= remainingBet) {
-      user.sc_unplayed -= remainingBet;
-    } else {
-      remainingBet -= user.sc_unplayed;
-      user.sc_unplayed = 0;
-      user.sc_played -= remainingBet;
-    }
-    updateVipAndRakeback(user, betAmount, 0);
-  }
+  const wager = validateWager(req, res);
+  if (!wager) return;
+  const { user, currency, amount } = wager;
 
-  logTransaction(user.id, 'BET', `Wagered on ${gameId.toUpperCase()}`, currency === 'GC' ? -betAmount : 0, currency === 'SC' ? -betAmount : 0);
+  debitBet(user, currency, amount);
+  logTransaction(user.id, 'BET', `Wagered on ${gameId.toUpperCase()}`,
+    currency === 'GC' ? -amount : 0, currency === 'SC' ? -amount : 0);
 
   const seedPair = getUserSeedPair(user.id);
-  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, 52);
+  const floatCount = GAME_FLOAT_COUNTS[gameId] || 20;
+  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, floatCount);
 
-  const outcome = GAMES[gameId](floats, params || {});
-  const payout = outcome.multiplier * betAmount;
+  const outcome = GAMES[gameId](floats, req.body.params || {});
+  // Any positive multiplier returns value to the player (partial plinko hits, pushes, etc.)
+  const payout = Math.round(outcome.multiplier * amount * 100) / 100;
 
-  if (outcome.win && payout > 0) {
-    if (currency === 'GC') {
-      user.gc_balance += payout;
-    } else {
-      user.sc_played += payout;
-    }
-    logTransaction(user.id, 'WIN', `Won ${gameId.toUpperCase()} @ ${outcome.multiplier}x`, currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
+  if (payout > 0) {
+    creditWin(user, currency, payout);
+    logTransaction(user.id, outcome.multiplier > 1 ? 'WIN' : 'BET',
+      `${gameId.toUpperCase()} resolved @ ${outcome.multiplier}x`,
+      currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
   }
 
   broadcastLiveBet({
     username: user.username,
     game: gameId.toUpperCase(),
-    betAmount,
+    betAmount: amount,
     currency,
     multiplier: outcome.multiplier,
-    win: outcome.win,
+    win: outcome.multiplier > 1,
     payout
   });
 
   res.json({
     ...outcome,
+    betAmount: amount,
     payout,
     provablyFair: {
       serverSeedHash: ProvablyFair.hashSeed(seedPair.serverSeed),
       clientSeed: seedPair.clientSeed,
       nonce: seedPair.nonce - 1
     },
-    balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
+    balances: balancesOf(user)
   });
 });
 
+// -----------------------------------------------------------------------------
+// 12b. ERROR HANDLING & JSON 404 FALLBACK
+// -----------------------------------------------------------------------------
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Malformed JSON body.' });
+  }
+  console.error('[SERVER ERROR]', err);
+  res.status(500).json({ error: 'Internal server error.' });
+});
+
+// JSON 404 for any unknown API route (never leak an HTML stack page)
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Endpoint not found.' });
+  }
+  res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 // -----------------------------------------------------------------------------
 // 13. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
 // -----------------------------------------------------------------------------
