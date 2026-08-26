@@ -2,19 +2,20 @@
 node_modules/
 jspm_packages/
 
-# Environment variables & secrets
+# Environment files and secrets
 .env
 .env.local
 .env.*.local
 
+# Database or session state files if generated locally
+*.sqlite
+*.sqlite-journal
+
 # Logs and runtime data
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-logs
 *.log
 
-# OS generated files
+# OS files
 .DS_Store
 Thumbs.db
