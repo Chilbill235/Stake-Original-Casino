@@ -21,8 +21,10 @@ const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'AL'];
 
-// Initialize Stripe API
-const stripe = require('stripe')(STRIPE_SECRET_KEY);
+// Initialize Stripe API with pinned API version matching production expectations
+const stripe = require('stripe')(STRIPE_SECRET_KEY, {
+  apiVersion: '2025-02-28.acacia',
+});
 
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
 const COIN_PACKAGES = {
@@ -853,11 +855,10 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
   if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
 
   const host = req.headers.origin || `https://${req.headers.host}`;
-  const mode = uiMode === 'hosted' ? 'hosted' : 'embedded';
+  const mode = uiMode === 'hosted' ? 'hosted' : 'embedded_page';
 
   try {
     const sessionConfig = {
-      payment_method_types: ['card'],
       line_items: [{
         price_data: {
           currency: 'usd',
@@ -875,8 +876,8 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
       }
     };
 
-    if (mode === 'embedded') {
-      sessionConfig.ui_mode = 'embedded';
+    if (mode === 'embedded_page') {
+      sessionConfig.ui_mode = 'embedded_page';
       sessionConfig.return_url = `${host}/?payment=success&session_id={CHECKOUT_SESSION_ID}`;
     } else {
       sessionConfig.success_url = `${host}/?payment=success&session_id={CHECKOUT_SESSION_ID}`;
