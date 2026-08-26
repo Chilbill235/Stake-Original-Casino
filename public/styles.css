@@ -45,7 +45,7 @@ body.dark-theme {
 }
 
 /* ==========================================================================
-   2. NAVBAR & RESPONSIVE HEADER ADAPTATIONS
+   2. NAVBAR & HEADER (FIXED Z-INDEX OVERLAP)
    ========================================================================== */
 .navbar {
   height: 64px;
@@ -57,7 +57,7 @@ body.dark-theme {
   padding: 0 16px;
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 1000; /* Ensures navbar and balance stay above mobile sidebar overlays */
   width: 100%;
 }
 
@@ -223,7 +223,7 @@ body.dark-theme {
   gap: 4px;
   overflow-y: auto;
   transition: var(--transition);
-  z-index: 50;
+  z-index: 500;
 }
 
 .sidebar.collapsed {
@@ -295,7 +295,7 @@ body.dark-theme {
   overflow-y: auto;
   padding: 24px;
   background-color: var(--bg-dark);
-  min-width: 0; /* Prevents flex items from overflowing horizontally */
+  min-width: 0;
 }
 
 /* Live Bets Sidebar */
@@ -552,7 +552,7 @@ body.dark-theme {
 }
 
 /* ==========================================================================
-   5. GAME VIEW & CONTROL DECK (FIXED ALIGNMENT & CONTROLS)
+   5. GAME VIEW & CONTROL DECK
    ========================================================================== */
 .hidden {
   display: none !important;
@@ -631,7 +631,6 @@ body.dark-theme {
   text-align: center;
 }
 
-/* Fixed Control Deck Layout & Elements */
 .game-control-deck {
   background-color: var(--bg-surface);
   border-top: 1px solid var(--border-color);
@@ -673,7 +672,6 @@ body.dark-theme {
   height: 40px;
 }
 
-/* Clean Integrated Betting Bar Layout */
 .bet-bar {
   display: flex;
   gap: 16px;
@@ -1021,11 +1019,11 @@ body.dark-theme {
 }
 
 /* ==========================================================================
-   8. MOBILE RESPONSIVE ADAPTATIONS & NAVBAR FIXES
+   8. MOBILE RESPONSIVE ADAPTATIONS (FIXED OVERLAY & HEADER POSITIONING)
    ========================================================================== */
 @media (max-width: 1024px) {
   .bets-sidebar {
-    display: none; /* Hide live bets feed on smaller screens to maximize play space */
+    display: none;
   }
 }
 
@@ -1043,7 +1041,6 @@ body.dark-theme {
     font-size: 1rem;
   }
 
-  /* Compact Wallet Info on Mobile */
   .wallet-selector-container {
     padding: 2px 4px;
   }
@@ -1057,15 +1054,9 @@ body.dark-theme {
     padding: 2px 4px;
   }
 
-  /* Streamline Action Buttons to fit Navbar seamlessly */
   .btn-action {
     padding: 6px 10px;
     font-size: 0.75rem;
-  }
-
-  /* Hide lengthy text descriptions on small buttons if desired or scale down */
-  .btn-buy-gc, .btn-redeem {
-    border-radius: var(--radius-sm);
   }
 
   .user-profile-badge .avatar-circle {
@@ -1073,13 +1064,14 @@ body.dark-theme {
     height: 30px;
   }
 
-  /* Sidebar Drawer Overlay behavior on Mobile */
+  /* Fixed Mobile Sidebar Positioning: Sits cleanly below the 56px header */
   .sidebar {
     position: fixed;
     top: 56px;
     bottom: 0;
     left: 0;
     box-shadow: 5px 0 15px rgba(0,0,0,0.5);
+    z-index: 900;
   }
 
   .sidebar.collapsed {
