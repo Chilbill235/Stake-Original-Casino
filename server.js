@@ -19,6 +19,8 @@ const PERSONA_WEBHOOK_SECRET = process.env.PERSONA_WEBHOOK_SECRET;
 const HOUSE_EDGE = 0.01; // 1% House Edge (99% RTP)
 const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user
 
+const stripe = require('stripe')(STRIPE_SECRET_KEY);
+
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'AL'];
 
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
