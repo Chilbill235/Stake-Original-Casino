@@ -8,7 +8,7 @@
 // ==========================================================================
 
 const state = {
-  currency: 'GC', // 'GC' (Gold Coins) or 'SC' (Sweeps Coins)
+  currency: localStorage.getItem('casino_currency') || 'GC', // Persistent currency choice
   currentGame: null,
   balances: { gc: 10000.0, sc: 10.0 },
   selectedKenoNumbers: [],
@@ -31,10 +31,10 @@ const state = {
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 function playSound(type) {
-  if (!state.sfxEnabled || audioCtx.state === 'suspended') {
+  if (!state.sfxEnabled) return;
+  if (audioCtx.state === 'suspended') {
     audioCtx.resume();
   }
-  if (!state.sfxEnabled) return;
 
   const now = audioCtx.currentTime;
   const osc = audioCtx.createOscillator();
@@ -56,8 +56,8 @@ function playSound(type) {
     case 'win':
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(440, now);
-      osc.frequency.setValueAtTime(554.37, now + 0.1); // C#5
-      osc.frequency.setValueAtTime(659.25, now + 0.2); // E5
+      osc.frequency.setValueAtTime(554.37, now + 0.1);
+      osc.frequency.setValueAtTime(659.25, now + 0.2);
       gain.gain.setValueAtTime(0.2, now);
       gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
       osc.start(now);
@@ -137,10 +137,10 @@ async function initSession() {
       }
     } else {
       const data = await apiRequest('/api/user/me');
-      state.balances = data.balances;
+      if (data.balances) state.balances = data.balances;
     }
   } catch (err) {
-    console.error('[Auth Init Error]:', err);
+    console.warn('[Auth Guest Fallback Mode]: Using local balances.');
   }
 
   updateWalletUI();
@@ -162,7 +162,6 @@ function connectWebSocket() {
   state.ws = new WebSocket(`${protocol}//${window.location.host}`);
 
   state.ws.onopen = () => {
-    console.log('[WS] Connected to live bets stream');
     if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
   };
 
@@ -178,12 +177,10 @@ function connectWebSocket() {
   };
 
   state.ws.onclose = () => {
-    console.warn('[WS] Connection lost. Reconnecting in 3s...');
     state.wsReconnectTimer = setTimeout(connectWebSocket, 3000);
   };
 
   state.ws.onerror = (err) => {
-    console.error('[WS Error]:', err);
     state.ws.close();
   };
 }
@@ -222,38 +219,87 @@ function renderLiveBetRow(data) {
 }
 
 // ==========================================================================
-// 5. WALLET, BET & CURRENCY CONTROLLER
+// 5. WALLET, SWITCHER & CURRENCY CONTROLLER
 // ==========================================================================
 
 function updateWalletUI() {
   const tag = document.getElementById('curr-tag');
   const val = document.getElementById('balance-val');
-  if (!tag || !val) return;
+  const optionGc = document.getElementById('wallet-opt-gc');
+  const optionSc = document.getElementById('wallet-opt-sc');
+  const balanceGcMenu = document.getElementById('menu-bal-gc');
+  const balanceScMenu = document.getElementById('menu-bal-sc');
+
+  const formattedGc = Number(state.balances.gc || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const formattedSc = Number(state.balances.sc || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+
+  if (balanceGcMenu) balanceGcMenu.textContent = formattedGc;
+  if (balanceScMenu) balanceScMenu.textContent = formattedSc;
 
   if (state.currency === 'GC') {
-    tag.textContent = 'GC';
-    tag.style.background = '#ffb703';
-    tag.style.color = '#000';
-    val.textContent = Number(state.balances.gc || 0).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+    if (tag) {
+      tag.textContent = 'GC';
+      tag.className = 'currency-badge-icon badge-gc';
+    }
+    if (val) val.textContent = formattedGc;
+    if (optionGc) optionGc.classList.add('active');
+    if (optionSc) optionSc.classList.remove('active');
   } else {
-    tag.textContent = 'SC';
-    tag.style.background = '#00e701';
-    tag.style.color = '#000';
-    val.textContent = Number(state.balances.sc || 0).toFixed(2);
+    if (tag) {
+      tag.textContent = 'SC';
+      tag.className = 'currency-badge-icon badge-sc';
+    }
+    if (val) val.textContent = formattedSc;
+    if (optionSc) optionSc.classList.add('active');
+    if (optionGc) optionGc.classList.remove('active');
   }
+
+  validateBetInputBounds();
+}
+
+function toggleWalletDropdown(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('wallet-dropdown-menu');
+  if (menu) {
+    menu.classList.toggle('hidden');
+    playSound('click');
+  }
+}
+
+function closeWalletDropdown() {
+  const menu = document.getElementById('wallet-dropdown-menu');
+  if (menu) menu.classList.add('hidden');
 }
 
 function switchCurrency(currency) {
   if (state.isProcessing) return;
   if (state.activeGameState) {
-    return alert('Cannot switch currency while an active game is in progress.');
+    closeWalletDropdown();
+    return alert('Cannot switch currency while an active game round is in progress.');
   }
+
   playSound('click');
   state.currency = currency;
+  localStorage.setItem('casino_currency', currency);
   updateWalletUI();
+  closeWalletDropdown();
+}
+
+function validateBetInputBounds() {
+  const input = document.getElementById('bet-input');
+  if (!input) return;
+  const currentBet = parseFloat(input.value) || 0;
+  const maxBalance = state.currency === 'GC' ? state.balances.gc : state.balances.sc;
+
+  if (currentBet > maxBalance) {
+    input.value = maxBalance > 0 ? maxBalance.toFixed(2) : '1.00';
+  }
 }
 
 function adjustBet(action) {
@@ -269,11 +315,11 @@ function adjustBet(action) {
   } else if (action === 'DOUBLE') {
     currentBet = Math.min(maxBalance, currentBet * 2);
   } else if (action === 'MAX') {
-    currentBet = maxBalance;
+    currentBet = Math.max(0.01, maxBalance);
   } else if (action === '25%') {
-    currentBet = maxBalance * 0.25;
+    currentBet = Math.max(0.01, maxBalance * 0.25);
   } else if (action === '50%') {
-    currentBet = maxBalance * 0.5;
+    currentBet = Math.max(0.01, maxBalance * 0.5);
   }
 
   input.value = currentBet.toFixed(2);
@@ -564,7 +610,6 @@ function handlePrimaryAction() {
   const betInput = document.getElementById('bet-input');
   const betAmount = parseFloat(betInput?.value || 0);
 
-  // If active multi-step game is in progress, dispatch to its cashout/action handler
   if (state.activeGameState) {
     if (state.currentGame === 'mines') return cashoutMines();
     if (state.currentGame === 'hilo') return cashoutHilo();
@@ -617,8 +662,7 @@ function handlePrimaryAction() {
 // 11. INTERACTIVE GAME ENGINES
 // ==========================================================================
 
-/* --- BLACKJACK (Interactive Multi-Action Engine) --- */
-
+/* --- BLACKJACK --- */
 async function startBlackjackRound(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -727,8 +771,7 @@ function renderBlackjackBoard(data, inProgress) {
   updateProvablyFairHash(data.provablyFair?.serverSeedHash);
 }
 
-/* --- MINES ENGINE (Grid Reveal & Dynamic Multiplier) --- */
-
+/* --- MINES ENGINE --- */
 async function startMinesGame(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -839,8 +882,7 @@ async function cashoutMines() {
   }
 }
 
-/* --- HILO ENGINE (Continuous Pick Loop) --- */
-
+/* --- HILO ENGINE --- */
 async function startHiloGame(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -945,7 +987,6 @@ function renderHiloBoard(card, multiplier, inProgress) {
 }
 
 /* --- TOWER ENGINE --- */
-
 async function startTowerGame(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -1057,7 +1098,6 @@ async function cashoutTower() {
 }
 
 /* --- ANIMATED SLOTS ENGINE --- */
-
 async function executeAnimatedSlots(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -1123,8 +1163,7 @@ async function executeAnimatedSlots(betAmount) {
   }
 }
 
-/* --- LIMBO ENGINE (Animated Multiplier Counter) --- */
-
+/* --- LIMBO ENGINE --- */
 async function executeLimboBet(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -1184,7 +1223,6 @@ async function executeLimboBet(betAmount) {
 }
 
 /* --- DICE ENGINE --- */
-
 function updateDiceOdds() {
   const cond = document.getElementById('dice-cond')?.value || 'OVER';
   const target = parseFloat(document.getElementById('dice-target')?.value || 50);
@@ -1239,7 +1277,6 @@ async function executeDiceBet(betAmount) {
 }
 
 /* --- WHEEL ENGINE --- */
-
 async function executeWheelBet(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -1281,7 +1318,6 @@ async function executeWheelBet(betAmount) {
 }
 
 /* --- BACCARAT ENGINE --- */
-
 async function executeBaccaratRound(betAmount) {
   state.isProcessing = true;
   playSound('chip');
@@ -1362,7 +1398,6 @@ async function executeBaccaratRound(betAmount) {
 }
 
 /* --- KENO BOARD --- */
-
 function renderKenoBoard() {
   let html = '<div style="display:grid; grid-template-columns: repeat(8, 1fr); gap:6px; max-width:360px; margin:auto;" id="keno-board">';
   for (let i = 1; i <= 40; i++) {
@@ -1385,8 +1420,7 @@ function toggleKenoNumber(num) {
   renderKenoBoard();
 }
 
-/* --- STANDARD BET DISPATCHER (Plinko, Keno) --- */
-
+/* --- STANDARD BET DISPATCHER --- */
 async function executeStandardBet(betAmount) {
   if (!state.currentGame) return;
 
@@ -1474,7 +1508,6 @@ function setupGlobalEventListeners() {
     primaryBtn.addEventListener('click', handlePrimaryAction);
   }
 
-  // Client seed change listener
   const clientSeedInput = document.getElementById('pf-client-seed');
   if (clientSeedInput) {
     clientSeedInput.addEventListener('change', (e) => {
@@ -1483,7 +1516,6 @@ function setupGlobalEventListeners() {
     });
   }
 
-  // Audio toggle button
   const audioBtn = document.getElementById('btn-toggle-sfx');
   if (audioBtn) {
     audioBtn.addEventListener('click', () => {
@@ -1491,6 +1523,14 @@ function setupGlobalEventListeners() {
       audioBtn.textContent = state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF';
     });
   }
+
+  // Dismiss wallet menu on outside click
+  document.addEventListener('click', (e) => {
+    const container = document.querySelector('.wallet-selector-container');
+    if (container && !container.contains(e.target)) {
+      closeWalletDropdown();
+    }
+  });
 }
 
 window.addEventListener('DOMContentLoaded', initSession);
