@@ -6,97 +6,72 @@ const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const path = require('path');
+const cors = require('cors');
 
-// Initialize Stripe from Environment Variables
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-
-const app = express();
-const server = http.createServer(app);
-
-// Safe WebSocket initialization (handles serverless environments gracefully)
-let wss;
-try {
-  wss = new WebSocket.Server({ server });
-} catch (e) {
-  wss = { clients: [] };
-}
-
+// -----------------------------------------------------------------------------
+// 1. CONFIGURATION & CONSTANTS
+// -----------------------------------------------------------------------------
+const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const HOUSE_EDGE = 0.01; // 1% House Edge (99% RTP)
+const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user
 
-// In-Memory Database (Store connected Stripe accounts per user)
-const users = new Map();
-users.set(1, { 
-  id: 1, 
-  username: 'Guest_1001', 
-  gc_balance: 10000.0, 
-  sc_balance: 100.0, 
-  stripeAccountId: null 
-});
+const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'AL'];
 
-// Active Game Sessions
-const activeSessions = new Map();
+// Initialize Stripe API
+const stripe = require('stripe')(STRIPE_SECRET_KEY);
 
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
 const COIN_PACKAGES = {
   'pack_10': { name: '10,000 GC + 10 Free SC', priceInCents: 1000, gcAmount: 10000, scAmount: 10 },
   'pack_20': { name: '20,000 GC + 20 Free SC', priceInCents: 2000, gcAmount: 20000, scAmount: 20 },
-  'pack_50': { name: '50,000 GC + 50 Free SC', priceInCents: 5000, gcAmount: 50000, scAmount: 50 }
+  'pack_50': { name: '50,000 GC + 50 Free SC', priceInCents: 5000, gcAmount: 50000, scAmount: 50 },
+  'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 10000, gcAmount: 100000, scAmount: 105 }
 };
 
-// 1. STRIPE WEBHOOK (Must capture raw body BEFORE express.json())
-app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
+// -----------------------------------------------------------------------------
+// 2. IN-MEMORY DATA STORES
+// -----------------------------------------------------------------------------
+const users = new Map();
+const processedEvents = new Set(); 
+const transactions = new Map();   
+const activeSessions = new Map(); 
+const userSeeds = new Map();      
+const amoeRegistry = new Map();   
 
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.error(`Webhook signature verification failed: ${err.message}`);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  // Credit user balances upon successful payment collection
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-
-    if (session.payment_status === 'paid') {
-      const userId = parseInt(session.metadata.userId);
-      const gcAmount = parseFloat(session.metadata.gcAmount);
-      const scAmount = parseFloat(session.metadata.scAmount);
-
-      const user = users.get(userId);
-      if (user) {
-        user.gc_balance += gcAmount;
-        user.sc_balance += scAmount;
-        console.log(`[PAYMENT RECEIVED] Credited User ${userId}: +${gcAmount} GC, +${scAmount} SC`);
-      }
-    }
-  }
-
-  res.json({ received: true });
+// Seed Initial Demo User
+users.set(1, { 
+  id: 1, 
+  username: 'Player_1001', 
+  gc_balance: 10000.0, 
+  sc_unplayed: 100.0, // SC received via purchase/bonus (Must wager 1x)
+  sc_played: 0.0,     // SC won from bets (Redeemable for cash)
+  stripeAccountId: null,
+  lastDailyClaim: 0,
+  dailyStreak: 0,
+  adsWatchedToday: 0,
+  lastAdReset: Date.now(),
+  state: 'CA',
+  vipTier: 'Bronze',
+  totalWageredGC: 0,
+  totalWageredSC: 0,
+  rakebackAccruedSC: 0
 });
+transactions.set(1, []);
 
-// Standard JSON middleware for remaining application routes
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-
-function verifyToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token provided' });
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
-    next();
-  });
-}
-
+// -----------------------------------------------------------------------------
+// 3. PROVABLY FAIR ENGINE
+// -----------------------------------------------------------------------------
 class ProvablyFair {
-  static generateServerSeed() { return crypto.randomBytes(32).toString('hex'); }
-  static hashSeed(seed) { return crypto.createHash('sha256').update(seed).digest('hex'); }
+  static generateServerSeed() { 
+    return crypto.randomBytes(32).toString('hex'); 
+  }
+
+  static hashSeed(seed) { 
+    return crypto.createHash('sha256').update(seed).digest('hex'); 
+  }
   
   static getFloats(serverSeed, clientSeed, nonce, count = 1) {
     const floats = [];
@@ -112,6 +87,63 @@ class ProvablyFair {
     }
     return floats;
   }
+}
+
+// -----------------------------------------------------------------------------
+// 4. HELPER & COMPLIANCE FUNCTIONS
+// -----------------------------------------------------------------------------
+function getUserSeedPair(userId) {
+  if (!userSeeds.has(userId)) {
+    userSeeds.set(userId, {
+      serverSeed: ProvablyFair.generateServerSeed(),
+      clientSeed: 'default_client_seed',
+      nonce: 0
+    });
+  }
+  return userSeeds.get(userId);
+}
+
+function logTransaction(userId, type, description, gcDelta, scDelta) {
+  if (!transactions.has(userId)) transactions.set(userId, []);
+  transactions.get(userId).unshift({
+    id: crypto.randomUUID(),
+    type,
+    description,
+    gcDelta,
+    scDelta,
+    timestamp: new Date().toISOString()
+  });
+}
+
+function updateVipAndRakeback(user, scWagered, gcWagered) {
+  user.totalWageredSC += scWagered;
+  user.totalWageredGC += gcWagered;
+
+  // Accrue SC Rakeback
+  if (scWagered > 0) {
+    user.rakebackAccruedSC += (scWagered * HOUSE_EDGE * RAKEBACK_RATE);
+  }
+
+  // Tier progression based on SC wagered
+  if (user.totalWageredSC >= 100000) user.vipTier = 'Diamond';
+  else if (user.totalWageredSC >= 25000) user.vipTier = 'Platinum';
+  else if (user.totalWageredSC >= 5000) user.vipTier = 'Gold';
+  else if (user.totalWageredSC >= 1000) user.vipTier = 'Silver';
+  else user.vipTier = 'Bronze';
+}
+
+function getBaccaratCardValue(card) {
+  if (['10', 'J', 'Q', 'K'].includes(card.value)) return 0;
+  if (card.value === 'A') return 1;
+  return parseInt(card.value, 10);
+}
+
+function getBaccaratHandScore(hand) {
+  let total = 0;
+  for (let card of hand) {
+    total += getBaccaratCardValue(card);
+  }
+  return total % 10;
 }
 
 function createDeck() {
@@ -139,15 +171,9 @@ function getHandScore(hand) {
   return score;
 }
 
-function getBaccaratHandScore(hand) {
-  let total = 0;
-  for (let card of hand) {
-    let val = card.score === 11 ? 1 : (card.score === 10 ? 0 : card.score);
-    total += val;
-  }
-  return total % 10;
-}
-
+// -----------------------------------------------------------------------------
+// 5. GAME ENGINES
+// -----------------------------------------------------------------------------
 const GAMES = {
   slots: (floats) => {
     const symbols = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣'];
@@ -231,16 +257,22 @@ const GAMES = {
     let bScore = getBaccaratHandScore(bankerHand);
 
     if (pScore < 8 && bScore < 8) {
+      let playerThirdVal = null;
       if (pScore <= 5) {
-        playerHand.push(deck.pop());
+        const p3 = deck.pop();
+        playerHand.push(p3);
+        playerThirdVal = getBaccaratCardValue(p3);
         pScore = getBaccaratHandScore(playerHand);
       }
-      if (bankerHand.length === 2) {
+
+      if (playerHand.length === 2) {
+        if (bScore <= 5) bankerHand.push(deck.pop());
+      } else {
         if (bScore <= 2) bankerHand.push(deck.pop());
-        else if (bScore === 3 && (playerHand[2] ? playerHand[2].score !== 8 : true)) bankerHand.push(deck.pop());
-        else if (bScore === 4 && [2,3,4,5,6,7].includes(playerHand[2]?.score)) bankerHand.push(deck.pop());
-        else if (bScore === 5 && [4,5,6,7].includes(playerHand[2]?.score)) bankerHand.push(deck.pop());
-        else if (bScore === 6 && [6,7].includes(playerHand[2]?.score)) bankerHand.push(deck.pop());
+        else if (bScore === 3 && playerThirdVal !== 8) bankerHand.push(deck.pop());
+        else if (bScore === 4 && [2,3,4,5,6,7].includes(playerThirdVal)) bankerHand.push(deck.pop());
+        else if (bScore === 5 && [4,5,6,7].includes(playerThirdVal)) bankerHand.push(deck.pop());
+        else if (bScore === 6 && [6,7].includes(playerThirdVal)) bankerHand.push(deck.pop());
       }
       bScore = getBaccaratHandScore(bankerHand);
     }
@@ -279,6 +311,34 @@ const GAMES = {
     return { win, multiplier: win ? target : 0, details: { result, target } };
   },
 
+  crash: (floats, params) => {
+    const e = Math.pow(2, 52);
+    const h = Math.floor(floats[0] * e);
+    let crashPoint = 1.0;
+    if (h % 33 !== 0) {
+      crashPoint = parseFloat(((e - h / 50) / (e - h) * (1 - HOUSE_EDGE)).toFixed(2));
+    }
+    const target = params.targetMultiplier || 1.5;
+    const win = crashPoint >= target;
+    return { win, multiplier: win ? target : 0, details: { crashPoint, target } };
+  },
+
+  hilo: (floats, params) => {
+    const deck = createDeck();
+    const currentCardIdx = Math.floor(floats[0] * deck.length);
+    const nextCardIdx = Math.floor(floats[1] * deck.length);
+    const currentCard = deck[currentCardIdx];
+    const nextCard = deck[nextCardIdx];
+
+    const guess = params.guess || 'HIGHER'; // 'HIGHER' or 'LOWER'
+    let win = false;
+    if (guess === 'HIGHER') win = nextCard.score >= currentCard.score;
+    if (guess === 'LOWER') win = nextCard.score <= currentCard.score;
+
+    const multiplier = win ? parseFloat((1.95 * (1 - HOUSE_EDGE)).toFixed(2)) : 0;
+    return { win, multiplier, details: { currentCard, nextCard, guess } };
+  },
+
   plinko: (floats) => {
     let position = 0;
     for (let r = 0; r < 16; r++) {
@@ -311,18 +371,198 @@ const GAMES = {
   }
 };
 
-// API ROUTES
+// -----------------------------------------------------------------------------
+// 6. EXPRESS APP & MIDDLEWARES
+// -----------------------------------------------------------------------------
+const app = express();
+const server = http.createServer(app);
+
+app.use(cors({ origin: true, credentials: true }));
+
+// Geofencing Compliance Middleware
+function enforceJurisdiction(req, res, next) {
+  const userState = req.headers['x-user-state'] || 'CA';
+  if (RESTRICTED_STATES.includes(userState.toUpperCase())) {
+    return res.status(403).json({ 
+      error: `Sweepstakes play is unavailable in your jurisdiction (${userState}).` 
+    });
+  }
+  next();
+}
+
+// Stripe Webhook Endpoint (Raw Body Parser)
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error(`[WEBHOOK ERROR] ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (processedEvents.has(event.id)) {
+    return res.json({ received: true, deduplicated: true });
+  }
+  processedEvents.add(event.id);
+
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+
+    if (session.payment_status === 'paid') {
+      const userId = parseInt(session.metadata.userId);
+      const gcAmount = parseFloat(session.metadata.gcAmount);
+      const scAmount = parseFloat(session.metadata.scAmount);
+
+      const user = users.get(userId);
+      if (user) {
+        user.gc_balance += gcAmount;
+        user.sc_unplayed += scAmount; // Purchased SC is unplayed
+
+        logTransaction(userId, 'PURCHASE', `Purchased ${session.metadata.packageName || 'Coin Package'}`, gcAmount, scAmount);
+
+        sendToUser(userId, {
+          type: 'BALANCE_UPDATE',
+          balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
+          message: `Added ${gcAmount.toLocaleString()} GC and ${scAmount} SC!`
+        });
+      }
+    }
+  }
+
+  res.json({ received: true });
+});
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+function verifyToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Authentication token required.' });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid or expired session token.' });
+    req.user = user;
+    next();
+  });
+}
+
+// -----------------------------------------------------------------------------
+// 7. WEBSOCKET SERVER & HEARTBEAT
+// -----------------------------------------------------------------------------
+const wss = new WebSocket.Server({ noServer: true });
+const connectedClients = new Map();
+
+server.on('upgrade', (request, socket, head) => {
+  const urlParams = new URLSearchParams(request.url.replace(/^[^?]*\?/, ''));
+  const token = urlParams.get('token');
+
+  if (!token) {
+    socket.destroy();
+    return;
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      ws.userId = decoded.id;
+      ws.isAlive = true;
+      wss.emit('connection', ws, request);
+    });
+  });
+});
+
+wss.on('connection', (ws) => {
+  if (!connectedClients.has(ws.userId)) {
+    connectedClients.set(ws.userId, new Set());
+  }
+  connectedClients.get(ws.userId).add(ws);
+
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  ws.on('close', () => {
+    if (connectedClients.has(ws.userId)) {
+      connectedClients.get(ws.userId).delete(ws);
+      if (connectedClients.get(ws.userId).size === 0) {
+        connectedClients.delete(ws.userId);
+      }
+    }
+  });
+});
+
+// Ping interval every 30s to purge dead connections
+const pingInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => clearInterval(pingInterval));
+
+function sendToUser(userId, payload) {
+  const userSockets = connectedClients.get(userId);
+  if (userSockets) {
+    const data = JSON.stringify(payload);
+    userSockets.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) client.send(data);
+    });
+  }
+}
+
+function broadcastLiveBet(betData) {
+  const data = JSON.stringify({ type: 'LIVE_BET', ...betData });
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) client.send(data);
+  });
+}
+
+// -----------------------------------------------------------------------------
+// 8. API ROUTES
+// -----------------------------------------------------------------------------
 
 app.post('/api/auth/guest', (req, res) => {
-  const token = jwt.sign({ id: 1, username: `Guest_${Math.floor(1000 + Math.random() * 9000)}` }, JWT_SECRET);
-  const user = users.get(1);
-  res.json({ token, balances: { gc: user.gc_balance, sc: user.sc_balance } });
+  const guestId = users.size + 1;
+  const username = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+  const newUser = {
+    id: guestId,
+    username,
+    gc_balance: 10000.0,
+    sc_unplayed: 10.0,
+    sc_played: 0.0,
+    stripeAccountId: null,
+    lastDailyClaim: 0,
+    dailyStreak: 0,
+    adsWatchedToday: 0,
+    lastAdReset: Date.now(),
+    state: 'CA',
+    vipTier: 'Bronze',
+    totalWageredGC: 0,
+    totalWageredSC: 0,
+    rakebackAccruedSC: 0
+  };
+  users.set(guestId, newUser);
+  transactions.set(guestId, []);
+
+  const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ 
+    token, 
+    user: { id: newUser.id, username: newUser.username }, 
+    balances: { gc: newUser.gc_balance, sc_unplayed: newUser.sc_unplayed, sc_played: newUser.sc_played } 
+  });
 });
 
 app.get('/api/user/me', verifyToken, async (req, res) => {
-  const user = users.get(req.user.id) || users.get(1);
-  let transfersActive = false;
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User profile not found.' });
 
+  let transfersActive = false;
   if (user.stripeAccountId) {
     try {
       const acc = await stripe.accounts.retrieve(user.stripeAccountId);
@@ -332,84 +572,202 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     }
   }
 
-  res.json({ 
-    balances: { gc: user.gc_balance, sc: user.sc_balance }, 
+  res.json({
+    id: user.id,
+    username: user.username,
+    balances: { 
+      gc: user.gc_balance, 
+      sc_unplayed: user.sc_unplayed, 
+      sc_played: user.sc_played,
+      total_sc: user.sc_unplayed + user.sc_played 
+    },
+    vipTier: user.vipTier,
+    rakebackAccruedSC: user.rakebackAccruedSC,
     hasPayoutAccount: !!user.stripeAccountId,
-    transfersActive
+    transfersActive,
+    dailyBonus: {
+      canClaim: Date.now() - user.lastDailyClaim > 24 * 60 * 60 * 1000,
+      nextClaimMs: Math.max(0, (user.lastDailyClaim + 24 * 60 * 60 * 1000) - Date.now()),
+      streak: user.dailyStreak
+    }
   });
 });
 
-app.post('/api/user/claim-gc', verifyToken, (req, res) => {
-  const user = users.get(req.user.id) || users.get(1);
-  user.gc_balance += 10000;
-  res.json({ balances: { gc: user.gc_balance, sc: user.sc_balance } });
+// AMOE (Alternative Method of Entry - Postal Request Code Generator)
+app.post('/api/user/amoe-code', verifyToken, (req, res) => {
+  const code = `AMOE-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  amoeRegistry.set(code, { userId: req.user.id, issuedAt: Date.now(), redeemed: false });
+  
+  res.json({
+    success: true,
+    amoeCode: code,
+    instructions: 'Write this code on a 4x6 post card along with your account username and mail it to our legal sweepstakes address to claim 5.00 free SC.'
+  });
 });
 
-// Create Stripe Embedded Checkout Session (Dynamic Host Detection for Vercel)
-app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
-  const { packageId } = req.body;
-  const pkg = COIN_PACKAGES[packageId || 'pack_10'];
-
-  if (!pkg) {
-    return res.status(400).json({ error: 'Invalid coin package selected.' });
+// Claim Accrued SC Rakeback
+app.post('/api/user/claim-rakeback', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (user.rakebackAccruedSC <= 0) {
+    return res.status(400).json({ error: 'No rakeback available to claim.' });
   }
 
+  const amount = user.rakebackAccruedSC;
+  user.sc_unplayed += amount;
+  user.rakebackAccruedSC = 0;
+
+  logTransaction(user.id, 'RAKEBACK', `Claimed Rakeback`, 0, amount);
+
+  res.json({
+    success: true,
+    claimed: amount,
+    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+  });
+});
+
+// Daily Bonus Claim Endpoint
+app.post('/api/user/daily-bonus', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const now = Date.now();
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const TWO_DAYS = 48 * 60 * 60 * 1000;
+
+  if (now - user.lastDailyClaim < ONE_DAY) {
+    const remainingMs = (user.lastDailyClaim + ONE_DAY) - now;
+    return res.status(400).json({ error: 'Daily bonus is not ready yet.', nextClaimMs: remainingMs });
+  }
+
+  if (now - user.lastDailyClaim > TWO_DAYS) {
+    user.dailyStreak = 1;
+  } else {
+    user.dailyStreak = (user.dailyStreak || 0) + 1;
+  }
+
+  user.lastDailyClaim = now;
+  const gcReward = 5000 + (user.dailyStreak * 1000);
+  const scReward = 1.00 + (user.dailyStreak * 0.25);
+
+  user.gc_balance += gcReward;
+  user.sc_unplayed += scReward;
+
+  logTransaction(user.id, 'BONUS', `Daily Claim (Day ${user.dailyStreak})`, gcReward, scReward);
+
+  res.json({
+    success: true,
+    claimed: { gc: gcReward, sc: scReward },
+    streak: user.dailyStreak,
+    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+  });
+});
+
+// Rewarded Ad View Endpoint
+app.post('/api/user/rewarded-ad', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const now = Date.now();
+  if (now - user.lastAdReset > 24 * 60 * 60 * 1000) {
+    user.adsWatchedToday = 0;
+    user.lastAdReset = now;
+  }
+
+  if (user.adsWatchedToday >= 10) {
+    return res.status(429).json({ error: 'Daily ad watch limit reached (10/10).' });
+  }
+
+  user.adsWatchedToday += 1;
+  const gcReward = 2500;
+  const scReward = 0.25;
+
+  user.gc_balance += gcReward;
+  user.sc_unplayed += scReward;
+
+  logTransaction(user.id, 'AD_REWARD', `Watched Video Ad (#${user.adsWatchedToday})`, gcReward, scReward);
+
+  res.json({
+    success: true,
+    adsWatchedToday: user.adsWatchedToday,
+    reward: { gc: gcReward, sc: scReward },
+    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
+  });
+});
+
+// Stripe Purchase Endpoint
+app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
+  const { packageId, uiMode } = req.body;
+  const pkg = COIN_PACKAGES[packageId || 'pack_10'];
+
+  if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
+
   const host = req.headers.origin || `https://${req.headers.host}`;
+  const mode = uiMode === 'hosted' ? 'hosted' : 'embedded';
 
   try {
-    const session = await stripe.checkout.sessions.create({
-      ui_mode: 'embedded_page',
+    const sessionConfig = {
       payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: { name: pkg.name },
-            unit_amount: pkg.priceInCents,
-          },
-          quantity: 1,
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          product_data: { name: pkg.name },
+          unit_amount: pkg.priceInCents,
         },
-      ],
+        quantity: 1,
+      }],
       mode: 'payment',
-      return_url: `${host}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         userId: req.user.id.toString(),
+        packageName: pkg.name,
         gcAmount: pkg.gcAmount.toString(),
         scAmount: pkg.scAmount.toString()
       }
-    });
+    };
 
-    res.json({ 
+    if (mode === 'embedded') {
+      sessionConfig.ui_mode = 'embedded';
+      sessionConfig.return_url = `${host}/?payment=success&session_id={CHECKOUT_SESSION_ID}`;
+    } else {
+      sessionConfig.success_url = `${host}/?payment=success&session_id={CHECKOUT_SESSION_ID}`;
+      sessionConfig.cancel_url = `${host}/?payment=cancelled`;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionConfig);
+
+    res.json({
       clientSecret: session.client_secret,
-      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY 
+      url: session.url,
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to create payment checkout session.', details: err.message });
+    res.status(500).json({ error: 'Failed to create checkout session.', details: err.message });
   }
 });
 
-// Withdraw SC Endpoint with Dynamic URLs
+// Withdraw Redeemable Sweeps Coins (SC) Payout Endpoint
 app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
   const { amount } = req.body;
-  const user = users.get(req.user.id) || users.get(1);
+  const user = users.get(req.user.id);
   const host = req.headers.origin || `https://${req.headers.host}`;
 
-  if (isNaN(amount) || amount < 100) {
-    return res.status(400).json({ error: 'Minimum redemption limit is 100.00 Sweeps Coins (SC).' });
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (isNaN(amount) || amount < 50) {
+    return res.status(400).json({ error: 'Minimum redemption limit is 50.00 Sweeps Coins (SC).' });
   }
 
-  if (user.sc_balance < amount) {
-    return res.status(400).json({ error: 'Insufficient Sweeps Coins balance.' });
+  // Strictly enforce 1x Playthrough: Only sc_played can be redeemed
+  if (user.sc_played < amount) {
+    return res.status(400).json({ 
+      error: `Insufficient redeemable balance. You have ${user.sc_played.toFixed(2)} SC eligible for redemption. (Unplayed SC must be wagered 1x first).` 
+    });
   }
 
   try {
     if (!user.stripeAccountId) {
       const account = await stripe.accounts.create({
         type: 'express',
-        capabilities: { 
-          transfers: { requested: true },
-          card_payments: { requested: true }
-        },
+        capabilities: { transfers: { requested: true } },
       });
       user.stripeAccountId = account.id;
     }
@@ -428,7 +786,7 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
       return res.status(200).json({
         requiresOnboarding: true,
         onboardingUrl: accountLink.url,
-        error: 'Your payout account requires setup verification with Stripe before transferring funds.'
+        error: 'Your payout account requires identity verification with Stripe before transferring funds.'
       });
     }
 
@@ -437,56 +795,104 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
       amount: amountInCents,
       currency: 'usd',
       destination: user.stripeAccountId,
-      description: `Sweeps Coins Payout for User #${user.id}`,
+      description: `Sweeps Coins Redemption for User #${user.id}`,
     });
 
-    user.sc_balance -= amount;
+    user.sc_played -= amount;
+    logTransaction(user.id, 'WITHDRAWAL', `Redeemed ${amount} SC ($${amount.toFixed(2)} USD)`, 0, -amount);
 
     res.json({
       success: true,
-      message: `Successfully paid out $${amount.toFixed(2)} USD!`,
+      message: `Successfully transferred $${amount.toFixed(2)} USD!`,
       transferId: transfer.id,
-      balances: { gc: user.gc_balance, sc: user.sc_balance }
+      balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
     });
   } catch (err) {
-    console.error('Stripe Payout Error:', err);
     res.status(500).json({ error: 'Payout transfer failed.', details: err.message });
   }
 });
 
-// Mines & Games Endpoints
-app.post('/api/play/mines/start', verifyToken, (req, res) => {
-  const { currency, betAmount, mineCount } = req.body;
-  const user = users.get(req.user.id) || users.get(1);
-  const balKey = currency === 'GC' ? 'gc_balance' : 'sc_balance';
+// Provably Fair Seed Management
+app.get('/api/provably-fair/seed', verifyToken, (req, res) => {
+  const seeds = getUserSeedPair(req.user.id);
+  res.json({
+    clientSeed: seeds.clientSeed,
+    serverSeedHash: ProvablyFair.hashSeed(seeds.serverSeed),
+    nonce: seeds.nonce
+  });
+});
 
-  if (user[balKey] < betAmount) return res.status(400).json({ error: 'Insufficient balance' });
-
-  user[balKey] -= betAmount;
+app.post('/api/provably-fair/rotate-seed', verifyToken, (req, res) => {
+  const { newClientSeed } = req.body;
+  const seeds = getUserSeedPair(req.user.id);
   
-  const sSeed = ProvablyFair.generateServerSeed();
-  const floats = ProvablyFair.getFloats(sSeed, 'client_seed', Date.now(), 25);
+  const previousServerSeed = seeds.serverSeed;
+  seeds.serverSeed = ProvablyFair.generateServerSeed();
+  if (newClientSeed) seeds.clientSeed = newClientSeed;
+  seeds.nonce = 0;
+
+  res.json({
+    previousServerSeed,
+    newServerSeedHash: ProvablyFair.hashSeed(seeds.serverSeed),
+    newClientSeed: seeds.clientSeed,
+    nonce: seeds.nonce
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 9. MINES GAME ENDPOINTS
+// -----------------------------------------------------------------------------
+app.post('/api/play/mines/start', verifyToken, enforceJurisdiction, (req, res) => {
+  const { currency, betAmount, mineCount } = req.body;
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  if (currency === 'GC') {
+    if (user.gc_balance < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient GC balance.' });
+    user.gc_balance -= betAmount;
+  } else {
+    const totalSC = user.sc_unplayed + user.sc_played;
+    if (totalSC < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient SC balance.' });
+    
+    // Deduct unplayed SC first, then played SC
+    let remainingBet = betAmount;
+    if (user.sc_unplayed >= remainingBet) {
+      user.sc_unplayed -= remainingBet;
+    } else {
+      remainingBet -= user.sc_unplayed;
+      user.sc_unplayed = 0;
+      user.sc_played -= remainingBet;
+    }
+    updateVipAndRakeback(user, betAmount, 0);
+  }
+
+  const seedPair = getUserSeedPair(user.id);
+  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, 25);
   
   const board = Array(25).fill('GEM');
   let bombs = 0;
   let idx = 0;
-  const count = mineCount || 3;
+  const count = Math.min(Math.max(mineCount || 3, 1), 24);
+
   while (bombs < count) {
     const pos = Math.floor(floats[idx++] * 25);
     if (board[pos] !== 'BOMB') { board[pos] = 'BOMB'; bombs++; }
   }
 
-  activeSessions.set(req.user.id + '_mines', {
+  activeSessions.set(`${user.id}_mines`, {
     currency, betAmount, board, revealed: [], mineCount: count, active: true
   });
 
-  res.json({ balances: { gc: user.gc_balance, sc: user.sc_balance }, status: 'ACTIVE' });
+  logTransaction(user.id, 'BET', `Placed bet on Mines (${count} mines)`, currency === 'GC' ? -betAmount : 0, currency === 'SC' ? -betAmount : 0);
+
+  res.json({ balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }, status: 'ACTIVE' });
 });
 
 app.post('/api/play/mines/reveal', verifyToken, (req, res) => {
   const { tileIndex } = req.body;
-  const session = activeSessions.get(req.user.id + '_mines');
-  if (!session || !session.active) return res.status(400).json({ error: 'No active game' });
+  const session = activeSessions.get(`${req.user.id}_mines`);
+  if (!session || !session.active) return res.status(400).json({ error: 'No active Mines game found.' });
+  if (session.revealed.includes(tileIndex)) return res.status(400).json({ error: 'Tile already revealed.' });
 
   if (session.board[tileIndex] === 'BOMB') {
     session.active = false;
@@ -505,8 +911,8 @@ app.post('/api/play/mines/reveal', verifyToken, (req, res) => {
 });
 
 app.post('/api/play/mines/cashout', verifyToken, (req, res) => {
-  const session = activeSessions.get(req.user.id + '_mines');
-  if (!session || !session.active || session.revealed.length === 0) return res.status(400).json({ error: 'Cannot cashout' });
+  const session = activeSessions.get(`${req.user.id}_mines`);
+  if (!session || !session.active || session.revealed.length === 0) return res.status(400).json({ error: 'Cannot cashout.' });
 
   let mult = 1;
   for (let i = 0; i < session.revealed.length; i++) {
@@ -514,65 +920,105 @@ app.post('/api/play/mines/cashout', verifyToken, (req, res) => {
   }
   mult *= (1 - HOUSE_EDGE);
 
-  const user = users.get(req.user.id) || users.get(1);
-  const balKey = session.currency === 'GC' ? 'gc_balance' : 'sc_balance';
+  const user = users.get(req.user.id);
   const payout = mult * session.betAmount;
-  user[balKey] += payout;
+
+  if (session.currency === 'GC') {
+    user.gc_balance += payout;
+  } else {
+    user.sc_played += payout; // All SC winnings are credited as played (redeemable)
+  }
 
   session.active = false;
+  logTransaction(user.id, 'WIN', `Cashed out Mines @ ${mult.toFixed(2)}x`, session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
 
-  const broadcastData = JSON.stringify({
-    type: 'LIVE_BET', username: user.username, game: 'MINES',
-    betAmount: session.betAmount, currency: session.currency, multiplier: mult, win: true, payout
+  broadcastLiveBet({
+    username: user.username, game: 'MINES', betAmount: session.betAmount, currency: session.currency, multiplier: mult, win: true, payout
   });
-  if (wss.clients) {
-    wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(broadcastData); });
-  }
 
-  res.json({ win: true, payout, multiplier: parseFloat(mult.toFixed(2)), balances: { gc: user.gc_balance, sc: user.sc_balance } });
+  res.json({ win: true, payout, multiplier: parseFloat(mult.toFixed(2)), balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played } });
 });
 
-app.post('/api/play/:gameId', verifyToken, (req, res) => {
+// -----------------------------------------------------------------------------
+// 10. GENERAL GAMES EXECUTION ENDPOINT
+// -----------------------------------------------------------------------------
+app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
   const { gameId } = req.params;
   const { currency, betAmount, params } = req.body;
-  const user = users.get(req.user.id) || users.get(1);
+  const user = users.get(req.user.id);
 
-  if (!GAMES[gameId]) return res.status(404).json({ error: 'Game not found' });
-  const balKey = currency === 'GC' ? 'gc_balance' : 'sc_balance';
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (!GAMES[gameId]) return res.status(404).json({ error: `Game engine '${gameId}' not supported.` });
+  
+  if (currency === 'GC') {
+    if (user.gc_balance < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient GC balance.' });
+    user.gc_balance -= betAmount;
+    updateVipAndRakeback(user, 0, betAmount);
+  } else {
+    const totalSC = user.sc_unplayed + user.sc_played;
+    if (totalSC < betAmount || betAmount <= 0) return res.status(400).json({ error: 'Insufficient SC balance.' });
 
-  if (user[balKey] < betAmount) {
-    return res.status(400).json({ error: `Insufficient ${currency} balance.` });
+    // Deduct unplayed SC first, then played SC
+    let remainingBet = betAmount;
+    if (user.sc_unplayed >= remainingBet) {
+      user.sc_unplayed -= remainingBet;
+    } else {
+      remainingBet -= user.sc_unplayed;
+      user.sc_unplayed = 0;
+      user.sc_played -= remainingBet;
+    }
+    updateVipAndRakeback(user, betAmount, 0);
   }
 
-  user[balKey] -= betAmount;
+  logTransaction(user.id, 'BET', `Wagered on ${gameId.toUpperCase()}`, currency === 'GC' ? -betAmount : 0, currency === 'SC' ? -betAmount : 0);
 
-  const sSeed = ProvablyFair.generateServerSeed();
-  const floats = ProvablyFair.getFloats(sSeed, 'client_seed', Date.now(), 52);
+  const seedPair = getUserSeedPair(user.id);
+  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, 52);
 
   const outcome = GAMES[gameId](floats, params || {});
   const payout = outcome.multiplier * betAmount;
 
   if (outcome.win && payout > 0) {
-    user[balKey] += payout;
+    if (currency === 'GC') {
+      user.gc_balance += payout;
+    } else {
+      user.sc_played += payout; // SC won becomes redeemable
+    }
+    logTransaction(user.id, 'WIN', `Won ${gameId.toUpperCase()} @ ${outcome.multiplier}x`, currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
   }
 
-  const broadcastData = JSON.stringify({
-    type: 'LIVE_BET', username: user.username, game: gameId.toUpperCase(),
-    betAmount, currency, multiplier: outcome.multiplier, win: outcome.win, payout
+  broadcastLiveBet({
+    username: user.username,
+    game: gameId.toUpperCase(),
+    betAmount,
+    currency,
+    multiplier: outcome.multiplier,
+    win: outcome.win,
+    payout
   });
-  if (wss.clients) {
-    wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(broadcastData); });
-  }
 
   res.json({
     ...outcome,
     payout,
-    provablyFair: { serverSeedHash: ProvablyFair.hashSeed(sSeed) },
-    balances: { gc: user.gc_balance, sc: user.sc_balance }
+    provablyFair: {
+      serverSeedHash: ProvablyFair.hashSeed(seedPair.serverSeed),
+      clientSeed: seedPair.clientSeed,
+      nonce: seedPair.nonce - 1
+    },
+    balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played }
   });
 });
 
-const PORT = process.env.PORT || 3000;
+// -----------------------------------------------------------------------------
+// 11. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
+// -----------------------------------------------------------------------------
 server.listen(PORT, () => {
-  console.log(`🎰 STAKE CASINO ENGINE ACTIVE: Port ${PORT}`);
+  console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
+});
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
 });
