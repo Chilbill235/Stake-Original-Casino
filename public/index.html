@@ -5,18 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stake Originals — Premium Casino Experience</title>
   <link rel="stylesheet" href="styles.css">
-  <!-- Google Fonts: Plus Jakarta Sans for dark-mode gaming aesthetic -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <!-- Stripe.js SDK -->
   <script src="https://js.stripe.com/v3/"></script>
 </head>
 <body class="dark-theme">
 
-  <!-- ==========================================================================
-       1. TOP NAVIGATION BAR
-       ========================================================================== -->
+  <!-- TOP NAVIGATION BAR -->
   <header class="navbar">
     <div class="navbar-left">
       <button class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle Sidebar">
@@ -28,7 +24,6 @@
     </div>
 
     <div class="navbar-center">
-      <!-- Wallet & Currency Switcher Container -->
       <div class="wallet-selector-container">
         <div class="wallet-selector" onclick="toggleWalletDropdown(event)">
           <div class="currency-badge-icon" id="curr-tag">GC</div>
@@ -39,7 +34,6 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="#b1bad2" style="margin-left: 8px;"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
 
-        <!-- Dropdown Menu -->
         <div class="wallet-dropdown-menu hidden" id="wallet-dropdown-menu">
           <div class="wallet-option" id="wallet-opt-gc" onclick="switchCurrency('GC')">
             <span class="currency-badge-icon badge-gc">GC</span>
@@ -75,18 +69,15 @@
     </div>
   </header>
 
-  <!-- ==========================================================================
-       2. MAIN APPLICATION LAYOUT
-       ========================================================================== -->
+  <!-- MAIN APPLICATION LAYOUT -->
   <div class="main-layout">
     
-    <!-- LEFT SIDEBAR: Game Categories & Originals Navigation -->
+    <!-- LEFT SIDEBAR -->
     <aside class="sidebar" id="main-sidebar">
       <div class="nav-item active" id="nav-lobby" onclick="showLobby()">
         <span class="nav-icon">🏠</span> <span class="nav-label">Lobby</span>
       </div>
       
-      <!-- Featured Category -->
       <div class="nav-section-header">⭐ FEATURED SLOT</div>
       <div class="nav-item slot-highlight-nav" onclick="launchGame('slots')">
         <span class="nav-icon">🎰</span> <span class="nav-label">Stake Gates</span>
@@ -118,10 +109,8 @@
     <!-- CENTER CONTENT STAGE -->
     <main class="content-stage">
       
-      <!-- A. LOBBY VIEW -->
+      <!-- LOBBY VIEW -->
       <div id="view-lobby" class="game-view">
-        
-        <!-- Hero Slot Banner -->
         <div class="hero-slot-banner" onclick="launchGame('slots')">
           <div class="hero-content">
             <div class="hero-badge">FEATURED SLOT</div>
@@ -142,7 +131,6 @@
           </div>
         </div>
 
-        <!-- Filter Tabs -->
         <div style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
           <button class="btn-secondary-action cat-tab-btn active" data-category="ALL" onclick="filterLobbyGames('ALL')">All Games</button>
           <button class="btn-secondary-action cat-tab-btn" data-category="ORIGINALS" onclick="filterLobbyGames('ORIGINALS')">Originals</button>
@@ -151,68 +139,57 @@
         </div>
         
         <div class="games-grid">
-          <!-- Featured Slot Card -->
           <div class="game-card slot-featured-card" data-category="SLOTS" onclick="launchGame('slots')">
             <div class="card-badge">POPULAR</div>
             <div class="game-card-icon-wrapper">🎰</div>
             <h4 class="game-card-title">Stake Gates</h4>
             <span class="game-subtext">Multipliers up to 5,000x</span>
           </div>
-
           <div class="game-card" data-category="TABLE" onclick="launchGame('blackjack')">
             <div class="game-card-icon-wrapper">♠️</div>
             <h4 class="game-card-title">Blackjack</h4>
             <span class="game-subtext">House Edge 0.5%</span>
           </div>
-
           <div class="game-card" data-category="TABLE" onclick="launchGame('baccarat')">
             <div class="game-card-icon-wrapper">🎴</div>
             <h4 class="game-card-title">Baccarat</h4>
             <span class="game-subtext">Player / Banker / Tie</span>
           </div>
-
           <div class="game-card" data-category="ORIGINALS" onclick="launchGame('dice')">
             <div class="game-card-icon-wrapper">🎲</div>
             <h4 class="game-card-title">Dice</h4>
             <span class="game-subtext">99% RTP</span>
           </div>
-
           <div class="game-card" data-category="ORIGINALS" onclick="launchGame('limbo')">
             <div class="game-card-icon-wrapper">🚀</div>
             <h4 class="game-card-title">Limbo</h4>
             <span class="game-subtext">Target up to 1,000,000x</span>
           </div>
-
           <div class="game-card" data-category="ORIGINALS" onclick="launchGame('plinko')">
             <div class="game-card-icon-wrapper">⚪</div>
             <h4 class="game-card-title">Plinko</h4>
             <span class="game-subtext">Dynamic Row Physics</span>
           </div>
-
           <div class="game-card" data-category="ORIGINALS" onclick="launchGame('mines')">
             <div class="game-card-icon-wrapper">💣</div>
             <h4 class="game-card-title">Mines</h4>
             <span class="game-subtext">Grid Cashout Game</span>
           </div>
-
           <div class="game-card" data-category="ORIGINALS" onclick="launchGame('keno')">
             <div class="game-card-icon-wrapper">🔢</div>
             <h4 class="game-card-title">Keno</h4>
             <span class="game-subtext">Select up to 10 Numbers</span>
           </div>
-
           <div class="game-card" data-category="ORIGINALS" onclick="launchGame('wheel')">
             <div class="game-card-icon-wrapper">🎡</div>
             <h4 class="game-card-title">Wheel</h4>
             <span class="game-subtext">Risk Segment Multipliers</span>
           </div>
-
           <div class="game-card" data-category="TABLE" onclick="launchGame('hilo')">
             <div class="game-card-icon-wrapper">🃏</div>
             <h4 class="game-card-title">Hilo</h4>
             <span class="game-subtext">Higher or Lower</span>
           </div>
-
           <div class="game-card" data-category="ORIGINALS" onclick="launchGame('tower')">
             <div class="game-card-icon-wrapper">🏰</div>
             <h4 class="game-card-title">Tower</h4>
@@ -221,7 +198,7 @@
         </div>
       </div>
 
-      <!-- B. ACTIVE GAME VIEW STAGE -->
+      <!-- ACTIVE GAME VIEW STAGE -->
       <div id="view-game" class="game-view hidden">
         <div class="game-header-bar">
           <button class="btn-back" onclick="showLobby()">
@@ -235,18 +212,13 @@
         </div>
 
         <div class="game-stage">
-          <!-- Interactive Game Render Screen -->
           <div class="game-display" id="game-display-area">
             <div class="game-placeholder-text">Select a game to begin</div>
           </div>
 
-          <!-- Control Options & Betting Deck -->
           <div class="game-control-deck">
-            
-            <!-- Game Specific Parameter Selectors -->
             <div id="game-controls-options" class="game-controls-options"></div>
 
-            <!-- Unified Bet Controls Bar -->
             <div class="bet-bar" id="bet-bar">
               <div class="bet-input-wrapper">
                 <label for="bet-input" class="bet-label">BET AMOUNT</label>
@@ -264,7 +236,6 @@
             </div>
           </div>
 
-          <!-- Quick Provably Fair Hash Footer -->
           <div class="pf-verifier-footer">
             <span class="pf-label">Active Server Seed Hash:</span>
             <code id="pf-hash" class="pf-hash-code">Unverified</code>
@@ -281,7 +252,6 @@
         <h3>⚡ Global Bets</h3>
         <span class="live-tag">LIVE</span>
       </div>
-      <!-- Feed Filter Tabs -->
       <div style="display:flex; gap:4px; padding:8px 12px; background:#0f171e; border-bottom:1px solid #243542;">
         <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter('ALL')" style="font-size:0.75rem; padding:4px 8px;">All</button>
         <button class="btn-secondary-action feed-tab-btn" data-filter="MY_BETS" onclick="setFeedFilter('MY_BETS')" style="font-size:0.75rem; padding:4px 8px;">My Bets</button>
@@ -292,18 +262,12 @@
           <span>USER / GAME</span>
           <span>MULT.</span>
         </div>
-        <div class="bets-feed" id="bets-feed">
-          <!-- Real-time bet rows prepended dynamically via WebSocket/JS -->
-        </div>
+        <div class="bets-feed" id="bets-feed"></div>
       </div>
     </aside>
   </div>
 
-  <!-- ==========================================================================
-       3. MODAL DIALOGS
-       ========================================================================== -->
-
-  <!-- Store Modal (Gold Coins Package Purchase via Stripe) -->
+  <!-- MODAL DIALOGS -->
   <div id="modal-store" class="modal-backdrop hidden" aria-modal="true" role="dialog">
     <div class="modal-box store-modal">
       <div class="modal-header-flex">
@@ -313,7 +277,7 @@
       <p class="modal-subtitle">Purchase Gold Coins (GC) and get <strong>FREE bonus Sweeps Coins (SC)</strong>!</p>
 
       <div class="package-list">
-        <div class="package-card" id="card-pack_10" onclick="buyCoinPackage('pack_10')">
+        <div class="package-card" onclick="buyCoinPackage('pack_10')">
           <div class="package-badge">POPULAR</div>
           <div class="package-details">
             <span class="pkg-gc">10,000 Gold Coins</span>
@@ -321,8 +285,7 @@
           </div>
           <button type="button" class="btn-price">$10.00</button>
         </div>
-
-        <div class="package-card" id="card-pack_20" onclick="buyCoinPackage('pack_20')">
+        <div class="package-card" onclick="buyCoinPackage('pack_20')">
           <div class="package-badge best-value">BEST VALUE</div>
           <div class="package-details">
             <span class="pkg-gc">25,000 Gold Coins</span>
@@ -330,67 +293,45 @@
           </div>
           <button type="button" class="btn-price">$20.00</button>
         </div>
-
-        <div class="package-card" id="card-pack_50" onclick="buyCoinPackage('pack_50')">
-          <div class="package-details">
-            <span class="pkg-gc">60,000 Gold Coins</span>
-            <span class="pkg-sc">+ FREE 50.00 Sweeps Coins</span>
-          </div>
-          <button type="button" class="btn-price">$50.00</button>
-        </div>
       </div>
 
-      <!-- Target Container for Stripe Embedded Checkout -->
       <div id="checkout-container" class="checkout-embed-container"></div>
-
       <div class="modal-footer-actions">
         <button type="button" onclick="closeStoreModal()" class="btn-secondary-action">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- Redemption Modal (Sweeps Coins Cashout) -->
   <div id="modal-redeem" class="modal-backdrop hidden" aria-modal="true" role="dialog">
     <div class="modal-box redeem-modal">
       <div class="modal-header-flex">
         <h3>💸 Redeem Sweeps Coins</h3>
         <button class="x-close" onclick="closeRedeemModal()" aria-label="Close Modal">×</button>
       </div>
-      <p class="modal-subtitle">Minimum redemption: <strong>100.00 SC</strong> (1 SC = $1.00 USD cash redemption rate).</p>
+      <p class="modal-subtitle">Minimum redemption: <strong>50.00 SC</strong> (1 SC = $1.00 USD cash redemption rate).</p>
 
       <div class="form-group">
         <label for="redeem-input" class="form-label">Amount to Redeem (SC)</label>
         <div class="input-with-symbol">
-          <span class="input-symbol">SC</span>
-          <input type="number" id="redeem-input" value="100" min="100" class="form-input">
+          <input type="number" id="redeem-input" value="50" min="50" class="form-input">
         </div>
       </div>
 
-      <div class="form-group">
-        <label for="bank-routing-input" class="form-label">Bank Routing Number</label>
-        <input type="text" id="bank-routing-input" placeholder="9-digit routing number" maxlength="9" class="form-input">
-      </div>
-
-      <div class="form-group">
-        <label for="bank-account-input" class="form-label">Bank Account Number</label>
-        <input type="text" id="bank-account-input" placeholder="Account number" class="form-input">
-      </div>
-
-      <div class="modal-actions-flex">
+      <div class="modal-actions-flex" style="margin-top:15px;">
         <button type="button" onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
-        <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action">Cancel</button>
+        <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action" style="margin-top:10px;">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- Provably Fair Verification Modal -->
+  <!-- Provably Fair Verification Modal (Stake-Style Seed Customization) -->
   <div id="modal-pf" class="modal-backdrop hidden" aria-modal="true" role="dialog">
     <div class="modal-box pf-modal">
       <div class="modal-header-flex">
         <h3>🛡️ Provably Fair Verification</h3>
         <button class="x-close" onclick="closeProvablyFairModal()" aria-label="Close Modal">×</button>
       </div>
-      <p class="modal-subtitle">All game outcomes are cryptographically generated using SHA-256 HMAC algorithms.</p>
+      <p class="modal-subtitle">Verify game outcomes and customize your random seeds securely.</p>
       
       <div class="form-group">
         <label for="pf-modal-server-hash" class="form-label">Active Server Seed (Hashed)</label>
@@ -398,8 +339,12 @@
       </div>
 
       <div class="form-group">
-        <label for="pf-client-seed" class="form-label">Client Seed</label>
-        <input type="text" id="pf-client-seed" class="form-input" value="client_seed_default_stake">
+        <label for="pf-client-seed" class="form-label">Client Seed (Customizable)</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="pf-client-seed" class="form-input" value="">
+          <button type="button" onclick="updateClientSeed()" class="btn-secondary-action" style="width:auto; padding:0 12px;">Save</button>
+          <button type="button" onclick="randomizeClientSeed()" class="btn-secondary-action" style="width:auto; padding:0 12px;" title="Randomize">🎲</button>
+        </div>
       </div>
 
       <div style="margin-top: 15px;">
@@ -412,7 +357,6 @@
     </div>
   </div>
 
-  <!-- Application Controller Script -->
   <script src="client.js"></script>
 </body>
 </html>

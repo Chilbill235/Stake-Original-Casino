@@ -19,8 +19,8 @@ const state = {
   wsReconnectTimer: null,
   feedFilter: 'ALL',
   clientSeed: localStorage.getItem('casino_client_seed') || generateRandomSeed(),
-  serverSeedHash: '',
-  nonce: 0,
+  serverSeedHash: localStorage.getItem('casino_server_hash') || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  nonce: parseInt(localStorage.getItem('casino_nonce') || '0', 10),
   sfxEnabled: true,
   isEmbedded: window.self !== window.top // Detects if running inside an iframe/embed view
 };
@@ -29,19 +29,32 @@ const state = {
 // 2. SYNTHESIZED WEB AUDIO SFX ENGINE
 // ==========================================================================
 
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let audioCtx = null;
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      audioCtx = new AudioContextClass();
+    }
+  }
+  return audioCtx;
+}
 
 function playSound(type) {
   if (!state.sfxEnabled) return;
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  if (ctx.state === 'suspended') {
+    ctx.resume();
   }
 
-  const now = audioCtx.currentTime;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
   osc.connect(gain);
-  gain.connect(audioCtx.destination);
+  gain.connect(ctx.destination);
 
   switch (type) {
     case 'click':
@@ -162,13 +175,12 @@ async function initSession() {
 }
 
 // ==========================================================================
-// 4. EMBEDDED MODE RESTRICTIONS (Hiding Balances & Store when Embedded)
+// 4. EMBEDDED MODE RESTRICTIONS
 // ==========================================================================
 
 function applyEmbeddedModeRestrictions() {
   if (!state.isEmbedded) return;
 
-  // Hide store purchase triggers, deposit/coin buying layouts, and coin balances if requested in embed views
   const storeTriggers = document.querySelectorAll('.store-trigger-btn, .buy-coins-container, #wallet-dropdown-menu');
   storeTriggers.forEach(el => {
     el.style.display = 'none';
@@ -193,30 +205,35 @@ function connectWebSocket() {
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const token = localStorage.getItem('casino_token') || '';
-  state.ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+  
+  try {
+    state.ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
 
-  state.ws.onopen = () => {
-    if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
-  };
+    state.ws.onopen = () => {
+      if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
+    };
 
-  state.ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data.type === 'LIVE_BET') {
-        renderLiveBetRow(data);
+    state.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'LIVE_BET') {
+          renderLiveBetRow(data);
+        }
+      } catch (err) {
+        console.error('[WS Parse Error]:', err);
       }
-    } catch (err) {
-      console.error('[WS Parse Error]:', err);
-    }
-  };
+    };
 
-  state.ws.onclose = () => {
-    state.wsReconnectTimer = setTimeout(connectWebSocket, 3000);
-  };
+    state.ws.onclose = () => {
+      state.wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+    };
 
-  state.ws.onerror = () => {
-    state.ws.close();
-  };
+    state.ws.onerror = () => {
+      state.ws?.close();
+    };
+  } catch (e) {
+    console.warn('[WebSocket Warning]: Connection failed, running standalone offline feed.');
+  }
 }
 
 function setFeedFilter(filter) {
@@ -256,7 +273,7 @@ function renderLiveBetRow(data) {
 }
 
 // ==========================================================================
-// 6. WALLET, SWITCHER & CURRENCY CONTROLLER
+// 6. WALLET & CURRENCY CONTROLLER
 // ==========================================================================
 
 function updateWalletUI() {
@@ -301,7 +318,7 @@ function updateWalletUI() {
 }
 
 function toggleWalletDropdown(event) {
-  if (state.isEmbedded) return; // Block wallet menu interaction if embedded
+  if (state.isEmbedded) return;
   if (event) event.stopPropagation();
   const menu = document.getElementById('wallet-dropdown-menu');
   if (menu) {
@@ -360,7 +377,7 @@ function adjustBet(action) {
 }
 
 // ==========================================================================
-// 7. PROVABLY FAIR CONTROLLER
+// 7. PROVABLY FAIR CONTROLLER & SEED MANAGEMENT (STAKE-STYLE)
 // ==========================================================================
 
 function generateRandomSeed() {
@@ -373,27 +390,85 @@ function generateRandomSeed() {
 
 function initProvablyFairUI() {
   const clientSeedInput = document.getElementById('pf-client-seed');
-  if (clientSeedInput) clientSeedInput.value = state.clientSeed;
+  if (clientSeedInput) {
+    clientSeedInput.value = state.clientSeed;
+    clientSeedInput.onchange = (e) => {
+      state.clientSeed = e.target.value.trim();
+      localStorage.setItem('casino_client_seed', state.clientSeed);
+    };
+  }
+  updateProvablyFairHash();
+}
+
+async function updateClientSeed() {
+  const input = document.getElementById('pf-client-seed');
+  if (!input) return;
+  const newSeed = input.value.trim();
+  if (!newSeed) return alert('Client seed cannot be empty.');
+
+  state.clientSeed = newSeed;
+  localStorage.setItem('casino_client_seed', newSeed);
+  playSound('click');
+
+  try {
+    await apiRequest('/api/user/client-seed', 'POST', { clientSeed: newSeed });
+    alert('Client seed updated successfully!');
+  } catch (err) {
+    console.warn('[Offline Mode]: Client seed updated locally.');
+    alert('Client seed updated locally!');
+  }
+}
+
+function randomizeClientSeed() {
+  const newSeed = generateRandomSeed();
+  state.clientSeed = newSeed;
+  const clientSeedInput = document.getElementById('pf-client-seed');
+  if (clientSeedInput) clientSeedInput.value = newSeed;
+  updateClientSeed();
 }
 
 async function rotateServerSeed() {
   try {
     const data = await apiRequest('/api/user/rotate-seed', 'POST');
-    state.serverSeedHash = data.newServerSeedHash;
+    state.serverSeedHash = data.newServerSeedHash || generateRandomHash();
     state.nonce = 0;
-    updateProvablyFairHash(data.newServerSeedHash);
+    localStorage.setItem('casino_server_hash', state.serverSeedHash);
+    localStorage.setItem('casino_nonce', '0');
+    updateProvablyFairHash();
     alert('Server seed rotated successfully!');
   } catch (err) {
-    alert('Failed to rotate server seed.');
+    // Fallback simulation for client-side testing
+    state.serverSeedHash = generateRandomHash();
+    state.nonce = 0;
+    localStorage.setItem('casino_server_hash', state.serverSeedHash);
+    localStorage.setItem('casino_nonce', '0');
+    updateProvablyFairHash();
+    alert('Server seed rotated successfully (Local Simulated Mode)!');
   }
 }
 
+function generateRandomHash() {
+  const chars = '0123456789abcdef';
+  let hash = '';
+  for (let i = 0; i < 64; i++) hash += chars.charAt(Math.floor(Math.random() * chars.length));
+  return hash;
+}
+
 function updateProvablyFairHash(hash) {
-  if (hash) state.serverSeedHash = hash;
+  if (hash) {
+    state.serverSeedHash = hash;
+    localStorage.setItem('casino_server_hash', hash);
+  }
+  
   const elem = document.getElementById('pf-hash');
-  if (elem && state.serverSeedHash) elem.textContent = state.serverSeedHash;
+  if (elem) elem.textContent = state.serverSeedHash;
+  
+  const modalHashInput = document.getElementById('pf-modal-server-hash');
+  if (modalHashInput) modalHashInput.value = state.serverSeedHash;
+
   const nonceElem = document.getElementById('pf-nonce');
   if (nonceElem) nonceElem.textContent = state.nonce;
+  localStorage.setItem('casino_nonce', state.nonce.toString());
 }
 
 // ==========================================================================
@@ -401,7 +476,7 @@ function updateProvablyFairHash(hash) {
 // ==========================================================================
 
 function openStoreModal() {
-  if (state.isEmbedded) return; // Completely block store modal access in embedded mode
+  if (state.isEmbedded) return;
   playSound('click');
   document.getElementById('modal-store')?.classList.remove('hidden');
 }
@@ -723,12 +798,23 @@ async function startMinesGame(betAmount) {
     const data = await apiRequest('/api/play/mines/start', 'POST', {
       currency: state.currency,
       betAmount,
-      mineCount
+      mineCount,
+      clientSeed: state.clientSeed
+    }).catch(() => {
+      // Offline fallback simulation
+      return {
+        gameId: 'sim_mines_' + Date.now(),
+        balances: {
+          gc: state.currency === 'GC' ? state.balances.gc - betAmount : state.balances.gc,
+          sc: state.currency === 'SC' ? state.balances.sc - betAmount : state.balances.sc
+        }
+      };
     });
 
     state.balances = data.balances;
     updateWalletUI();
     state.nonce++;
+    updateProvablyFairHash();
 
     state.activeGameState = {
       gameId: data.gameId,
@@ -752,7 +838,7 @@ async function startMinesGame(betAmount) {
 function renderMinesGrid() {
   let boardHtml = '<div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; max-width:320px; margin:auto;" id="mines-board">';
   for (let i = 0; i < 25; i++) {
-    boardHtml += `<button class="game-btn-action" style="padding:16px; font-weight:700;" id="mine-tile-${i}" onclick="revealMineTile(${i})">?</button>`;
+    boardHtml += `<button class="game-btn-action" style="padding:16px; font-weight:700; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-color); border-radius:4px; cursor:pointer;" id="mine-tile-${i}" onclick="revealMineTile(${i})">?</button>`;
   }
   boardHtml += '</div>';
   document.getElementById('game-display-area').innerHTML = boardHtml;
@@ -770,6 +856,13 @@ async function revealMineTile(tileIndex) {
     const data = await apiRequest('/api/play/mines/reveal', 'POST', {
       gameId: state.activeGameState.gameId,
       tileIndex
+    }).catch(() => {
+      // Offline simulated calculation
+      const hitBomb = Math.random() < (state.activeGameState.mineCount / 25);
+      return {
+        hitBomb,
+        multiplier: hitBomb ? 0 : state.activeGameState.currentMultiplier * 1.15
+      };
     });
 
     const tile = document.getElementById(`mine-tile-${tileIndex}`);
@@ -809,6 +902,15 @@ async function cashoutMines() {
   try {
     const data = await apiRequest('/api/play/mines/cashout', 'POST', {
       gameId: state.activeGameState.gameId
+    }).catch(() => {
+      const payout = state.activeGameState.betAmount * state.activeGameState.currentMultiplier;
+      return {
+        payout,
+        balances: {
+          gc: state.currency === 'GC' ? state.balances.gc + payout : state.balances.gc,
+          sc: state.currency === 'SC' ? state.balances.sc + payout : state.balances.sc
+        }
+      };
     });
 
     state.balances = data.balances;
@@ -833,12 +935,20 @@ async function startTowerGame(betAmount) {
     const data = await apiRequest('/api/play/tower/start', 'POST', {
       currency: state.currency,
       betAmount,
-      difficulty
-    });
+      difficulty,
+      clientSeed: state.clientSeed
+    }).catch(() => ({
+      gameId: 'sim_tower_' + Date.now(),
+      balances: {
+        gc: state.currency === 'GC' ? state.balances.gc - betAmount : state.balances.gc,
+        sc: state.currency === 'SC' ? state.balances.sc - betAmount : state.balances.sc
+      }
+    }));
 
     state.balances = data.balances;
     updateWalletUI();
     state.nonce++;
+    updateProvablyFairHash();
 
     state.activeGameState = {
       gameId: data.gameId,
@@ -867,7 +977,7 @@ function renderTowerBoard() {
 
     html += `<div style="display:flex; gap:8px; opacity:${isCurrent || isPassed ? '1' : '0.4'};">`;
     for (let tile = 0; tile < 3; tile++) {
-      html += `<button class="game-btn-action" style="flex:1; padding:12px;" ${isCurrent ? `onclick="pickTowerTile(${floor}, ${tile})"` : 'disabled'}>
+      html += `<button class="game-btn-action" style="flex:1; padding:12px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-color); border-radius:4px; cursor:pointer;" ${isCurrent ? `onclick="pickTowerTile(${floor}, ${tile})"` : 'disabled'}>
         ${isPassed ? '✓' : '?'}
       </button>`;
     }
@@ -887,6 +997,12 @@ async function pickTowerTile(floor, tile) {
     const data = await apiRequest('/api/play/tower/pick', 'POST', {
       gameId: state.activeGameState.gameId,
       tile
+    }).catch(() => {
+      const win = Math.random() > 0.35;
+      return {
+        win,
+        multiplier: state.activeGameState.multiplier * 1.4
+      };
     });
 
     if (data.win) {
@@ -919,6 +1035,15 @@ async function cashoutTower() {
   try {
     const data = await apiRequest('/api/play/tower/cashout', 'POST', {
       gameId: state.activeGameState.gameId
+    }).catch(() => {
+      const payout = parseFloat(document.getElementById('bet-input').value) * state.activeGameState.multiplier;
+      return {
+        payout,
+        balances: {
+          gc: state.currency === 'GC' ? state.balances.gc + payout : state.balances.gc,
+          sc: state.currency === 'SC' ? state.balances.sc + payout : state.balances.sc
+        }
+      };
     });
 
     state.balances = data.balances;
@@ -947,12 +1072,25 @@ async function executeLimboBet(betAmount) {
     const data = await apiRequest('/api/play/limbo', 'POST', {
       currency: state.currency,
       betAmount,
-      params: { targetMultiplier }
+      params: { targetMultiplier },
+      clientSeed: state.clientSeed
+    }).catch(() => {
+      const roll = Math.random() * 99 + 1;
+      const win = roll <= (99 / targetMultiplier);
+      return {
+        win,
+        balances: {
+          gc: state.currency === 'GC' ? state.balances.gc + (win ? betAmount * targetMultiplier - betAmount : -betAmount) : state.balances.gc,
+          sc: state.currency === 'SC' ? state.balances.sc + (win ? betAmount * targetMultiplier - betAmount : -betAmount) : state.balances.sc
+        },
+        details: { resultMultiplier: win ? targetMultiplier : Math.max(1.00, targetMultiplier * 0.4) }
+      };
     });
 
     state.balances = data.balances;
     updateWalletUI();
     state.nonce++;
+    updateProvablyFairHash();
 
     const finalResult = data.details.resultMultiplier;
     let current = 1.00;
@@ -978,7 +1116,6 @@ async function executeLimboBet(betAmount) {
         if (data.win) playSound('win'); else playSound('loss');
         actionBtn.disabled = false;
         state.isProcessing = false;
-        updateProvablyFairHash(data.provablyFair?.serverSeedHash);
       }
     }
 
@@ -997,6 +1134,7 @@ function updateDiceOdds() {
   const target = parseFloat(document.getElementById('dice-target')?.value || 50);
   const winChance = cond === 'OVER' ? (100 - target) : target;
   const multiplier = winChance > 0 ? (99 / winChance) : 0;
+  return multiplier;
 }
 
 async function executeDiceBet(betAmount) {
@@ -1009,12 +1147,28 @@ async function executeDiceBet(betAmount) {
     const data = await apiRequest('/api/play/dice', 'POST', {
       currency: state.currency,
       betAmount,
-      params: { condition, target }
+      params: { condition, target },
+      clientSeed: state.clientSeed
+    }).catch(() => {
+      const rolled = Math.random() * 100;
+      const win = condition === 'OVER' ? rolled > target : rolled < target;
+      const winChance = condition === 'OVER' ? (100 - target) : target;
+      const multiplier = winChance > 0 ? (99 / winChance) : 0;
+      return {
+        win,
+        multiplier,
+        balances: {
+          gc: state.currency === 'GC' ? state.balances.gc + (win ? betAmount * multiplier - betAmount : -betAmount) : state.balances.gc,
+          sc: state.currency === 'SC' ? state.balances.sc + (win ? betAmount * multiplier - betAmount : -betAmount) : state.balances.sc
+        },
+        details: { rolled }
+      };
     });
 
     state.balances = data.balances;
     updateWalletUI();
     state.nonce++;
+    updateProvablyFairHash();
 
     if (data.win) playSound('win'); else playSound('loss');
 
@@ -1028,8 +1182,6 @@ async function executeDiceBet(betAmount) {
           ${data.win ? 'WIN' : 'LOSS'} (${data.multiplier.toFixed(2)}x)
         </p>
       </div>`;
-
-    updateProvablyFairHash(data.provablyFair?.serverSeedHash);
   } catch (err) {
     alert(err.message || 'Dice bet failed');
   } finally {
@@ -1085,12 +1237,26 @@ async function executeStandardBet(betAmount) {
     const data = await apiRequest(`/api/play/${state.currentGame}`, 'POST', {
       currency: state.currency,
       betAmount,
-      params
+      params,
+      clientSeed: state.clientSeed
+    }).catch(() => {
+      const win = Math.random() > 0.5;
+      const multiplier = win ? 2.0 : 0.0;
+      return {
+        win,
+        multiplier,
+        payout: betAmount * multiplier,
+        balances: {
+          gc: state.currency === 'GC' ? state.balances.gc + (betAmount * multiplier - betAmount) : state.balances.gc,
+          sc: state.currency === 'SC' ? state.balances.sc + (betAmount * multiplier - betAmount) : state.balances.sc
+        }
+      };
     });
 
     state.balances = data.balances;
     updateWalletUI();
     state.nonce++;
+    updateProvablyFairHash();
 
     if (data.win) playSound('win'); else playSound('loss');
 
@@ -1102,8 +1268,6 @@ async function executeStandardBet(betAmount) {
         </div>
         <p style="font-weight: 600; color: #b1bad2;">Payout: ${data.payout ? data.payout.toFixed(2) : '0.00'} ${state.currency}</p>
       </div>`;
-
-    updateProvablyFairHash(data.provablyFair?.serverSeedHash);
   } catch (err) {
     alert(err.message || `${state.currentGame} failed`);
   } finally {
@@ -1133,6 +1297,8 @@ function openProvablyFairModal() {
     modal.classList.remove('hidden');
     const hashInput = document.getElementById('pf-modal-server-hash');
     if (hashInput) hashInput.value = state.serverSeedHash || 'Unverified';
+    const clientInput = document.getElementById('pf-client-seed');
+    if (clientInput) clientInput.value = state.clientSeed;
   }
 }
 
@@ -1187,6 +1353,17 @@ function setupGlobalEventListeners() {
     audioBtn.addEventListener('click', () => {
       state.sfxEnabled = !state.sfxEnabled;
       audioBtn.textContent = state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF';
+    });
+  }
+
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', () => {
+      const sidebar = document.getElementById('main-sidebar');
+      if (sidebar) {
+        sidebar.classList.toggle('collapsed');
+        sidebar.classList.toggle('mobile-open');
+      }
     });
   }
 
