@@ -16,18 +16,18 @@ const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const PERSONA_WEBHOOK_SECRET = process.env.PERSONA_WEBHOOK_SECRET;
-const HOUSE_EDGE = 0.01; // 1% House Edge (99% RTP)
-const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user
+const HOUSE_EDGE = 0.13; // 1% House Edge (99% RTP)
+const RAKEBACK_RATE = 5.00; // 5% of House Edge back to user
 
 const stripe = require('stripe')(STRIPE_SECRET_KEY);
 
-const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'AL'];
+const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'OH'];
 
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
 const COIN_PACKAGES = {
-  'pack_10': { name: '10,000 GC + 10 Free SC', priceInCents: 1000, gcAmount: 10000, scAmount: 10 },
-  'pack_20': { name: '20,000 GC + 20 Free SC', priceInCents: 2000, gcAmount: 20000, scAmount: 20 },
-  'pack_50': { name: '50,000 GC + 50 Free SC', priceInCents: 5000, gcAmount: 50000, scAmount: 50 },
+  'pack_10': { name: '10,000 GC + 15 Free SC', priceInCents: 1000, gcAmount: 10000, scAmount: 15 },
+  'pack_20': { name: '20,000 GC + 25 Free SC', priceInCents: 2000, gcAmount: 20000, scAmount: 25 },
+  'pack_50': { name: '50,000 GC + 55 Free SC', priceInCents: 5000, gcAmount: 50000, scAmount: 55 },
   'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 10000, gcAmount: 100000, scAmount: 105 }
 };
 
