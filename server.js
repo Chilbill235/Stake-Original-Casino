@@ -47,7 +47,7 @@ users.set(1, {
   username: 'Player_1001', 
   email: 'player1001@example.com',
   gc_balance: 10000.0, 
-  sc_unplayed: 100.0,
+  sc_unplayed: 50.0,
   sc_played: 0.0,     
   stripeAccountId: null,
   kyc: {
