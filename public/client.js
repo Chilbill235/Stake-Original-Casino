@@ -1201,10 +1201,9 @@ function renderTowerBoard() {
   }
   html += '</div>';
 
-    display.innerHTML = html;
-    if (winLines.length) playSound('win'); else playSound('loss');
-   }
- }
+  display.innerHTML = html;
+}
+
 async function pickTowerTile(floor, tile) {
   if (state.isProcessing || !state.activeGameState) return;
   state.isProcessing = true;
@@ -1465,7 +1464,7 @@ async function executeStandardBet(betAmount) {
      switch (state.currentGame) {
       case 'slots':    return renderSlotsResult(data.details, data.multiplier);
       case 'plinko':   return renderPlinkoResult(data.details, data.multiplier, data.payout);
-      case 'keno':     return renderKenoResult(data.details);
+       case 'keno':     return renderKenoResult(data.details, data.multiplier, data.payout);
       case 'wheel':    return renderWheelResult(data.details, data.multiplier);
       case 'baccarat': return renderBaccaratResult(data.details, data.payout);
       case 'crash':    return renderCrashResult(data.details, data.win, data.payout);
@@ -1488,8 +1487,9 @@ async function executeStandardBet(betAmount) {
   }
 }
 
-function renderKenoResult(details) {
+function renderKenoResult(details, multiplier, payout) {
   renderKenoBoard({ drawn: details.drawn, locked: true });
+  if (multiplier > 0) playSound('win'); else playSound('loss');
 }
 
 
@@ -1569,6 +1569,7 @@ function renderSlotsResult(details, multiplier) {
       html += '<div style="text-align:center;margin-top:14px;color:#ff4d4d;font-weight:700;">No winning lines</div>';
     }
     display.innerHTML = html;
+    if (winLines.length) playSound('win'); else playSound('loss');
   }
 }
 
