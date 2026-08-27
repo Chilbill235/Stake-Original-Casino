@@ -31,7 +31,7 @@
             <span class="balance-label">BALANCE</span>
             <span id="balance-val" class="balance-amount">10,000.00</span>
           </div>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#b1bad2" style="margin-left: 8px;"><path d="M7 10l5 5 5-5z"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--text-secondary)"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
 
         <div class="wallet-dropdown-menu hidden" id="wallet-dropdown-menu">
@@ -49,6 +49,21 @@
               <span class="opt-val" id="menu-bal-sc">10.00</span>
             </div>
           </div>
+          <div class="wallet-dropdown-divider"></div>
+          <div class="wallet-option" onclick="openStoreModalFromDropdown()">
+            <span class="wallet-opt-icon">🪙</span>
+            <div class="wallet-option-info">
+              <span class="opt-name">Buy Coins</span>
+              <span class="opt-val" style="color:var(--accent-gold);">Deposit</span>
+            </div>
+          </div>
+          <div class="wallet-option" onclick="openRedeemModalFromDropdown()">
+            <span class="wallet-opt-icon">💸</span>
+            <div class="wallet-option-info">
+              <span class="opt-name">Redeem SC</span>
+              <span class="opt-val" style="color:var(--accent-green);">Withdraw</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -62,7 +77,7 @@
         <span class="btn-icon">💸</span>
         <span class="btn-text">REDEEM</span>
       </button>
-      <button id="btn-toggle-sfx" class="btn-action" style="background:#14222d; color:#b1bad2; border:1px solid #243542; padding:6px 10px; font-size:0.8rem;">🔊 SFX ON</button>
+      <button id="btn-toggle-sfx" class="btn-action btn-sfx-toggle">🔊 SFX ON</button>
       <div class="user-profile-badge" id="user-badge" title="User Profile & Settings" onclick="openProfileModal()">
         <div class="avatar-circle">👤</div>
       </div>

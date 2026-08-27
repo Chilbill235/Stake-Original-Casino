@@ -59,12 +59,23 @@ body.dark-theme {
   top: 0;
   z-index: 1000;
   width: 100%;
+  gap: 12px;
 }
 
-.navbar-left, .navbar-right {
+.navbar-left, .navbar-center, .navbar-right {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.navbar-center {
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+
+.navbar-right {
+  flex-shrink: 0;
 }
 
 .sidebar-toggle-btn {
@@ -102,17 +113,23 @@ body.dark-theme {
   background-color: var(--bg-dark);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 4px 8px;
+  padding: 4px 10px;
   display: flex;
   align-items: center;
   cursor: pointer;
   position: relative;
+  height: 38px;
 }
 
 .wallet-selector {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.wallet-selector svg {
+  margin-left: 6px;
+  flex-shrink: 0;
 }
 
 .currency-badge-icon {
@@ -174,6 +191,20 @@ body.dark-theme {
   background-color: var(--bg-card);
 }
 
+.wallet-dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+.wallet-opt-icon {
+  font-size: 1rem;
+  min-width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .wallet-option-info {
   display: flex;
   flex-direction: column;
@@ -222,6 +253,54 @@ body.dark-theme {
 
 .btn-redeem:hover {
   background-color: var(--border-color);
+}
+
+.btn-sfx-toggle {
+  background: var(--bg-dark);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.btn-sfx-toggle:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--accent-gold);
+}
+
+.btn-primary {
+  background: linear-gradient(145deg, var(--accent-green), var(--accent-green-hover));
+  color: #000;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 20px rgba(0, 231, 1, 0.4);
 }
 
 .user-profile-badge .avatar-circle {
@@ -1239,21 +1318,6 @@ body.dark-theme {
   font-weight: 800;
 }
 
-.x-close {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 1.5rem;
-  cursor: pointer;
-  padding: 4px;
-}
-
-.modal-subtitle {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
 /* KYC Status Badges */
 .kyc-badge {
   display: inline-block;
@@ -1431,12 +1495,12 @@ body.dark-theme {
   flex-shrink: 1;
 }
 
-.modal-actions-flex {
-  display: flex;
-  flex-direction: row;
-  gap: 10px;
-  margin-top: auto;
-}
+ .modal-actions-flex {
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+   margin-top: 8px;
+ }
 
 /* Ensure button groups stack on mobile */
 @media (max-width: 500px) {
@@ -1725,13 +1789,24 @@ body.dark-theme {
   }
 
   .modal-box {
-    width: calc(100vw - 24px);
-    max-height: 88vh;
+    width: 100%;
+    max-width: 480px;
+    max-height: 85vh;
     overflow-y: auto;
-    padding: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
   }
 
   .modal-box::before { display: none; }
+
+  .form-group label {
+    font-size: 0.75rem;
+  }
+
+  .form-input, .control-select {
+    height: 44px;
+  }
 
   .store-modal { padding: 16px; }
 
@@ -1753,7 +1828,7 @@ body.dark-theme {
   }
 
   .content-stage {
-    padding-bottom: 24px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
   }
 
   .navbar-center {
@@ -1777,12 +1852,25 @@ body.dark-theme {
     width: 34px;
     height: 34px;
   }
+
+  .navbar-center {
+    max-width: 60%;
+  }
+
+  /* Hide Buy Coins / Redeem from navbar on mobile - in wallet dropdown now */
+  .btn-buy-gc, .btn-redeem {
+    display: none;
+  }
 }
 
 @media (max-width: 480px) {
   #btn-toggle-sfx { display: none; }
   .btn-text { font-size: 0.68rem !important; }
   .games-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
-  .wallet-dropdown-menu { right: -40px; }
+  .wallet-dropdown-menu { right: 0; }
   .pf-verifier-footer { flex-wrap: wrap; gap: 8px; }
+
+  .navbar-center {
+    max-width: 65%;
+  }
 }

@@ -581,9 +581,11 @@ function closeStoreModal() {
 
 function showPackageList() {
   const pkgList = document.querySelector('.package-selection');
+  const summary = document.getElementById('package-summary');
   const checkoutSection = document.getElementById('checkout-section');
   const successSection = document.getElementById('checkout-success');
   if (pkgList) pkgList.classList.remove('hidden');
+  if (summary) summary.classList.add('hidden');
   if (checkoutSection) checkoutSection.classList.add('hidden');
   if (successSection) successSection.classList.add('hidden');
   document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
@@ -1199,9 +1201,10 @@ function renderTowerBoard() {
   }
   html += '</div>';
 
-  display.innerHTML = html;
-}
-
+    display.innerHTML = html;
+    if (winLines.length) playSound('win'); else playSound('loss');
+   }
+ }
 async function pickTowerTile(floor, tile) {
   if (state.isProcessing || !state.activeGameState) return;
   state.isProcessing = true;
@@ -1350,9 +1353,9 @@ async function executeDiceBet(betAmount) {
     updateWalletUI();
     syncFair(data);
 
-    if (data.win) playSound('win'); else playSound('loss');
     renderDiceResult(data.details, data.win);
-  } catch (err) {
+    if (data.win) playSound('win'); else playSound('loss');
+   } catch (err) {
     alert(err.message || 'Dice bet failed');
   } finally {
     state.isProcessing = false;
@@ -1455,13 +1458,11 @@ async function executeStandardBet(betAmount) {
       params
     });
 
-    state.balances = data.balances;
-    updateWalletUI();
-    syncFair(data);
+     state.balances = data.balances;
+     updateWalletUI();
+     syncFair(data);
 
-     if (data.multiplier > 1 || data.pushed) playSound('win'); else playSound('loss');
-
-    switch (state.currentGame) {
+     switch (state.currentGame) {
       case 'slots':    return renderSlotsResult(data.details, data.multiplier);
       case 'plinko':   return renderPlinkoResult(data.details, data.multiplier, data.payout);
       case 'keno':     return renderKenoResult(data.details);
@@ -1548,8 +1549,8 @@ function renderSlotsResult(details, multiplier) {
     }
   }, 60);
 
-  function finishSlots() {
-    const LINES = [
+    function finishSlots() {
+     const LINES = [
       [[0, 0], [0, 1], [0, 2]],
       [[1, 0], [1, 1], [1, 2]],
       [[2, 0], [2, 1], [2, 2]],
@@ -1614,13 +1615,13 @@ function renderPlinkoResult(details, multiplier, payout) {
     buckets += '</div>';
 
     const won = multiplier >= 1;
-    display.innerHTML =
-      '<div style="max-width:520px;margin:auto;text-align:center;">' + buckets +
-      '<div style="margin-top:16px;font-size:2rem;font-weight:900;color:' + (won ? '#00e701' : '#ff4d4d') + ';">' + multiplier.toFixed(2) + 'x</div>' +
-      '<div style="color:#b1bad2;font-size:0.85rem;margin-top:4px;">Payout: ' + Number(payout || 0).toFixed(2) + ' ' + state.currency + '</div>' +
-      '</div>';
-    if (won) playSound('win');
-  }
+     display.innerHTML =
+       '<div style="max-width:520px;margin:auto;text-align:center;">' + buckets +
+       '<div style="margin-top:16px;font-size:2rem;font-weight:900;color:' + (won ? '#00e701' : '#ff4d4d') + ';">' + multiplier.toFixed(2) + 'x</div>' +
+       '<div style="color:#b1bad2;font-size:0.85rem;margin-top:4px;">Payout: ' + Number(payout || 0).toFixed(2) + ' ' + state.currency + '</div>' +
+       '</div>';
+     if (won) playSound('win'); else playSound('loss');
+   }
 }
 
 
@@ -1685,7 +1686,10 @@ function renderBaccaratResult(details, payout) {
     '<div style="text-align:center;color:#b1bad2;font-size:0.85rem;margin-top:4px;">' +
     (outcome === betOn ? 'Payout: ' + Number(payout).toFixed(2) + ' ' + state.currency :
      (outcome === 'TIE' && betOn !== 'TIE' ? 'Tie — your stake was pushed back' : '')) +
-    '</div></div>';
+     '</div></div>';
+   if (outcome === betOn) playSound('win');
+   else if (outcome === 'TIE' && betOn !== 'TIE') playSound('chip');
+   else playSound('loss');
 }
 
 /* --- CRASH RENDERER --- */
@@ -1697,6 +1701,7 @@ function renderCrashResult(details, win, payout) {
     '<div style="color:#b1bad2;font-weight:600;margin-top:6px;">Crashed' + (win ? ' after your ' + details.target.toFixed(2) + 'x target ✓' : ' before your ' + details.target.toFixed(2) + 'x target') + '</div>' +
     (win ? '<div style="margin-top:12px;font-weight:800;color:#00e701;">Paid ' + Number(payout).toFixed(2) + ' ' + state.currency + '</div>' : '') +
     '</div>';
+  if (win) playSound('win'); else playSound('loss');
 }
 
 
@@ -1765,6 +1770,34 @@ async function startBlackjackGame(betAmount) {
     }
   } catch (err) {
     alert(err.message || 'Blackjack failed');
+  } finally {
+    state.isProcessing = false;
+   }
+}
+
+
+/* --- BLACKJACK (interactive HIT / STAND) --- */
+async function blackjackAction(action) {
+  if (state.isProcessing || !state.activeGameState) return;
+  state.isProcessing = true;
+  try {
+    const data = await apiRequest('/api/play/blackjack/' + action, 'POST', {
+      gameId: state.activeGameState.gameId
+    });
+
+    if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+
+    if (data.resolved) {
+      renderBlackjackHands(data.playerHand, data.dealerHand, false,
+        blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+      if (data.multiplier > 1) playSound('win'); else playSound('loss');
+      resetRoundUI('DEAL HAND');
+      state.activeGameState = null;
+    } else {
+      renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+    }
+  } catch (err) {
+    alert(err.message || 'Blackjack ' + action + ' failed');
   } finally {
     state.isProcessing = false;
   }
@@ -2120,6 +2153,20 @@ function confirmAge() {
   if (ag) ag.classList.add('hidden');
   playSound('win');
   openAuthModal();
+}
+
+function closeWalletDropdown() {
+  document.getElementById('wallet-dropdown-menu')?.classList.add('hidden');
+}
+
+function openStoreModalFromDropdown() {
+  closeWalletDropdown();
+  openStoreModal();
+}
+
+function openRedeemModalFromDropdown() {
+  closeWalletDropdown();
+  openRedeemModal();
 }
 
 function openAuthModal() {
