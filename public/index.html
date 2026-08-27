@@ -96,6 +96,7 @@
         <div class="nav-item" onclick="launchGame('wheel')"><span class="nav-icon">🎡</span><span class="nav-label">Wheel</span></div>
         <div class="nav-item" onclick="launchGame('hilo')"><span class="nav-icon">🃏</span><span class="nav-label">Hilo</span></div>
         <div class="nav-item" onclick="launchGame('tower')"><span class="nav-icon">🏰</span><span class="nav-label">Tower</span></div>
+        <div class="nav-item" onclick="launchGame('crash')"><span class="nav-icon">💥</span><span class="nav-label">Crash</span></div>
       </nav>
 
       <div class="sidebar-footer">
@@ -194,6 +195,11 @@
             <div class="game-card-icon-wrapper">🏰</div>
             <h4 class="game-card-title">Tower</h4>
             <span class="game-subtext">Climb to Max Multiplier</span>
+          </div>
+          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('crash')">
+            <div class="game-card-icon-wrapper">💥</div>
+            <h4 class="game-card-title">Crash</h4>
+            <span class="game-subtext">Auto Cashout Target</span>
           </div>
         </div>
       </div>
@@ -300,6 +306,14 @@
           </div>
           <button type="button" class="btn-price">$50.00</button>
         </div>
+        <div class="package-card" onclick="buyCoinPackage('pack_100')">
+          <div class="package-badge best-value">BEST VALUE</div>
+          <div class="package-details">
+            <span class="pkg-gc">100,000 Gold Coins</span>
+            <span class="pkg-sc">+ FREE 105.00 Sweeps Coins</span>
+          </div>
+          <button type="button" class="btn-price">$100.00</button>
+        </div>
       </div>
 
       <div id="checkout-container" class="checkout-embed-container"></div>
@@ -360,6 +374,77 @@
 
       <div class="modal-actions-flex" style="margin-top: 15px;">
         <button type="button" onclick="closeProvablyFairModal()" class="btn-secondary-action btn-full">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth Modal (Login / Register) -->
+  <div id="modal-auth" class="modal-backdrop hidden" aria-modal="true" role="dialog">
+    <div class="modal-box auth-modal">
+      <div class="modal-header-flex">
+        <h3 id="auth-title">Login to Your Account</h3>
+        <button class="x-close" onclick="closeAuthModal()" aria-label="Close Modal">×</button>
+      </div>
+      <p class="modal-subtitle" id="auth-subtitle">Enter your credentials to access your account.</p>
+
+      <div id="auth-form-login" class="auth-form-section">
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input type="email" id="auth-email" class="form-input" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="auth-password" class="form-input" placeholder="••••••••">
+        </div>
+        <div id="auth-login-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
+        <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+          <button type="button" onclick="submitLogin()" class="btn-play btn-full">LOGIN</button>
+          <button type="button" onclick="switchAuthMode('register')" class="btn-secondary-action btn-full">Create New Account</button>
+          <button type="button" onclick="continueAsGuest()" class="btn-secondary-action btn-full" style="font-size:0.8rem;">Continue as Guest</button>
+        </div>
+      </div>
+
+      <div id="auth-form-register" class="auth-form-section hidden">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input type="text" id="reg-username" class="form-input" placeholder="Choose a username">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input type="email" id="reg-email" class="form-input" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="reg-password" class="form-input" placeholder="Min 8 characters">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Birth Date</label>
+          <input type="date" id="reg-birthdate" class="form-input">
+        </div>
+        <div id="auth-register-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
+        <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+          <button type="button" onclick="submitRegister()" class="btn-play btn-full">REGISTER & PLAY</button>
+          <button type="button" onclick="switchAuthMode('login')" class="btn-secondary-action btn-full">Back to Login</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Age Gate Modal -->
+  <div id="modal-agegate" class="modal-backdrop" aria-modal="true" role="dialog" style="z-index: 3000;">
+    <div class="modal-box" style="max-width: 400px; text-align: center;">
+      <div class="modal-header-flex">
+        <h3>🔞 Age Verification</h3>
+      </div>
+      <p class="modal-subtitle">This casino contains gambling content and is restricted to adults 18 and older.</p>
+      <div style="margin: 20px 0; padding: 16px; background:#14222d; border-radius:8px; border:1px solid #243542;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem; color:#b1bad2;">
+          <input type="checkbox" id="age-confirm" style="transform:scale(1.3); margin:0;">
+          <span>I confirm I am 18 years of age or older</span>
+        </label>
+      </div>
+      <div style="margin-top: 15px;">
+        <button type="button" onclick="confirmAge()" class="btn-play btn-full">ENTER CASINO</button>
       </div>
     </div>
   </div>

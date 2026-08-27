@@ -11,6 +11,7 @@ const state = {
   currency: localStorage.getItem('casino_currency') || 'GC',
   currentGame: null,
   balances: { gc: 10000.0, sc: 10.0 },
+  profile: null,
   selectedKenoNumbers: [],
   activeGameState: null,
   isProcessing: false,
@@ -18,11 +19,12 @@ const state = {
   ws: null,
   wsReconnectTimer: null,
   feedFilter: 'ALL',
+  liveBetBuffer: [],
   clientSeed: localStorage.getItem('casino_client_seed') || generateRandomSeed(),
   serverSeedHash: localStorage.getItem('casino_server_hash') || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   nonce: parseInt(localStorage.getItem('casino_nonce') || '0', 10),
   sfxEnabled: true,
-  isEmbedded: window.self !== window.top // Detects if running inside an iframe/embed view
+  isEmbedded: window.self !== window.top
 };
 
 // ==========================================================================
@@ -140,7 +142,15 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       throw new Error('Session expired. Re-authenticated.');
     }
 
-    if (!res.ok) throw new Error(data.error || 'Server error occurred');
+    if (!res.ok) {
+      const error = new Error(data.error || 'Server error occurred');
+      error.status = res.status;
+      error.data = data;
+      error.requiresKyc = data.requiresKyc;
+      error.requiresOnboarding = data.requiresOnboarding;
+      error.onboardingUrl = data.onboardingUrl;
+      throw error;
+    }
     return data;
   } catch (err) {
     console.error(`[API Error] ${endpoint}:`, err);
@@ -149,25 +159,27 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
 }
 
 async function initSession() {
+  const ageConfirmed = localStorage.getItem('casino_age_confirmed') === 'true';
+  if (!ageConfirmed) {
+    document.getElementById('modal-agegate')?.classList.remove('hidden');
+    return;
+  }
+
   let token = localStorage.getItem('casino_token');
 
+  if (!token) {
+    document.getElementById('modal-auth')?.classList.remove('hidden');
+    return;
+  }
+
   try {
-    if (!token) {
-      const data = await apiRequest('/api/auth/guest', 'POST');
-      if (data.token) {
-        localStorage.setItem('casino_token', data.token);
-        if (data.user && data.user.username) {
-          localStorage.setItem('casino_username', data.user.username);
-        }
-        state.balances = data.balances || state.balances;
-      }
-    } else {
-      const data = await apiRequest('/api/user/me');
-      if (data.balances) state.balances = data.balances;
-      if (data.username) localStorage.setItem('casino_username', data.username);
-    }
+    const data = await apiRequest('/api/user/me');
+    if (data.balances) state.balances = data.balances;
+    if (data.username) localStorage.setItem('casino_username', data.username);
+    state.profile = data;
   } catch (err) {
     console.warn('[Auth Guest Fallback Mode]: Using local balances.');
+    localStorage.removeItem('casino_token');
   }
 
   await fetchFairSeed();
@@ -260,8 +272,21 @@ function connectWebSocket() {
     state.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'LIVE_BET') {
-          renderLiveBetRow(data);
+        switch (data.type) {
+          case 'LIVE_BET':
+            renderLiveBetRow(data);
+            break;
+          case 'BALANCE_UPDATE':
+            state.balances = { gc: data.balances.gc, sc: data.balances.sc_unplayed + data.balances.sc_played };
+            updateWalletUI();
+            break;
+          case 'KYC_STATUS_UPDATE':
+            if (state.profile) state.profile.kyc = data.kyc;
+            if (data.message) alert(data.message);
+            if (document.getElementById('modal-profile') && !document.getElementById('modal-profile').classList.contains('hidden')) {
+              refreshProfileModal();
+            }
+            break;
         }
       } catch (err) {
         console.error('[WS Parse Error]:', err);
@@ -285,35 +310,41 @@ function setFeedFilter(filter) {
   document.querySelectorAll('.feed-tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.filter === filter);
   });
+  renderBetFeed();
+}
+
+function renderBetFeed() {
   const feed = document.getElementById('bets-feed');
-  if (feed) feed.innerHTML = '';
+  if (!feed) return;
+  feed.innerHTML = '';
+  const myUsername = localStorage.getItem('casino_username') || 'You';
+  for (const data of state.liveBetBuffer) {
+    const isMyBet = data.username === myUsername;
+    const isHighRoller = Number(data.payout || 0) >= 100 || Number(data.multiplier || 0) >= 10;
+    if (state.feedFilter === 'MY_BETS' && !isMyBet) continue;
+    if (state.feedFilter === 'HIGH_ROLLERS' && !isHighRoller) continue;
+
+    const row = document.createElement('div');
+    row.className = `bet-row ${isMyBet ? 'my-bet' : ''}`;
+    const winClass = data.win ? 'win' : 'loss';
+    const winLabel = data.win ? 'WIN' : 'LOSS';
+    row.innerHTML =
+      `<div class="bet-user-game">` +
+      `<span class="bet-user">${escapeHTML(data.username || 'Anonymous')}</span>` +
+      `<span class="bet-game">${escapeHTML(data.game)}</span>` +
+      `</div>` +
+      `<span class="bet-mult ${winClass}">` +
+      `${winLabel} ${Number(data.multiplier).toFixed(2)}x (${Number(data.payout || 0).toFixed(2)} ${data.currency || 'GC'})` +
+      `</span>`;
+    feed.appendChild(row);
+  }
 }
 
 function renderLiveBetRow(data) {
-  const feed = document.getElementById('bets-feed');
-  if (!feed) return;
-
-  const myUsername = localStorage.getItem('casino_username') || 'You';
-  const isMyBet = data.username === myUsername;
-  const isHighRoller = Number(data.payout || 0) >= 100 || Number(data.multiplier || 0) >= 10;
-
-  if (state.feedFilter === 'MY_BETS' && !isMyBet) return;
-  if (state.feedFilter === 'HIGH_ROLLERS' && !isHighRoller) return;
-
-  const row = document.createElement('div');
-  row.className = `bet-row ${isMyBet ? 'my-bet' : ''}`;
-  row.innerHTML = `
-    <div class="bet-user-game">
-      <span class="bet-user">${escapeHTML(data.username || 'Anonymous')}</span>
-      <span class="bet-game">${escapeHTML(data.game)}</span>
-    </div>
-    <span class="bet-mult ${data.win ? 'win' : 'loss'}">
-      ${Number(data.multiplier).toFixed(2)}x (${Number(data.payout || 0).toFixed(2)} ${data.currency || 'GC'})
-    </span>
-  `;
-
-  feed.prepend(row);
-  if (feed.children.length > 15) feed.removeChild(feed.lastChild);
+  if (!state.liveBetBuffer) state.liveBetBuffer = [];
+  state.liveBetBuffer.unshift(data);
+  if (state.liveBetBuffer.length > 50) state.liveBetBuffer.pop();
+  renderBetFeed();
 }
 
 // ==========================================================================
@@ -553,18 +584,16 @@ async function buyCoinPackage(packageId) {
     playSound('click');
     openStoreModal();
 
-    let container = document.getElementById('checkout-container');
+    const container = document.getElementById('checkout-container');
     if (!container) return;
 
     container.style.display = 'block';
-    container.innerHTML = '<div style="text-align:center; padding:30px; color:#b1bad2; font-weight:600;">Loading secure embedded checkout...</div>';
+    container.innerHTML = '<div style="text-align:center; padding:40px; color:#b1bad2; font-weight:600;">💳 Connecting to secure payment gateway...</div>';
+
+    document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '0.5');
 
     if (state.activeCheckoutInstance) {
-      try {
-        state.activeCheckoutInstance.destroy();
-      } catch (e) {
-        console.warn('Checkout instance cleanup warning:', e);
-      }
+      try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
       state.activeCheckoutInstance = null;
     }
 
@@ -581,11 +610,18 @@ async function buyCoinPackage(packageId) {
 
     state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
       clientSecret: data.clientSecret,
-      onComplete: () => {
+      onComplete: (result) => {
         playSound('win');
-        alert('Payment completed successfully! Balance refreshed.');
-        closeStoreModal();
-        initSession();
+        container.innerHTML = '<div style="text-align:center; padding:20px; color:#00e701; font-weight:600;">&#10003; Payment successful! Updating balance...</div>';
+        setTimeout(() => {
+          closeStoreModal();
+          initSessionFromToken();
+        }, 1500);
+      },
+      onError: (err) => {
+        console.error('[Checkout Error]:', err);
+        container.innerHTML = '<div style="text-align:center; padding:20px; color:#ff4d4d; font-weight:600;">Payment failed: ' + escapeHTML(err.message || 'Please try again') + '</div>';
+        setTimeout(() => container.innerHTML = '', 3000);
       }
     });
 
@@ -595,20 +631,25 @@ async function buyCoinPackage(packageId) {
     console.error('[Embedded Payment Error]:', err);
     const container = document.getElementById('checkout-container');
     if (container) {
-      container.innerHTML = `
-        <div style="color:#ff4d4d; text-align:center; padding:20px; font-weight:700; border:1px solid #ff4d4d; border-radius:6px; background:rgba(255,77,77,0.05);">
-          ${escapeHTML(err.message || 'Failed to initialize in-page payment.')}
-        </div>`;
+      container.innerHTML =
+        '<div style="color:#ff4d4d; text-align:center; padding:20px; font-weight:700; border:1px solid #ff4d4d; border-radius:6px; background:rgba(255,77,77,0.05);">' +
+        escapeHTML(err.message || 'Failed to initialize in-page payment.') +
+        '</div>';
     } else {
       alert(err.message || 'Failed to connect to checkout service.');
     }
+    document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
   }
 }
 
-function openRedeemModal() { 
+function openRedeemModal() {
   if (state.isEmbedded) return;
-  playSound('click'); 
-  document.getElementById('modal-redeem')?.classList.remove('hidden'); 
+  if (state.profile?.kyc?.status !== 'VERIFIED') {
+    alert('Identity verification (KYC) is required to redeem Sweeps Coins for cash. Please complete verification in your Profile first.');
+    return;
+  }
+  playSound('click');
+  document.getElementById('modal-redeem')?.classList.remove('hidden');
 }
 
 function closeRedeemModal() { 
@@ -625,8 +666,9 @@ async function submitRedeem() {
     return alert('Minimum redemption limit is 50.00 Sweeps Coins (SC).');
   }
 
+  playSound('click');
+
   try {
-    playSound('click');
     const data = await apiRequest('/api/user/withdraw-sc', 'POST', { amount });
 
     if (data.requiresOnboarding && data.onboardingUrl) {
@@ -639,7 +681,13 @@ async function submitRedeem() {
     alert(data.message || 'Redemption request submitted successfully.');
     closeRedeemModal();
   } catch (err) {
-    alert(err.message || 'Redemption request failed.');
+    if (err.requiresKyc) {
+      alert(err.message + ' Please complete KYC verification in your Profile first.');
+      closeRedeemModal();
+      setTimeout(() => openProfileModal(), 300);
+    } else {
+      alert(err.message || 'Redemption request failed.');
+    }
   }
 }
 
@@ -712,6 +760,9 @@ function launchGame(gameId) {
         <div class="control-group">
           <label class="control-label">Target Number</label>
           <input type="number" id="dice-target" value="50.00" step="0.01" min="0.01" max="98.99" class="control-input" oninput="updateDiceOdds()">
+        </div>
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <div id="dice-payout-preview" style="font-size:0.75rem; color:#b1bad2; font-weight:600; padding:6px 8px; background:#14222d; border-radius:4px;">Win Chance: 50.00%  •  Payout: 1.9800x</div>
         </div>`;
       setTimeout(updateDiceOdds, 50);
       break;
@@ -1291,7 +1342,7 @@ async function executeStandardBet(betAmount) {
     updateWalletUI();
     syncFair(data);
 
-    if (data.multiplier > 1) playSound('win'); else playSound('loss');
+     if (data.multiplier > 1 || data.pushed) playSound('win'); else playSound('loss');
 
     switch (state.currentGame) {
       case 'slots':    return renderSlotsResult(data.details, data.multiplier);
@@ -1468,14 +1519,35 @@ function renderWheelResult(details, multiplier) {
   colors.forEach((c, i) => { stops += c + ' ' + (i * 30) + 'deg ' + ((i + 1) * 30) + 'deg' + (i < 11 ? ',' : ''); });
   const won = multiplier > 0;
 
+  const winningIndex = details.index || 0;
+  const finalRotation = (360 - (winningIndex * 30 + 15)) % 360;
+  const totalSpins = 6;
+  const totalRotation = totalSpins * 360 + finalRotation;
+  const spinDuration = 3500;
+
+  playSound('spin');
+
   display.innerHTML =
-    '<div style="text-align:center;padding:10px;">' +
-    '<div style="position:relative;width:min(220px,60vw);height:min(220px,60vw);margin:auto;border-radius:50%;background:conic-gradient(' + stops + ');border:5px solid #243542;box-shadow:0 0 24px rgba(0,0,0,.6);">' +
+    '<div id="wheel-result" style="text-align:center;padding:10px;">' +
+    '<div id="wheel-spin" style="position:relative;width:min(220px,60vw);height:min(220px,60vw);margin:20px auto;border-radius:50%;background:conic-gradient(' + stops + ');border:5px solid #243542;box-shadow:0 0 24px rgba(0,0,0,.6);transition:transform ' + spinDuration + 'ms cubic-bezier(0.25,0.1,0.25,1);transform:rotate(0deg);">' +
     '<div style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:16px solid #ffc700;"></div>' +
     '</div>' +
-    '<div style="margin-top:20px;font-size:2rem;font-weight:900;color:' + (won ? '#00e701' : '#ff4d4d') + ';">' + multiplier.toFixed(2) + 'x</div>' +
+    '<div id="wheel-multiplier" style="font-size:2rem;font-weight:900;color:' + (won ? '#00e701' : '#ff4d4d') + ';min-height:1.5em;">Spinning...</div>' +
     '<div style="color:#b1bad2;font-weight:600;">Landed on ' + details.color.toLowerCase() + '</div>' +
     '</div>';
+
+  const wheel = document.getElementById('wheel-spin');
+  if (wheel) {
+    setTimeout(() => {
+      wheel.style.transform = 'rotate(' + totalRotation + 'deg)';
+    }, 50);
+  }
+
+  setTimeout(() => {
+    const multEl = document.getElementById('wheel-multiplier');
+    if (multEl) multEl.textContent = multiplier.toFixed(2) + 'x';
+    if (won) playSound('win'); else playSound('loss');
+  }, spinDuration);
 }
 
 /* --- BACCARAT RENDERER --- */
@@ -1715,14 +1787,169 @@ async function cashoutHilo() {
 // 11. PROFILE & MODAL CONTROLLERS
 // ==========================================================================
 
-function openProfileModal() {
+async function openProfileModal() {
+  if (!state.profile) {
+    openAuthModal();
+    return;
+  }
   playSound('click');
+  await refreshProfileModal();
   document.getElementById('modal-profile')?.classList.remove('hidden');
 }
 
 function closeProfileModal() {
   playSound('click');
   document.getElementById('modal-profile')?.classList.add('hidden');
+}
+
+async function refreshProfileModal() {
+  const modal = document.getElementById('modal-profile');
+  if (!modal) return;
+  try {
+    const data = await apiRequest('/api/user/me');
+    state.profile = data;
+    state.balances = data.balances || state.balances;
+    updateWalletUI();
+  } catch (err) {
+    console.warn('[Profile] Could not refresh profile:', err.message);
+  }
+  renderProfileModal(modal);
+}
+
+async function startKycVerification() {
+  try {
+    playSound('click');
+    const data = await apiRequest('/api/user/kyc/start', 'POST');
+    if (data.personaConfig) {
+      const pc = data.personaConfig;
+
+      if (pc.templateId === 'itmpl_sandbox_default') {
+        alert('Persona template not configured. Using sandbox verification.');
+        await verifyKycSandbox();
+        return;
+      }
+
+      if (!window.Persona && !document.getElementById('persona-script')) {
+        const script = document.createElement('script');
+        script.id = 'persona-script';
+        script.src = `https://withpersona.com/${pc.templateId}/build.js`;
+        script.async = true;
+        script.onload = () => {
+          if (window.Persona) {
+            window.Persona.start({
+              templateId: pc.templateId,
+              referenceId: pc.referenceId,
+              environment: pc.environment
+            });
+          }
+        };
+        script.onerror = () => {
+          alert('Failed to load identity verification. Please try the sandbox option.');
+        };
+        document.head.appendChild(script);
+      } else if (window.Persona) {
+        window.Persona.start({
+          templateId: pc.templateId,
+          referenceId: pc.referenceId,
+          environment: pc.environment
+        });
+      } else {
+        alert('Persona SDK not available. Reference ID: ' + pc.referenceId);
+      }
+    }
+  } catch (err) {
+    alert(err.message || 'Failed to start KYC verification.');
+  }
+}
+
+async function verifyKycSandbox() {
+  try {
+    playSound('click');
+    const data = await apiRequest('/api/user/kyc/verify-sandbox', 'POST');
+    alert(data.message || 'KYC verified successfully!');
+    state.profile = data.kyc ? { ...state.profile, kyc: data.kyc } : state.profile;
+    await refreshProfileModal();
+  } catch (err) {
+    alert(err.message || 'KYC verification failed.');
+  }
+}
+
+function renderProfileModal(modal) {
+  const p = state.profile || {};
+  const kyc = p.kyc || { status: 'UNVERIFIED', tier: 0 };
+  const kycStatusText = {
+    UNVERIFIED: 'Not Verified',
+    PENDING: 'Verification Pending',
+    VERIFIED: 'Verified',
+    REJECTED: 'Rejected'
+  }[kyc.status] || 'Unknown';
+  const kycClass = {
+    UNVERIFIED: 'kyc-badge-unverified',
+    PENDING: 'kyc-badge-pending',
+    VERIFIED: 'kyc-badge-verified',
+    REJECTED: 'kyc-badge-rejected'
+  }[kyc.status] || 'kyc-badge-unverified';
+
+  const gc = Number(state.balances.gc || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const sc = Number(state.balances.sc || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+let kycControls = '';
+  if (kyc.status === 'VERIFIED') {
+    kycControls = '<button type="button" class="btn-secondary-action btn-full" disabled style="color:#00e701;">&#10003; Identity Verified</button>';
+  } else if (kyc.status === 'PENDING') {
+    kycControls = '<button type="button" class="btn-secondary-action btn-full" disabled style="color:#b1bad2;">&#8230; Verification in Progress</button>';
+  } else if (kyc.status === 'REJECTED') {
+    kycControls = '<button type="button" class="btn-play btn-full" onclick="startKycVerification()" style="margin-bottom:8px;">Retry Verification</button>' +
+                  '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>';
+  } else {
+    kycControls = '<button type="button" class="btn-play btn-full" onclick="startKycVerification()" style="margin-bottom:8px;">Verify Identity (Persona)</button>' +
+                  '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>';
+  }
+
+  const vip = p.vip || {};
+  const vipText = vip.tier || 'Bronze';
+
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width: 420px;">
+      <div class="modal-header-flex">
+        <h3>👤 User Profile</h3>
+        <button class="x-close" onclick="closeProfileModal()">×</button>
+      </div>
+      <p class="modal-subtitle">Manage your account and verification status.</p>
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" class="form-input" readonly value="${escapeHTML(p.username || 'Guest')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="text" class="form-input" readonly value="${escapeHTML(p.email || 'guest@casino')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">VIP Tier</label>
+        <input type="text" class="form-input" readonly value="${escapeHTML(vipText)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gold Coins (GC)</label>
+        <input type="text" class="form-input" readonly value="${gc}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sweeps Coins (SC)</label>
+        <input type="text" class="form-input" readonly value="${sc}">
+      </div>
+      <div class="form-group" style="margin-top: 10px;">
+        <label class="form-label">KYC Status</label>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+          <span class="kyc-badge ${kycClass}">${escapeHTML(kycStatusText)}</span>
+          <span style="font-size:0.75rem; color:#b1bad2;">Tier ${kyc.tier} of 2</span>
+        </div>
+      </div>
+      ${kyc.rejectionReason ? `<div class="form-group"><label class="form-label">Rejection Reason</label><input type="text" class="form-input" readonly value="${escapeHTML(kyc.rejectionReason)}"></div>` : ''}
+      <div class="modal-actions-flex" style="margin-top: 20px; flex-direction:column; gap:8px;">
+        ${kycControls}
+        <button type="button" onclick="logout()" class="btn-secondary-action btn-full" style="color:var(--accent-red);">Logout</button>
+        <button type="button" onclick="closeProfileModal()" class="btn-secondary-action btn-full">Close</button>
+      </div>
+    </div>`;
 }
 
 function openProvablyFairModal() {
@@ -1753,17 +1980,177 @@ function injectMobileAndNavigationDOM() {
           <h3>👤 User Profile</h3>
           <button class="x-close" onclick="closeProfileModal()">×</button>
         </div>
-        <p class="modal-subtitle">Manage your account settings and preferences.</p>
-        <div class="form-group" style="margin: 15px 0;">
-          <label class="form-label">Session Status</label>
-          <input type="text" class="form-input" readonly value="Authenticated Guest">
-        </div>
+        <p class="modal-subtitle">Loading...</p>
         <div class="modal-actions-flex" style="margin-top: 20px;">
           <button type="button" onclick="closeProfileModal()" class="btn-play btn-full">Close</button>
         </div>
       </div>`;
     document.body.appendChild(profileModal);
   }
+}
+
+// ==========================================================================
+// 11b. AUTH & AGE GATE CONTROLLERS
+// ==========================================================================
+
+function confirmAge() {
+  const checkbox = document.getElementById('age-confirm');
+  if (!checkbox || !checkbox.checked) {
+    return alert('You must confirm you are 18 or older to enter.');
+  }
+  localStorage.setItem('casino_age_confirmed', 'true');
+  const ag = document.getElementById('modal-agegate');
+  if (ag) ag.classList.add('hidden');
+  playSound('win');
+  openAuthModal();
+}
+
+function openAuthModal() {
+  const loginErr = document.getElementById('auth-login-error');
+  if (loginErr) loginErr.textContent = '';
+  const regErr = document.getElementById('auth-register-error');
+  if (regErr) regErr.textContent = '';
+  document.getElementById('auth-form-login').classList.remove('hidden');
+  document.getElementById('auth-form-register').classList.add('hidden');
+  document.getElementById('auth-title').textContent = 'Login to Your Account';
+  document.getElementById('auth-subtitle').textContent = 'Enter your credentials to access your account.';
+  document.getElementById('modal-auth')?.classList.remove('hidden');
+}
+
+function closeAuthModal() {
+  document.getElementById('modal-auth')?.classList.add('hidden');
+}
+
+function switchAuthMode(mode) {
+  if (mode === 'register') {
+    document.getElementById('auth-form-login').classList.add('hidden');
+    document.getElementById('auth-form-register').classList.remove('hidden');
+    document.getElementById('auth-title').textContent = 'Create New Account';
+    document.getElementById('auth-subtitle').textContent = 'Register to unlock full features and higher limits.';
+  } else {
+    document.getElementById('auth-form-login').classList.remove('hidden');
+    document.getElementById('auth-form-register').classList.add('hidden');
+    document.getElementById('auth-title').textContent = 'Login to Your Account';
+    document.getElementById('auth-subtitle').textContent = 'Enter your credentials to access your account.';
+  }
+}
+
+async function submitLogin() {
+  const email = document.getElementById('auth-email')?.value.trim();
+  const password = document.getElementById('auth-password')?.value;
+  const errorEl = document.getElementById('auth-login-error');
+
+  if (!email || !password) {
+    if (errorEl) errorEl.textContent = 'Email and password are required.';
+    return;
+  }
+
+  try {
+    const data = await apiRequest('/api/auth/login', 'POST', { email, password });
+    localStorage.setItem('casino_token', data.token);
+    state.profile = data.user;
+    state.balances = data.balances || state.balances;
+    localStorage.setItem('casino_username', data.user?.username || '');
+    updateUserProfileBadge();
+    closeAuthModal();
+    await initSessionFromToken();
+  } catch (err) {
+    if (errorEl) errorEl.textContent = err.message || 'Login failed.';
+  }
+}
+
+async function submitRegister() {
+  const username = document.getElementById('reg-username')?.value.trim();
+  const email = document.getElementById('reg-email')?.value.trim();
+  const password = document.getElementById('reg-password')?.value;
+  const birthDate = document.getElementById('reg-birthdate')?.value;
+  const errorEl = document.getElementById('auth-register-error');
+
+  if (!username || !email || !password) {
+    if (errorEl) errorEl.textContent = 'All fields are required.';
+    return;
+  }
+  if (password.length < 8) {
+    if (errorEl) errorEl.textContent = 'Password must be at least 8 characters.';
+    return;
+  }
+  if (!birthDate) {
+    if (errorEl) errorEl.textContent = 'Birth date is required for age verification.';
+    return;
+  }
+
+  const birth = new Date(birthDate);
+  const ageMs = Date.now() - birth.getTime();
+  if (ageMs < 18 * 365 * 24 * 60 * 60 * 1000 || birth > new Date()) {
+    if (errorEl) errorEl.textContent = 'You must be at least 18 years old to register.';
+    return;
+  }
+
+  try {
+    const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate });
+    localStorage.setItem('casino_token', data.token);
+    state.profile = data.user;
+    state.balances = data.balances || state.balances;
+    localStorage.setItem('casino_username', data.user?.username || '');
+    updateUserProfileBadge();
+    closeAuthModal();
+    await initSessionFromToken();
+  } catch (err) {
+    if (errorEl) errorEl.textContent = err.message || 'Registration failed.';
+  }
+}
+
+async function continueAsGuest() {
+  try {
+    const data = await apiRequest('/api/auth/guest', 'POST');
+    if (data.token) {
+      localStorage.setItem('casino_token', data.token);
+      state.profile = data.user || null;
+      if (data.user && data.user.username) {
+        localStorage.setItem('casino_username', data.user.username);
+      }
+      state.balances = data.balances || state.balances;
+    }
+  } catch (err) {
+    console.warn('[Guest Fallback]:', err.message);
+  }
+  closeAuthModal();
+  await initSessionFromToken();
+}
+
+async function initSessionFromToken() {
+  await fetchFairSeed();
+  updateWalletUI();
+  if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
+    connectWebSocket();
+  }
+  if (!document.getElementById('modal-profile')) {
+    injectMobileAndNavigationDOM();
+  }
+  applyEmbeddedModeRestrictions();
+  updateUserProfileBadge();
+}
+
+function updateUserProfileBadge() {
+  const badge = document.getElementById('user-badge');
+  if (!badge) return;
+  const username = state.profile?.username || localStorage.getItem('casino_username') || 'Guest';
+  const firstChar = username.charAt(0) || '👤';
+  badge.title = username + ' — Profile & Settings';
+  const avatar = badge.querySelector('.avatar-circle');
+  if (avatar) avatar.textContent = firstChar.toUpperCase();
+}
+
+function logout() {
+  localStorage.removeItem('casino_token');
+  localStorage.removeItem('casino_username');
+  state.profile = null;
+  state.balances = { gc: 10000.0, sc: 10.0 };
+  updateWalletUI();
+  updateUserProfileBadge();
+  state.ws?.close();
+  state.ws = null;
+  openAuthModal();
 }
 
 // ==========================================================================

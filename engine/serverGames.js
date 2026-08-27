@@ -58,7 +58,7 @@ const WHEEL_SEGMENTS = [
   { color: 'GOLD',   mult: 10 },
   { color: 'GOLD',   mult: 50 }
 ];
-const WHEEL_WEIGHTS = [3.0, 2.0, 1.0, 1.5, 0.8, 3.0, 2.0, 1.0, 1.5, 0.5, 0.15, 0.05];
+const WHEEL_WEIGHTS = [6.7, 2.0, 1.0, 1.5, 0.8, 6.7, 2.0, 1.0, 1.5, 0.5, 0.15, 0.05];
 
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣'];
 const SLOT_WEIGHTS = [0.40, 0.25, 0.18, 0.10, 0.05, 0.02];
@@ -286,6 +286,7 @@ const GAMES = {
 
     let multiplier = 0;
     let win = false;
+    let pushed = false;
 
     if (betOn === outcome) {
       win = true;
@@ -293,12 +294,14 @@ const GAMES = {
       else if (outcome === 'BANKER') multiplier = 1.95;
       else multiplier = 9.0;
     } else if (outcome === 'TIE' && betOn !== 'TIE') {
-      multiplier = 1.0; // push — stake returned
+      pushed = true;
+      win = true; // stake returned — not a loss
+      multiplier = 1.0;
     }
 
     return {
       win,
-      pushed: !win && multiplier === 1.0,
+      pushed,
       multiplier,
       details: { playerHand, bankerHand, pScore, bScore, outcome, betOn }
     };

@@ -20,14 +20,15 @@ const HOUSE_EDGE = 0.13; // 13% House Edge (86% RTP)
 const RAKEBACK_RATE = 5.00; // 5% of House Edge back to user
 
 const stripe = require('stripe')(STRIPE_SECRET_KEY);
+const bcrypt = require('bcryptjs');
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'KY'];
 
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
 const COIN_PACKAGES = {
-  'pack_10': { name: '10,000 GC + 15 Free SC', priceInCents: 50, gcAmount: 15000, scAmount: 15 },
-  'pack_20': { name: '20,000 GC + 25 Free SC', priceInCents: 2000, gcAmount: 25000, scAmount: 25 },
-  'pack_50': { name: '50,000 GC + 55 Free SC', priceInCents: 5000, gcAmount: 55000, scAmount: 55 },
+  'pack_10': { name: '15,000 GC + 15 Free SC', priceInCents: 1000, gcAmount: 15000, scAmount: 15 },
+  'pack_20': { name: '25,000 GC + 25 Free SC', priceInCents: 2000, gcAmount: 25000, scAmount: 25 },
+  'pack_50': { name: '55,000 GC + 55 Free SC', priceInCents: 5000, gcAmount: 55000, scAmount: 55 },
   'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 10000, gcAmount: 100000, scAmount: 105 }
 };
 
@@ -227,45 +228,6 @@ function getOwnedSession(req, res, gameId) {
 }
 
 
-function getBaccaratCardValue(card) {
-  if (['10', 'J', 'Q', 'K'].includes(card.value)) return 0;
-  if (card.value === 'A') return 1;
-  return parseInt(card.value, 10);
-}
-
-function getBaccaratHandScore(hand) {
-  let total = 0;
-  for (let card of hand) {
-    total += getBaccaratCardValue(card);
-  }
-  return total % 10;
-}
-
-function createDeck() {
-  const suits = ['♠', '♥', '♦', '♣'];
-  const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-  const deck = [];
-  for (let s of suits) {
-    for (let v of values) {
-      let score = parseInt(v, 10);
-      if (['J', 'Q', 'K'].includes(v)) score = 10;
-      if (v === 'A') score = 11;
-      deck.push({ suit: s, value: v, score });
-    }
-  }
-  return deck;
-}
-
-function getHandScore(hand) {
-  let score = 0, aces = 0;
-  for (let card of hand) {
-    score += card.score;
-    if (card.value === 'A') aces++;
-  }
-  while (score > 21 && aces > 0) { score -= 10; aces--; }
-  return score;
-}
-
 // -----------------------------------------------------------------------------
 // 5. GAME ENGINES
 // -----------------------------------------------------------------------------
@@ -334,11 +296,30 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
 });
 
 // Persona / Identity Verification Webhook Endpoint
-app.post('/api/webhooks/kyc', express.json(), (req, res) => {
-  const event = req.body;
-  
+app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, res) => {
+  let event;
+
   if (PERSONA_WEBHOOK_SECRET) {
     const sig = req.headers['persona-signature'];
+    if (!sig) {
+      return res.status(401).json({ error: 'Missing webhook signature.' });
+    }
+
+    const computedSig = crypto
+      .createHmac('sha256', PERSONA_WEBHOOK_SECRET)
+      .update(req.body)
+      .digest('hex');
+
+    if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(computedSig, 'hex'))) {
+      console.error('[PERSONA WEBHOOK WARNING] Invalid signature');
+      return res.status(401).json({ error: 'Invalid webhook signature.' });
+    }
+  }
+
+  try {
+    event = JSON.parse(req.body.toString('utf8'));
+  } catch (err) {
+    return res.status(400).json({ error: 'Malformed JSON body.' });
   }
 
   const { event: eventType, data } = event;
@@ -504,6 +485,91 @@ app.post('/api/auth/guest', (req, res) => {
     token, 
     user: { id: newUser.id, username: newUser.username, kyc: newUser.kyc }, 
     balances: { gc: newUser.gc_balance, sc: newUser.sc_unplayed + newUser.sc_played } 
+  });
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  const { username, email, password, birthDate } = req.body || {};
+
+  if (!username || !email || !password) {
+    return res.status(400).json({ error: 'Username, email, and password are required.' });
+  }
+
+  if (!birthDate) {
+    return res.status(400).json({ error: 'Birth date is required for age verification.' });
+  }
+
+  const birth = new Date(birthDate);
+  const ageMs = Date.now() - birth.getTime();
+  const minAgeMs = 18 * 365 * 24 * 60 * 60 * 1000;
+  if (ageMs < minAgeMs || birth > new Date()) {
+    return res.status(403).json({ error: 'You must be at least 18 years old to register.' });
+  }
+
+  for (const u of users.values()) {
+    if (u.email === email) return res.status(409).json({ error: 'Email already registered.' });
+    if (u.username === username) return res.status(409).json({ error: 'Username already taken.' });
+  }
+
+  const userId = users.size + 1;
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const newUser = {
+    id: userId,
+    username,
+    email,
+    password: hashedPassword,
+    gc_balance: 10000.0,
+    sc_unplayed: 10.0,
+    sc_played: 0.0,
+    stripeAccountId: null,
+    kyc: {
+      status: 'UNVERIFIED',
+      tier: 0,
+      inquiryId: null,
+      verifiedAt: null,
+      rejectionReason: null
+    },
+    lastDailyClaim: 0,
+    dailyStreak: 0,
+    adsWatchedToday: 0,
+    lastAdReset: Date.now(),
+    state: 'CA',
+    vipTier: 'Bronze',
+    totalWageredGC: 0,
+    totalWageredSC: 0,
+    rakebackAccruedSC: 0
+  };
+  users.set(userId, newUser);
+  transactions.set(userId, []);
+
+  const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({
+    token,
+    user: { id: newUser.id, username: newUser.username, email: newUser.email, kyc: newUser.kyc },
+    balances: { gc: newUser.gc_balance, sc: newUser.sc_unplayed + newUser.sc_played }
+  });
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  let foundUser = null;
+  for (const u of users.values()) {
+    if (u.email === email) { foundUser = u; break; }
+  }
+  if (!foundUser) return res.status(401).json({ error: 'Invalid credentials.' });
+
+  const valid = await bcrypt.compare(password, foundUser.password || '');
+  if (!valid) return res.status(401).json({ error: 'Invalid credentials.' });
+
+  const token = jwt.sign({ id: foundUser.id, username: foundUser.username }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({
+    token,
+    user: { id: foundUser.id, username: foundUser.username, email: foundUser.email, kyc: foundUser.kyc },
+    balances: { gc: foundUser.gc_balance, sc: foundUser.sc_unplayed + foundUser.sc_played }
   });
 });
 
@@ -905,26 +971,26 @@ app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
   const floatCount = GAME_FLOAT_COUNTS[gameId] || 20;
   const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, floatCount);
 
-  const outcome = GAMES[gameId](floats, req.body.params || {});
-  // Any positive multiplier returns value to the player (partial plinko hits, pushes, etc.)
-  const payout = Math.round(outcome.multiplier * amount * 100) / 100;
+   const outcome = GAMES[gameId](floats, req.body.params || {});
+   const payout = Math.round(outcome.multiplier * amount * 100) / 100;
+   const isWin = outcome.multiplier > 1 || outcome.pushed;
 
-  if (payout > 0) {
-    creditWin(user, currency, payout);
-    logTransaction(user.id, outcome.multiplier > 1 ? 'WIN' : 'BET',
-      `${gameId.toUpperCase()} resolved @ ${outcome.multiplier}x`,
-      currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
-  }
+   if (payout > 0) {
+     creditWin(user, currency, payout);
+     logTransaction(user.id, isWin ? 'WIN' : 'BET',
+       `${gameId.toUpperCase()} resolved @ ${outcome.multiplier}x`,
+       currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
+   }
 
-  broadcastLiveBet({
-    username: user.username,
-    game: gameId.toUpperCase(),
-    betAmount: amount,
-    currency,
-    multiplier: outcome.multiplier,
-    win: outcome.multiplier > 1,
-    payout
-  });
+   broadcastLiveBet({
+     username: user.username,
+     game: gameId.toUpperCase(),
+     betAmount: amount,
+     currency,
+     multiplier: outcome.multiplier,
+     win: isWin,
+     payout
+   });
 
   res.json({
     ...outcome,

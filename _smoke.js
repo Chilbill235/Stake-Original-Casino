@@ -101,9 +101,11 @@ async function req(path, method = 'GET', body = null, token = null) {
   const guess = rank <= 7 ? 'HIGHER' : 'LOWER';
   r = await req('/api/play/hilo/guess', 'POST', { gameId: hiloId, guess }, T);
   ok(r.status === 200, 'hilo guess resolves with probability-based outcome');
-  if (r.data.multiplier > 1) {
+  if (r.data.multiplier > 1 && !(r.data.cashedOut || r.data.autoCashout)) {
     const co = await req('/api/play/hilo/cashout', 'POST', { gameId: hiloId }, T);
     ok(co.status === 200 && co.data.payout > 0, 'hilo cashout pays accrued multiplier');
+  } else if (r.data.cashedOut || r.data.autoCashout) {
+    ok(r.data.payout > 0, 'hilo auto-cashout paid accrued multiplier');
   } else {
     ok(true, 'hilo round ended (loss is a valid resolution)');
   }

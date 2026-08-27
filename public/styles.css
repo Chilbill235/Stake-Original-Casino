@@ -927,6 +927,21 @@ body.dark-theme {
   flex-shrink: 0;
 }
 
+/* KYC Status Badges */
+.kyc-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.kyc-badge-unverified { background: rgba(255, 199, 0, 0.15); color: var(--accent-gold); border: 1px solid var(--accent-gold); }
+.kyc-badge-pending { background: rgba(82, 119, 255, 0.15); color: #5277ff; border: 1px solid #5277ff; }
+.kyc-badge-verified { background: rgba(0, 231, 1, 0.15); color: var(--accent-green); border: 1px solid var(--accent-green); }
+.kyc-badge-rejected { background: rgba(255, 77, 77, 0.15); color: var(--accent-red); border: 1px solid var(--accent-red); }
+
 .package-card {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -1022,6 +1037,27 @@ body.dark-theme {
 
 .btn-full {
   width: 100%;
+}
+
+.auth-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 1;
+}
+
+.modal-actions-flex {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  margin-top: auto;
+}
+
+/* Ensure button groups stack on mobile */
+@media (max-width: 500px) {
+  .auth-form-section {
+    gap: 10px;
+  }
 }
 
 /* ==========================================================================
