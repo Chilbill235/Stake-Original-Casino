@@ -25,7 +25,7 @@ const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'KY'];
 
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
 const COIN_PACKAGES = {
-  'pack_10': { name: '10,000 GC + 15 Free SC', priceInCents: 10, gcAmount: 15000, scAmount: 15 },
+  'pack_10': { name: '10,000 GC + 15 Free SC', priceInCents: 0100, gcAmount: 15000, scAmount: 15 },
   'pack_20': { name: '20,000 GC + 25 Free SC', priceInCents: 2000, gcAmount: 25000, scAmount: 25 },
   'pack_50': { name: '50,000 GC + 55 Free SC', priceInCents: 5000, gcAmount: 55000, scAmount: 55 },
   'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 10000, gcAmount: 100000, scAmount: 105 }
