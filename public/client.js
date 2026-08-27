@@ -24,23 +24,41 @@ const state = {
   serverSeedHash: localStorage.getItem('casino_server_hash') || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   nonce: parseInt(localStorage.getItem('casino_nonce') || '0', 10),
   sfxEnabled: true,
-  isEmbedded: window.self !== window.top
+   isEmbedded: window.self !== window.top
 };
+window.__CASINO_CURRENCY = state.currency;
 
 // ==========================================================================
 // 2. SYNTHESIZED WEB AUDIO SFX ENGINE
 // ==========================================================================
 
 let audioCtx = null;
+let audioReady = false;
 
 function getAudioContext() {
   if (!audioCtx) {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (AudioContextClass) {
-      audioCtx = new AudioContextClass();
+      try {
+        audioCtx = new AudioContextClass();
+      } catch (e) {
+        console.warn('[Audio]: Failed to init AudioContext', e);
+      }
     }
   }
   return audioCtx;
+}
+
+function initAudioContext() {
+  if (audioReady) return;
+  const ctx = getAudioContext();
+  if (ctx) {
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(() => { audioReady = true; }).catch(() => {});
+    } else if (ctx.state === 'running') {
+      audioReady = true;
+    }
+  }
 }
 
 function playSound(type) {
@@ -51,6 +69,7 @@ function playSound(type) {
   if (ctx.state === 'suspended') {
     ctx.resume();
   }
+  if (ctx.state === 'suspended') return;
 
   const now = ctx.currentTime;
   const osc = ctx.createOscillator();
@@ -108,6 +127,16 @@ function playSound(type) {
       osc.start(now);
       osc.stop(now + 0.04);
       break;
+
+    case 'card-deal':
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(900, now);
+      osc.frequency.exponentialRampToValueAtTime(400, now + 0.04);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.linearRampToValueAtTime(0.01, now + 0.04);
+      osc.start(now);
+      osc.stop(now + 0.04);
+      break;
   }
 }
 
@@ -136,11 +165,12 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       }
     }
 
-    if (res.status === 401) {
-      localStorage.removeItem('casino_token');
-      await initSession();
-      throw new Error('Session expired. Re-authenticated.');
-    }
+     if (res.status === 401 || res.status === 404) {
+       localStorage.removeItem('casino_token');
+       localStorage.removeItem('casino_username');
+       await initSession();
+       throw new Error(res.status === 404 ? 'Session expired. Please log in again.' : 'Session expired. Re-authenticated.');
+     }
 
     if (!res.ok) {
       const error = new Error(data.error || 'Server error occurred');
@@ -290,6 +320,9 @@ function connectWebSocket() {
               refreshProfileModal();
             }
             break;
+          case 'GAME_RESULT':
+            renderGameResultRow(data);
+            break;
         }
       } catch (err) {
         console.error('[WS Parse Error]:', err);
@@ -348,6 +381,31 @@ function renderLiveBetRow(data) {
   state.liveBetBuffer.unshift(data);
   if (state.liveBetBuffer.length > 50) state.liveBetBuffer.pop();
   renderBetFeed();
+}
+
+function renderGameResultRow(data) {
+  if (!state.gameResultBuffer) state.gameResultBuffer = [];
+  state.gameResultBuffer.unshift(data);
+  if (state.gameResultBuffer.length > 15) state.gameResultBuffer.pop();
+  renderGameResultFeed();
+}
+
+function renderGameResultFeed() {
+  const container = document.getElementById('game-result-feed');
+  if (!container || !state.gameResultBuffer) return;
+  let html = '';
+  state.gameResultBuffer.forEach(item => {
+    const isWin = item.win;
+    const color = isWin ? '#00e701' : '#ff4d4d';
+    const mult = item.multiplier ? item.multiplier.toFixed(2) + 'x' : '';
+    const payout = item.payout ? Number(item.payout).toFixed(2) : '';
+    html += '<div class="result-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05);font-size:0.82rem;">' +
+      '<span style="color:' + color + ';font-weight:700;min-width:70px;text-transform:uppercase;font-size:0.72rem;">' + (item.game || '---') + '</span>' +
+      '<span style="color:' + color + ';font-family:monospace;font-weight:700;flex:1;">' + mult + '</span>' +
+      '<span style="color:#b1bad2;">' + (payout ? '+' + payout + ' ' + (item.currency || 'GC') : '') + '</span>' +
+      '</div>';
+  });
+  container.innerHTML = html;
 }
 
 // ==========================================================================
@@ -410,6 +468,21 @@ function closeWalletDropdown() {
   if (menu) menu.classList.add('hidden');
 }
 
+function openWalletDropdown(event) {
+  if (state.isEmbedded) return;
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('wallet-dropdown-menu');
+  if (menu) {
+    menu.classList.toggle('hidden');
+    playSound('click');
+  }
+}
+
+function openBonusModalFromDropdown() {
+  closeWalletDropdown();
+  openBonusModal();
+}
+
 function switchCurrency(currency) {
   if (state.isProcessing) return;
   if (state.activeGameState) {
@@ -419,8 +492,10 @@ function switchCurrency(currency) {
 
   playSound('click');
   state.currency = currency;
+  window.__CASINO_CURRENCY = currency;
   localStorage.setItem('casino_currency', currency);
   updateWalletUI();
+  updateBetCurrencyTag();
   closeWalletDropdown();
 }
 
@@ -452,6 +527,19 @@ function adjustBet(action) {
   }
 
   input.value = currentBet.toFixed(2);
+}
+
+function toggleAutoBet() {
+  const toggle = document.getElementById('auto-bet-toggle');
+  const countInput = document.getElementById('auto-bet-count');
+  if (toggle && countInput) {
+    countInput.style.display = toggle.checked ? 'block' : 'none';
+  }
+}
+
+function updateBetCurrencyTag() {
+  const tag = document.getElementById('bet-currency-tag');
+  if (tag) tag.textContent = state.currency;
 }
 
 // ==========================================================================
@@ -607,11 +695,8 @@ function showCheckoutLoading() {
   checkoutSection.classList.add('checkout-loading');
 
   container.innerHTML =
-    '<div style="text-align:center; padding:50px 20px;">' +
-    '<div style="display:inline-block; position:relative; margin-bottom:20px;">' +
-    '<div style="width:56px; height:56px; border:3px solid var(--border-color); border-top-color:var(--accent-gold); border-radius:50%; animation:spin 0.8s linear infinite;"></div>' +
-    '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.5rem;">💳</div>' +
-    '</div>' +
+    '<div style="text-align:center;">' +
+    '<div class="checkout-spinner"></div>' +
     '<p class="checkout-loading-text">Initializing secure checkout...</p>' +
     '<p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p>' +
     '</div>';
@@ -640,10 +725,23 @@ function showCheckoutSuccess(gc, sc) {
   const checkoutSection = document.getElementById('checkout-section');
   const successSection = document.getElementById('checkout-success');
   const successDetails = document.getElementById('success-details');
+  const confettiContainer = document.getElementById('confetti-container');
 
   if (pkgList) pkgList.classList.add('hidden');
   if (checkoutSection) checkoutSection.classList.add('hidden');
   if (successSection) successSection.classList.remove('hidden');
+
+  if (confettiContainer) {
+    confettiContainer.innerHTML = '';
+    for (let i = 0; i < 12; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      piece.style.left = (Math.random() * 100 - 10) + '%';
+      piece.style.animationDelay = (Math.random() * 0.5) + 's';
+      piece.style.background = Math.random() > 0.5 ? '#ffc700' : '#00e701';
+      confettiContainer.appendChild(piece);
+    }
+  }
 
   if (successDetails) {
     successDetails.innerHTML =
@@ -821,6 +919,13 @@ function showLobby() {
   state.currentGame = null;
   state.activeGameState = null;
   state.isProcessing = false;
+  window.location.hash = '';
+  clearGameControls();
+}
+
+function clearGameControls() {
+  const options = document.getElementById('game-controls-options');
+  if (options) options.innerHTML = '';
 }
 
 function filterLobbyGames(category) {
@@ -848,23 +953,39 @@ function searchLobbyGames(query) {
   });
 }
 
-function launchGame(gameId) {
+async function launchGame(gameId) {
   playSound('click');
   state.currentGame = gameId;
   state.activeGameState = null;
   state.isProcessing = false;
 
+  if (window.GameLoader) await window.GameLoader.load(gameId);
+
   document.getElementById('view-lobby')?.classList.add('hidden');
   document.getElementById('view-game')?.classList.remove('hidden');
   document.getElementById('active-game-title').textContent = gameId.toUpperCase();
+
+  if (window.location.hash !== '#' + gameId) {
+    window.location.hash = '#' + gameId;
+  }
 
   const options = document.getElementById('game-controls-options');
   const actionBtn = document.getElementById('btn-primary-action');
   const betBar = document.getElementById('bet-bar');
 
-  if (betBar) betBar.style.display = 'flex';
+   if (betBar) betBar.style.display = 'flex';
   options.innerHTML = '';
   actionBtn.disabled = false;
+  updateBetCurrencyTag();
+
+  const crashSidebar = document.getElementById('crash-sidebar');
+  if (crashSidebar) {
+    if (gameId === 'crash') {
+      crashSidebar.classList.remove('hidden');
+    } else {
+      crashSidebar.classList.add('hidden');
+    }
+  }
 
   switch (gameId) {
     case 'dice':
@@ -881,10 +1002,19 @@ function launchGame(gameId) {
           <input type="number" id="dice-target" value="50.00" step="0.01" min="0.01" max="98.99" class="control-input" oninput="updateDiceOdds()">
         </div>
         <div class="control-group" style="grid-column: 1 / -1;">
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button class="btn-quick-target" onclick="setDiceTarget('OVER',25)">25x</button>
+            <button class="btn-quick-target" onclick="setDiceTarget('OVER',50)">50x</button>
+            <button class="btn-quick-target" onclick="setDiceTarget('OVER',75)">75x</button>
+            <button class="btn-quick-target" onclick="setDiceTarget('OVER',90)">90x</button>
+            <button class="btn-quick-target" onclick="setDiceTarget('OVER',96)">96x</button>
+          </div>
+        </div>
+        <div class="control-group" style="grid-column: 1 / -1;">
           <div id="dice-payout-preview" style="font-size:0.75rem; color:#b1bad2; font-weight:600; padding:6px 8px; background:#14222d; border-radius:4px;">Win Chance: 50.00%  •  Payout: 1.9800x</div>
         </div>`;
-      setTimeout(updateDiceOdds, 50);
-      break;
+       setTimeout(updateDiceOdds, 50);
+       break;
 
     case 'limbo':
       options.innerHTML = `
@@ -930,17 +1060,24 @@ function launchGame(gameId) {
       actionBtn.textContent = 'START TOWER';
       break;
 
-        case 'baccarat':
+    case 'baccarat':
       options.innerHTML = `
         <div class="control-group" style="grid-column: 1 / -1;">
-          <label class="control-label">Bet Type</label>
+          <label class="control-label">Main Bet</label>
           <select id="baccarat-bet" class="control-select">
             <option value="PLAYER" selected>Player — pays 2x</option>
             <option value="BANKER">Banker — pays 1.95x</option>
             <option value="TIE">Tie — pays 9x</option>
           </select>
-        </div>`;
-      break;
+        </div>
+        <div style="display:flex;gap:6px;grid-column:1/-1;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:4px;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" id="baccarat-sb-pair" style="margin:0;"> Player Pair (11x)</label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" id="baccarat-sb-banker" style="margin:0;"> Banker Pair (11x)</label>
+        </div>
+        <div class="control-group" style="grid-column: 1 / -1;">
+           <button type="button" class="btn-secondary-action btn-full game-action-btn" onclick="revealBaccaratCards()">REVEAL CARDS</button>
+         </div>`;
+       break;
 
     case 'hilo':
       options.innerHTML = `
@@ -959,7 +1096,11 @@ function launchGame(gameId) {
 
     case 'keno':
       state.selectedKenoNumbers = [];
-      renderKenoBoard();
+      if (window.GameRenderers && window.GameRenderers.renderKenoBoard) {
+        window.GameRenderers.renderKenoBoard();
+      } else {
+        renderKenoBoard();
+      }
       break;
 
     case 'blackjack':
@@ -968,6 +1109,17 @@ function launchGame(gameId) {
 
     case 'slots':
       actionBtn.textContent = 'SPIN REELS';
+      options.innerHTML = `
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:3px;font-size:0.7rem;color:#b1bad2;cursor:pointer;"><input type="checkbox" id="slots-lines-1" checked style="margin:0;"> 1 Line</label>
+            <label style="display:flex;align-items:center;gap:3px;font-size:0.7rem;color:#b1bad2;cursor:pointer;"><input type="checkbox" id="slots-lines-3" checked style="margin:0;"> 3 Lines</label>
+            <label style="display:flex;align-items:center;gap:3px;font-size:0.7rem;color:#b1bad2;cursor:pointer;"><input type="checkbox" id="slots-lines-5" checked style="margin:0;"> 5 Lines</label>
+          </div>
+        </div>
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <div style="text-align:center;font-size:0.7rem;color:#b1bad2;font-weight:600;">Progressive Jackpots: Mini • Minor • Major • Grand</div>
+        </div>`;
       break;
   }
 
@@ -994,6 +1146,7 @@ function handlePrimaryAction() {
     if (state.currentGame === 'mines') return cashoutMines();
     if (state.currentGame === 'tower') return cashoutTower();
     if (state.currentGame === 'hilo') return cashoutHilo();
+    if (state.currentGame === 'blackjack') return blackjackAction('stand');
   }
 
   if (isNaN(betAmount) || betAmount <= 0) {
@@ -1040,7 +1193,11 @@ async function startMinesGame(betAmount) {
       currentMultiplier: 1.00
     };
 
-    renderMinesGrid();
+    if (window.GameRenderers && window.GameRenderers.renderMinesBoard) {
+      window.GameRenderers.renderMinesBoard();
+    } else {
+      renderMinesGrid();
+    }
     const actionBtn = document.getElementById('btn-primary-action');
     actionBtn.textContent = 'CASHOUT (1.00x)';
     actionBtn.disabled = false;
@@ -1073,45 +1230,45 @@ async function revealMineTile(tileIndex) {
       tileIndex
     });
 
-    const tile = document.getElementById(`mine-tile-${tileIndex}`);
-
-    if (data.hitBomb) {
+     if (data.hitBomb) {
       playSound('loss');
-      if (tile) {
-        tile.style.background = '#ff4d4d';
-        tile.textContent = '💣';
+      if (window.GameRenderers && window.GameRenderers.renderMinesLoss) {
+        window.GameRenderers.renderMinesLoss(data);
+      } else {
+        const tile = document.getElementById(`mine-tile-${tileIndex}`);
+        if (tile) { tile.style.background = '#ff4d4d'; tile.textContent = '💣'; }
+        (data.board || []).forEach((v, i) => {
+          if (v === 'BOMB') {
+            const b = document.getElementById(`mine-tile-${i}`);
+            if (b && i !== tileIndex) { b.textContent = '💣'; b.style.opacity = '0.55'; }
+          }
+        });
       }
-      // Reveal where every bomb was hiding
-      (data.board || []).forEach((v, i) => {
-        if (v === 'BOMB') {
-          const b = document.getElementById(`mine-tile-${i}`);
-          if (b && i !== tileIndex) { b.textContent = '💣'; b.style.opacity = '0.55'; }
-        }
-      });
-      alert('BOMB HIT! Game Over.');
-      const bets = state.activeGameState.betAmount;
+      clearGameControls();
       state.activeGameState = null;
-      launchGame('mines');
-      void bets;
+      setTimeout(() => { launchGame('mines'); }, 3000);
     } else {
       playSound('win');
-      if (tile) {
-        tile.style.background = '#00e701';
-        tile.style.color = '#000';
-        tile.textContent = '💎';
-      }
       state.activeGameState.revealedTiles.push(tileIndex);
       state.activeGameState.currentMultiplier = data.multiplier;
 
-      if (data.cashedOut || data.autoCashout) {
-        // Whole board cleared — server auto-cashed out for us
-        if (data.balances) { state.balances = data.balances; updateWalletUI(); }
-        alert(`Board cleared! Auto-cashout ${data.multiplier.toFixed(2)}x — +${data.payout.toFixed(2)} ${state.currency}`);
-        state.activeGameState = null;
-        launchGame('mines');
+      if (window.GameRenderers && window.GameRenderers.renderMinesBoard) {
+        window.GameRenderers.renderMinesBoard();
       } else {
-        document.getElementById('btn-primary-action').textContent =
-          `CASHOUT (${data.multiplier.toFixed(2)}x)`;
+        const tile = document.getElementById(`mine-tile-${tileIndex}`);
+        if (tile) { tile.style.background = '#00e701'; tile.style.color = '#000'; tile.textContent = '💎'; }
+      }
+
+      if (data.cashedOut || data.autoCashout) {
+        if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+        if (window.GameRenderers && window.GameRenderers.renderMinesWin) {
+          window.GameRenderers.renderMinesWin(data);
+        } else {
+          alert(`Board cleared! Auto-cashout ${data.multiplier.toFixed(2)}x — +${data.payout.toFixed(2)} ${state.currency}`);
+        }
+        setTimeout(() => { state.activeGameState = null; launchGame('mines'); }, 3000);
+      } else {
+        document.getElementById('btn-primary-action').textContent = `CASHOUT (${data.multiplier.toFixed(2)}x)`;
       }
     }
   } catch (err) {
@@ -1132,11 +1289,21 @@ async function cashoutMines() {
       gameId: state.activeGameState.gameId
     });
 
-    state.balances = data.balances;
+    if (window.GameRenderers && window.GameRenderers.renderMinesWin) {
+      window.GameRenderers.renderMinesWin({ ...data, payout: data.payout });
+      playSound('win');
+      setTimeout(() => {
+        state.balances = data.balances || state.balances;
+        updateWalletUI();
+      }, 1000);
+    } else {
+    state.balances = data.balances || state.balances;
     updateWalletUI();
     alert(`Cashed out successfully for ${Number(data.payout).toFixed(2)} ${state.currency}!`);
-    state.activeGameState = null;
-    launchGame('mines');
+  }
+  clearGameControls();
+  state.activeGameState = null;
+  setTimeout(() => { launchGame('mines'); }, 3000);
   } catch (err) {
     alert(err.message || 'Mines cashout failed');
   } finally {
@@ -1170,7 +1337,11 @@ async function startTowerGame(betAmount) {
       betAmount
     };
 
-    renderTowerBoard();
+    if (window.GameRenderers && window.GameRenderers.renderTower) {
+      window.GameRenderers.renderTower();
+    } else {
+      renderTowerBoard();
+    }
   } catch (err) {
     alert(err.message || 'Tower start failed');
   } finally {
@@ -1215,25 +1386,45 @@ async function pickTowerTile(floor, tile) {
       tile
     });
 
-    if (data.win) {
+       if (data.win) {
       playSound('win');
       state.activeGameState.multiplier = data.multiplier;
 
       if (data.cashedOut || data.autoCashout) {
         state.balances = data.balances;
         updateWalletUI();
-        alert(`TOWER COMPLETED! ${data.multiplier.toFixed(2)}x — +${Number(data.payout).toFixed(2)} ${state.currency}`);
+        const display = document.getElementById('game-display-area');
+        if (display) {
+          display.innerHTML = '<div style="text-align:center;padding:24px;">' +
+            '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">✅ TOWER COMPLETED</div>' +
+            '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Final Multiplier: ' + data.multiplier.toFixed(2) + 'x</div>' +
+            '<div style="color:#00e701;font-weight:700;margin-top:4px;">Payout: ' + Number(data.payout).toFixed(2) + ' ' + state.currency + '</div>' +
+            '</div>';
+        }
+        clearGameControls();
         state.activeGameState = null;
-        launchGame('tower');
+        setTimeout(() => { launchGame('tower'); }, 2500);
       } else {
-        state.activeGameState.currentFloor = data.currentFloor;
-        renderTowerBoard();
+         state.activeGameState.currentFloor = data.currentFloor;
+         if (window.GameRenderers && window.GameRenderers.renderTower) {
+           window.GameRenderers.renderTower();
+         } else {
+           renderTowerBoard();
+         }
       }
-    } else {
+     } else {
       playSound('loss');
-      alert('TRAP HIT! Tower collapsed.');
+      const display = document.getElementById('game-display-area');
+      if (display) {
+        display.innerHTML = '<div style="text-align:center;padding:24px;">' +
+          '<div style="font-size:2.5rem;font-weight:900;color:#ff4d4d;">💥 TRAP HIT</div>' +
+          '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Tower collapsed at floor ' + state.activeGameState.currentFloor + '</div>' +
+          '<div style="color:#ff4d4d;font-weight:700;margin-top:4px;">Lost ' + Number(state.activeGameState.betAmount).toFixed(2) + ' ' + state.currency + '</div>' +
+          '</div>';
+      }
+      clearGameControls();
       state.activeGameState = null;
-      launchGame('tower');
+      setTimeout(() => { launchGame('tower'); }, 2500);
     }
   } catch (err) {
     alert(err.message || 'Tower tile pick failed');
@@ -1252,11 +1443,20 @@ async function cashoutTower() {
       gameId: state.activeGameState.gameId
     });
 
-    state.balances = data.balances;
-    updateWalletUI();
-    alert(`Cashed out for ${Number(data.payout).toFixed(2)} ${state.currency}!`);
-    state.activeGameState = null;
-    launchGame('tower');
+    const display = document.getElementById('game-display-area');
+    if (display) {
+      display.innerHTML = '<div style="text-align:center;padding:24px;">' +
+        '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">✅ CASHED OUT</div>' +
+        '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Multiplier: ' + data.multiplier.toFixed(2) + 'x</div>' +
+        '<div style="color:#00e701;font-weight:700;margin-top:4px;">+' + Number(data.payout).toFixed(2) + ' ' + state.currency + '</div>' +
+        '</div>';
+    }
+    setTimeout(() => {
+      state.balances = data.balances || state.balances;
+      updateWalletUI();
+      state.activeGameState = null;
+      launchGame('tower');
+    }, 2000);
   } catch (err) {
     alert(err.message || 'Tower cashout failed');
   } finally {
@@ -1281,8 +1481,6 @@ async function executeLimboBet(betAmount) {
       params: { targetMultiplier }
     });
 
-    state.balances = data.balances;
-    updateWalletUI();
     syncFair(data);
 
     const finalResult = data.details.resultMultiplier;
@@ -1315,7 +1513,12 @@ async function executeLimboBet(betAmount) {
 
     requestAnimationFrame(animate);
 
-  } catch (err) {
+    setTimeout(() => {
+      state.balances = data.balances || state.balances;
+      updateWalletUI();
+    }, 1100);
+
+   } catch (err) {
     alert(err.message || 'Limbo bet failed');
     actionBtn.disabled = false;
     state.isProcessing = false;
@@ -1330,9 +1533,17 @@ function updateDiceOdds() {
   const multiplier = winChance > 0 ? (99 / winChance) : 0;
   const out = document.getElementById('dice-payout-preview');
   if (out) {
-    out.textContent = `Win Chance: ${winChance.toFixed(2)}%  •  Payout: ${multiplier > 0 ? multiplier.toFixed(4) + 'x' : '—'}`;
+    out.innerHTML = `<span style="color:#00e701;font-weight:700">${winChance.toFixed(1)}% win chance</span>  •  <span style="color:#b1bad2">Payout: ${multiplier > 0 ? multiplier.toFixed(4) + 'x' : '—'}</span>`;
   }
   return multiplier;
+}
+
+function setDiceTarget(cond, target) {
+  const condSel = document.getElementById('dice-cond');
+  const targetInput = document.getElementById('dice-target');
+  if (condSel) condSel.value = cond;
+  if (targetInput) targetInput.value = target;
+  updateDiceOdds();
 }
 
 async function executeDiceBet(betAmount) {
@@ -1348,17 +1559,33 @@ async function executeDiceBet(betAmount) {
       params: { condition, target }
     });
 
-    state.balances = data.balances;
-    updateWalletUI();
     syncFair(data);
 
-    renderDiceResult(data.details, data.win);
+    if (window.GameRenderers && window.GameRenderers.renderDice) {
+      window.GameRenderers.renderDice(data.details, data.win);
+    } else {
+      renderDiceResult(data.details, data.win);
+    }
     if (data.win) playSound('win'); else playSound('loss');
+
+    setTimeout(() => {
+      state.balances = data.balances || state.balances;
+      updateWalletUI();
+    }, 500);
    } catch (err) {
     alert(err.message || 'Dice bet failed');
   } finally {
     state.isProcessing = false;
   }
+}
+
+function revealBaccaratCards() {
+  if (!state.baccaratPendingReveal) return;
+  if (window.GameRenderers && window.GameRenderers.revealBaccaratCards) {
+    window.GameRenderers.revealBaccaratCards();
+  }
+  const btn = document.querySelector('#game-controls-options button[onclick="revealBaccaratCards()"]');
+  if (btn) btn.style.display = 'none';
 }
 
 function renderDiceResult(details, win) {
@@ -1383,9 +1610,34 @@ function renderDiceResult(details, win) {
       </div>
       <p style="font-weight:700; color:${win ? winColor : loseColor};">${win ? 'WIN' : 'LOSS'}${win ? ' • ' + details.winChance.toFixed(2) + '% chance' : ''}</p>
     </div>`;
+
+  const autoChk = document.getElementById('auto-bet-toggle');
+  if (autoChk && autoChk.checked) {
+    const count = parseInt(document.getElementById('auto-bet-count')?.value || '0') || 0;
+    state.autoBetRemaining = count > 0 ? count : Infinity;
+    state.autoBetGame = state.currentGame;
+  }
 }
 
 /* --- KENO BOARD --- */
+
+async function placeKenoBet() {
+  if (state.isProcessing || !state.currentGame) return;
+  if (state.selectedKenoNumbers.length === 0) {
+    return alert('Please select at least 1 number.');
+  }
+  const betInput = document.getElementById('bet-input');
+  const betAmount = parseFloat(betInput?.value || 0);
+  if (isNaN(betAmount) || betAmount <= 0) {
+    return alert('Please enter a valid bet amount.');
+  }
+  const currentBalance = state.currency === 'GC' ? state.balances.gc : state.balances.sc;
+  if (betAmount > currentBalance) {
+    return alert(`Insufficient ${state.currency} balance.`);
+  }
+  executeStandardBet(betAmount);
+}
+
 function renderKenoBoard(opts = {}) {
   const drawn = opts.drawn || [];
   const drawnSet = new Set(drawn);
@@ -1414,18 +1666,26 @@ function renderKenoBoard(opts = {}) {
 }
 
 function toggleKenoNumber(num) {
-  playSound('click');
-  if (state.selectedKenoNumbers.includes(num)) {
-    state.selectedKenoNumbers = state.selectedKenoNumbers.filter(n => n !== num);
-  } else if (state.selectedKenoNumbers.length < 10) {
-    state.selectedKenoNumbers.push(num);
+  if (window.GameRenderers && window.GameRenderers.toggleKenoNumber) {
+    window.GameRenderers.toggleKenoNumber(num);
+  } else {
+    playSound('click');
+    if (state.selectedKenoNumbers.includes(num)) {
+      state.selectedKenoNumbers = state.selectedKenoNumbers.filter(n => n !== num);
+    } else if (state.selectedKenoNumbers.length < 10) {
+      state.selectedKenoNumbers.push(num);
+    }
+    renderKenoBoard();
   }
-  renderKenoBoard();
 }
 
 /* --- STANDARD BET DISPATCHER --- */
 async function executeStandardBet(betAmount) {
   if (!state.currentGame) return;
+
+  const autoChk = document.getElementById('auto-bet-toggle');
+  const autoCount = parseInt(document.getElementById('auto-bet-count')?.value || '0') || 0;
+  state.autoBetRemaining = (autoChk && autoChk.checked && autoCount > 0) ? autoCount : null;
 
   state.isProcessing = true;
   playSound('chip');
@@ -1444,6 +1704,8 @@ async function executeStandardBet(betAmount) {
     params.selectedNumbers = state.selectedKenoNumbers;
   } else if (state.currentGame === 'baccarat') {
     params.betType = document.getElementById('baccarat-bet')?.value || 'PLAYER';
+    params.sideBetPlayerPair = !!document.getElementById('baccarat-sb-pair')?.checked;
+    params.sideBetBankerPair = !!document.getElementById('baccarat-sb-banker')?.checked;
   } else if (state.currentGame === 'crash') {
     params.targetMultiplier = parseFloat(document.getElementById('crash-target')?.value || 2.0);
   }
@@ -1457,33 +1719,56 @@ async function executeStandardBet(betAmount) {
       params
     });
 
-     state.balances = data.balances;
-     updateWalletUI();
-     syncFair(data);
+      syncFair(data);
 
-     switch (state.currentGame) {
-      case 'slots':    return renderSlotsResult(data.details, data.multiplier);
-      case 'plinko':   return renderPlinkoResult(data.details, data.multiplier, data.payout);
-       case 'keno':     return renderKenoResult(data.details, data.multiplier, data.payout);
-      case 'wheel':    return renderWheelResult(data.details, data.multiplier);
-      case 'baccarat': return renderBaccaratResult(data.details, data.payout);
-      case 'crash':    return renderCrashResult(data.details, data.win, data.payout);
-      default:         break;
-    }
+      switch (state.currentGame) {
+        case 'slots':    GameRenderers.renderSlots(data.details, data.multiplier, data.payout); break;
+        case 'plinko':   GameRenderers.renderPlinko(data.details, data.multiplier, data.payout); break;
+        case 'keno':     GameRenderers.renderKeno(data.details, data.multiplier, data.payout); break;
+        case 'wheel':    GameRenderers.renderWheel(data.details, data.multiplier); break;
+        case 'baccarat': GameRenderers.renderBaccarat(data.details, data.payout); break;
+        case 'dice':     GameRenderers.renderDice(data.details, data.win); break;
+        case 'crash':    GameRenderers.renderCrashGame(data.details, data.win, data.payout); break;
+        default:
+          const display = document.getElementById('game-display-area');
+          if (display) {
+            display.innerHTML = `
+              <div style="text-align:center; padding: 20px;">
+                <div style="font-size:2rem; font-weight:800; color:${data.multiplier > 1 ? '#00e701' : '#ff4d4d'}; margin-bottom: 12px;">
+                  ${data.multiplier.toFixed(2)}x
+                </div>
+                <p style="font-weight: 600; color: #b1bad2;">Payout: ${Number(data.payout).toFixed(2)} ${state.currency}</p>
+              </div>`;
+          }
+          break;
+      }
 
-    const display = document.getElementById('game-display-area');
-    display.innerHTML = `
-      <div style="text-align:center; padding: 20px;">
-        <div style="font-size:2rem; font-weight:800; color:${data.multiplier > 1 ? '#00e701' : '#ff4d4d'}; margin-bottom: 12px;">
-          ${data.multiplier.toFixed(2)}x
-        </div>
-        <p style="font-weight: 600; color: #b1bad2;">Payout: ${Number(data.payout).toFixed(2)} ${state.currency}</p>
-      </div>`;
+      if (state.currentGame !== 'crash' && state.currentGame !== 'wheel' && state.currentGame !== 'slots' && state.currentGame !== 'plinko' && state.currentGame !== 'baccarat') {
+        state.balances = data.balances || state.balances;
+        updateWalletUI();
+      } else if (state.currentGame === 'baccarat') {
+        state.baccaratPendingBalance = data.balances;
+      } else {
+        setTimeout(() => {
+          state.balances = data.balances || state.balances;
+          updateWalletUI();
+        }, 2800);
+      }
   } catch (err) {
     alert(err.message || (state.currentGame + ' failed'));
   } finally {
     actionBtn.disabled = false;
     state.isProcessing = false;
+
+    if (state.autoBetRemaining && state.autoBetRemaining > 0) {
+      state.autoBetRemaining--;
+      if (state.autoBetRemaining > 0) {
+        setTimeout(() => {
+          const betInput = document.getElementById('bet-input');
+          if (betInput) executeStandardBet(parseFloat(betInput.value) || 10);
+        }, 800);
+      }
+    }
   }
 }
 
@@ -1533,24 +1818,36 @@ function slotsGridHTML(grid, hotSet, final) {
   return html + '</div>';
 }
 
-function renderSlotsResult(details, multiplier) {
+function renderSlotsResult(details, multiplier, payout) {
   const display = document.getElementById('game-display-area');
   const grid = details.grid;
   const winLines = details.winningLines || [];
+  const jackpot = details.jackpot || null;
+  const jackpotPool = details.jackpotPool || null;
   let tick = 0;
 
   const timer = setInterval(() => {
     tick++;
     const animGrid = grid.map(row => row.map(() => SLOT_SPIN_SYMBOLS[Math.floor(Math.random() * SLOT_SPIN_SYMBOLS.length)]));
-    display.innerHTML = slotsGridHTML(animGrid, null, false);
+    let html = slotsGridHTML(animGrid, null, false);
+    if (jackpotPool) {
+      html += '<div style="margin-top:8px;text-align:center;max-width:240px;">';
+      ['mini','minor','major','grand'].forEach(t => {
+        const c = {mini:'#8248ff',minor:'#00b3ff',major:'#ff4d4d',grand:'#ff1744'}[t];
+        html += '<span style="display:inline-block;margin:0 4px;font-size:0.65rem;color:' + c + ';">' +
+          t.charAt(0).toUpperCase() + t.slice(1) + ': ' + Number(jackpotPool[t]).toFixed(0) + ' ' + state.currency + '</span>';
+      });
+      html += '</div>';
+    }
+    display.innerHTML = html;
     if (tick >= 12) {
       clearInterval(timer);
       finishSlots();
     }
   }, 60);
 
-    function finishSlots() {
-     const LINES = [
+  function finishSlots() {
+    const LINES = [
       [[0, 0], [0, 1], [0, 2]],
       [[1, 0], [1, 1], [1, 2]],
       [[2, 0], [2, 1], [2, 2]],
@@ -1561,15 +1858,25 @@ function renderSlotsResult(details, multiplier) {
     winLines.forEach(w => LINES[w.line].forEach(([r, c]) => hot.add(r + '-' + c)));
 
     let html = slotsGridHTML(grid, hot, true);
+
+    if (jackpot && jackpot.tier === 'grand') {
+      html += '<div style="text-align:center;margin-top:14px;"><div style="font-size:1.6rem;font-weight:900;color:#ff1744;">🎰 GRAND JACKPOT! 🎰</div>' +
+        '<div style="color:#ff4d4d;font-weight:700;">' + jackpot.amount.toFixed(2) + ' ' + state.currency + '</div></div>';
+    } else if (jackpot) {
+      html += '<div style="text-align:center;margin-top:12px;"><div style="font-weight:800;color:#ff4d4d;">' +
+        jackpot.tier.toUpperCase() + ' JACKPOT!</div><div style="font-size:0.78rem;color:#b1bad2;">' + jackpot.amount.toFixed(2) + ' ' + state.currency + '</div></div>';
+    }
+
     if (winLines.length) {
-      html += '<div style="text-align:center;margin-top:14px;font-weight:800;color:#00e701;font-size:1.15rem;">WIN ' + multiplier.toFixed(2) + 'x</div>';
+      html += '<div style="text-align:center;margin-top:12px;font-weight:800;color:#00e701;font-size:1.1rem;">💰 WIN ' + multiplier.toFixed(2) + 'x</div>';
       html += '<div style="text-align:center;color:#b1bad2;font-size:0.82rem;margin-top:4px;">' +
-        winLines.map(w => SLOT_LINE_NAMES[w.line] + ' pays ' + w.multiplier + 'x').join(' • ') + '</div>';
+        winLines.map(w => SLOT_LINE_NAMES[w.line] + ' pays ' + w.multiplier.toFixed(2) + 'x').join(' • ') + '</div>';
+      playSound('win');
     } else {
-      html += '<div style="text-align:center;margin-top:14px;color:#ff4d4d;font-weight:700;">No winning lines</div>';
+      html += '<div style="text-align:center;margin-top:14px;color:#ff4d4d;font-weight:700;">No winning lines 💀</div>';
+      playSound('loss');
     }
     display.innerHTML = html;
-    if (winLines.length) playSound('win'); else playSound('loss');
   }
 }
 
@@ -1726,16 +2033,43 @@ function blackjackOutcomeText(outcome, multiplier, payout) {
   }
 }
 
+/* --- BLACKJACK RENDERER --- */
+function blackjackHandScore(hand) {
+  if (!hand || hand.length === 0) return 0;
+  let total = 0;
+  let aces = 0;
+  for (const card of hand) {
+    const val = card.label || card.value;
+    if (val === 'A') { aces++; total += 11; }
+    else if (['J', 'Q', 'K', '10'].includes(String(val))) total += 10;
+    else total += parseInt(val, 10) || 0;
+  }
+  while (total > 21 && aces > 0) { total -= 10; aces--; }
+  return total;
+}
+
 function renderBlackjackHands(playerHand, dealerShown, holeHidden, msgObj) {
   const display = document.getElementById('game-display-area');
+  const playerScore = blackjackHandScore(playerHand);
+  let dealerScoreStr = '—';
+  if (!holeHidden) {
+    dealerScoreStr = blackjackHandScore(dealerShown).toString();
+  }
+
   display.innerHTML =
-    '<div style="max-width:430px;margin:auto;text-align:center;">' +
-    '<div class="bj-row-label">DEALER</div>' +
-    '<div class="hand-row">' + dealerShown.map(c => cardHTML(c, holeHidden)).join('') + '</div>' +
+    '<div style="max-width:460px;margin:auto;text-align:center;">' +
+    '<div class="bj-row-label" style="display:flex;justify-content:space-between;">' +
+      '<span>🂠 DEALER • ' + dealerScoreStr + '</span>' +
+      '<span style="color:var(--text-muted);font-size:0.8rem;">Target: 21</span>' +
+    '</div>' +
+    '<div class="hand-row">' + dealerShown.map(c => cardHTML(c, holeHidden, false)).join('') + '</div>' +
     '<div style="margin:10px 0;height:1px;background:#243542;"></div>' +
-    '<div class="bj-row-label">YOU</div>' +
-    '<div class="hand-row">' + playerHand.map(c => cardHTML(c, false)).join('') + '</div>' +
-    (msgObj ? '<div style="margin-top:14px;font-weight:800;color:' + msgObj.color + ';">' + msgObj.text + '</div>' : '') +
+    '<div class="bj-row-label" style="display:flex;justify-content:space-between;">' +
+      '<span>🃏 YOU • <span style="color:var(--accent-blue);font-weight:800;">' + playerScore + '</span></span>' +
+      '<span style="color:' + (playerScore > 21 ? '#ff4d4d' : playerScore === 21 ? '#00e701' : '#b1bad2') + ';font-size:0.8rem;font-weight:700;">' + (playerScore > 21 ? 'BUST' : playerScore === 21 ? 'BLACKJACK' : '') + '</span>' +
+    '</div>' +
+    '<div class="hand-row">' + playerHand.map(c => cardHTML(c, false, false)).join('') + '</div>' +
+    (msgObj ? '<div style="margin-top:14px;padding:8px;border-radius:8px;background:rgba(' + (msgObj.color.includes('e7') ? '0,231,1' : msgObj.color.includes('4d4d') ? '255,77,77' : '255,199,0') + ',0.12);font-weight:800;color:' + msgObj.color + ';">' + msgObj.text + '</div>' : '') +
     '</div>';
 }
 
@@ -1749,13 +2083,17 @@ async function startBlackjackGame(betAmount) {
     });
     if (data.balances) { state.balances = data.balances; updateWalletUI(); }
 
-    if (data.resolved) {
-      renderBlackjackHands(data.playerHand, data.dealerHand, false,
-        blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
-      if (data.multiplier > 1) playSound('win'); else playSound('chip');
-      resetRoundUI('DEAL HAND');
-      state.activeGameState = null;
-    } else {
+     if (data.resolved) {
+        renderBlackjackHands(data.playerHand, data.dealerHand, false,
+          blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+        if (data.multiplier > 1) playSound('win'); else playSound('loss');
+        clearGameControls();
+        state.activeGameState = null;
+        setTimeout(() => {
+          if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+          resetRoundUI('DEAL HAND');
+        }, 2000);
+     } else {
       state.activeGameState = {
         type: 'blackjack',
         gameId: data.gameId,
@@ -1764,8 +2102,8 @@ async function startBlackjackGame(betAmount) {
       };
       renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
       document.getElementById('game-controls-options').innerHTML =
-        '<button type="button" class="btn-play" style="padding:12px 26px;font-weight:800;" onclick="blackjackAction(\'hit\')">HIT</button>' +
-        '<button type="button" class="btn-secondary-action" style="padding:12px 26px;font-weight:800;" onclick="blackjackAction(\'stand\')">STAND</button>';
+        '<button type="button" class="btn-play game-action-btn" onclick="blackjackAction(\'hit\')">HIT</button>' +
+        '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'stand\')">STAND</button>';
       resetRoundUI('IN PLAY…');
       document.getElementById('btn-primary-action').disabled = true;
     }
@@ -1789,14 +2127,18 @@ async function blackjackAction(action) {
     if (data.balances) { state.balances = data.balances; updateWalletUI(); }
 
     if (data.resolved) {
-      renderBlackjackHands(data.playerHand, data.dealerHand, false,
-        blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
-      if (data.multiplier > 1) playSound('win'); else playSound('loss');
-      resetRoundUI('DEAL HAND');
-      state.activeGameState = null;
-    } else {
-      renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
-    }
+       renderBlackjackHands(data.playerHand, data.dealerHand, false,
+         blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+       if (data.multiplier > 1) playSound('win'); else playSound('loss');
+       clearGameControls();
+       state.activeGameState = null;
+       setTimeout(() => {
+         if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+         resetRoundUI('DEAL HAND');
+       }, 2000);
+     } else {
+       renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+     }
   } catch (err) {
     alert(err.message || 'Blackjack ' + action + ' failed');
   } finally {
@@ -1853,8 +2195,12 @@ async function startHiloGame(betAmount) {
       multiplier: 1.00,
       betAmount
     };
-    renderHiloBoard(null);
-    renderHiloControls();
+     if (window.GameRenderers && window.GameRenderers.renderHiloBoard) {
+       window.GameRenderers.renderHiloBoard(null);
+     } else {
+       renderHiloBoard(null);
+     }
+     renderHiloControls();
 
     const actionBtn = document.getElementById('btn-primary-action');
     actionBtn.textContent = 'CASHOUT (1.00x)';
@@ -1876,25 +2222,30 @@ async function hiloGuess(guess) {
       guess
     });
 
-    if (!data.win) {
-      if (data.balances) { state.balances = data.balances; updateWalletUI(); }
-      state.activeGameState.prevCard = state.activeGameState.currentCard;
-      state.activeGameState.currentCard = data.nextCard;
-      renderHiloBoard({ text: 'Wrong guess — you needed ' + guess.toLowerCase() + '. Round over.', color: '#ff4d4d' });
-      playSound('loss');
-      document.getElementById('game-controls-options').innerHTML = '';
-      state.activeGameState = null;
-      setTimeout(() => { launchGame('hilo'); }, 1500);
-    } else if (data.cashedOut || data.autoCashout) {
-      if (data.balances) { state.balances = data.balances; updateWalletUI(); }
-      state.activeGameState.multiplier = data.multiplier;
-      state.activeGameState.currentCard = data.nextCard;
-      state.activeGameState.prevCard = null;
-      renderHiloBoard({ text: 'Board boundary reached — auto-cashout ' + data.multiplier.toFixed(2) + 'x, +' + Number(data.payout).toFixed(2) + ' ' + state.currency, color: '#00e701' });
-      playSound('win');
-      document.getElementById('game-controls-options').innerHTML = '';
-      state.activeGameState = null;
-      resetRoundUI('PLACE BET');
+     if (!data.win) {
+       state.activeGameState.prevCard = state.activeGameState.currentCard;
+       state.activeGameState.currentCard = data.nextCard;
+       renderHiloBoard({ text: 'Wrong guess — you needed ' + guess.toLowerCase() + '. Round over.', color: '#ff4d4d' });
+       playSound('loss');
+       document.getElementById('game-controls-options').innerHTML = '';
+       setTimeout(() => {
+         if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+         state.activeGameState = null;
+         launchGame('hilo');
+       }, 1500);
+     } else if (data.cashedOut || data.autoCashout) {
+       const payout = Number(data.payout || 0).toFixed(2);
+       state.activeGameState.multiplier = data.multiplier;
+       state.activeGameState.currentCard = data.nextCard;
+       state.activeGameState.prevCard = null;
+       renderHiloBoard({ text: 'Board boundary reached — auto-cashout ' + data.multiplier.toFixed(2) + 'x, +' + payout + ' ' + state.currency, color: '#00e701' });
+       playSound('win');
+       document.getElementById('game-controls-options').innerHTML = '';
+       setTimeout(() => {
+         if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+         state.activeGameState = null;
+         resetRoundUI('PLACE BET');
+       }, 2000);
     } else {
       const ags = state.activeGameState;
       ags.prevCard = ags.currentCard;
@@ -1922,11 +2273,14 @@ async function cashoutHilo() {
     const data = await apiRequest('/api/play/hilo/cashout', 'POST', {
       gameId: state.activeGameState.gameId
     });
-    if (data.balances) { state.balances = data.balances; updateWalletUI(); }
-    renderHiloBoard({ text: 'Cashed out ' + data.multiplier.toFixed(2) + 'x — +' + Number(data.payout).toFixed(2) + ' ' + state.currency, color: '#00e701' });
+    const payout = Number(data.payout || 0).toFixed(2);
+    renderHiloBoard({ text: 'Cashed out ' + data.multiplier.toFixed(2) + 'x — +' + payout + ' ' + state.currency, color: '#00e701' });
     document.getElementById('game-controls-options').innerHTML = '';
-    state.activeGameState = null;
-    resetRoundUI('PLACE BET');
+    setTimeout(() => {
+      if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+      state.activeGameState = null;
+      resetRoundUI('PLACE BET');
+    }, 2000);
   } catch (err) {
     alert(err.message || 'HiLo cashout failed');
   } finally {
@@ -2086,7 +2440,15 @@ let kycControls = '';
       <div class="form-group">
         <label class="form-label">Sweeps Coins (SC)</label>
         <input type="text" class="form-input" readonly value="${sc}">
-      </div>
+       </div>
+       <div class="form-group">
+         <label class="form-label">Unplayed SC</label>
+         <input type="text" class="form-input" readonly value="${Number(state.balances.sc_unplayed || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}">
+       </div>
+       <div class="form-group">
+         <label class="form-label">Redeemable SC</label>
+         <input type="text" class="form-input" readonly value="${Number(state.balances.sc_played || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}">
+       </div>
       <div class="form-group" style="margin-top: 10px;">
         <label class="form-label">KYC Status</label>
         <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
@@ -2138,10 +2500,231 @@ function injectMobileAndNavigationDOM() {
       </div>`;
     document.body.appendChild(profileModal);
   }
+
+  // Bonus Pages Modals
+  if (!document.getElementById('modal-bonus')) {
+    const bonusModal = document.createElement('div');
+    bonusModal.id = 'modal-bonus';
+    bonusModal.className = 'modal-backdrop hidden';
+    bonusModal.innerHTML = `
+      <div class="modal-box bonus-modal" style="max-width: 600px;">
+        <div class="modal-header-flex">
+          <h3>🎁 Daily Bonuses</h3>
+          <button class="x-close" onclick="closeBonusModal()">×</button>
+        </div>
+        <p class="modal-subtitle">Claim daily rewards, complete challenges, and collect rakeback.</p>
+        <div id="bonus-content">
+          <div style="padding:20px;text-align:center;color:#b1bad2;">Loading bonus data...</div>
+        </div>
+        <div class="modal-actions-flex" style="margin-top:20px;">
+          <button type="button" onclick="closeBonusModal()" class="btn-secondary-action btn-full">Close</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bonusModal);
+  }
 }
 
-// ==========================================================================
-// 11b. AUTH & AGE GATE CONTROLLERS
+function openBonusModal() {
+  playSound('click');
+  document.getElementById('modal-bonus')?.classList.remove('hidden');
+  loadBonusContent();
+}
+
+function closeBonusModal() {
+  playSound('click');
+  document.getElementById('modal-bonus')?.classList.add('hidden');
+}
+
+async function loadBonusContent() {
+  const content = document.getElementById('bonus-content');
+  if (!content) return;
+  content.innerHTML = '<div style="padding:20px;text-align:center;color:#b1bad2;">Loading bonus data...</div>';
+
+  try {
+    const [bonusStatus, challenges, rakeback] = await Promise.all([
+      apiRequest('/api/bonus/status').catch(() => null),
+      apiRequest('/api/challenges').catch(() => null),
+      apiRequest('/api/rakeback/status').catch(() => null)
+    ]);
+
+    let html = '';
+
+    // Daily Claim Card
+    html += '<div class="bonus-card" style="margin-bottom:16px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+    html += '<h4 style="margin:0;font-size:1.05rem;">🎁 Daily Claim</h4>';
+    html += '</div>';
+    html += '<div style="font-size:0.85rem;color:#b1bad2;margin-bottom:10px;">Reward: <span style="color:#00e701;font-weight:700;">10,000 GC + 10.00 SC</span></div>';
+
+    if (bonusStatus && bonusStatus.canClaim) {
+      html += '<button type="button" class="btn-play btn-full game-action-btn" onclick="claimDaily()">Claim 10,000 GC + 10.00 SC</button>';
+    } else if (bonusStatus) {
+      const nextMs = bonusStatus.nextClaimMs || 0;
+      html += '<div style="display:flex;align-items:center;gap:8px;">';
+      html += '<span class="countdown-timer" id="daily-countdown" style="font-family:monospace;font-size:1.15rem;font-weight:800;color:#ff914d;">' + formatCountdown(nextMs) + '</span>';
+      html += '<span style="color:#b1bad2;font-size:0.8rem;">until next claim</span>';
+      html += '</div>';
+    } else {
+      html += '<button type="button" class="btn-play btn-full" onclick="claimDaily()">Claim Now</button>';
+    }
+    html += '</div>';
+
+    // Challenges Card
+    html += '<div class="bonus-card" style="margin-bottom:16px;">';
+    html += '<h4 style="margin:0 0 8px;font-size:1.05rem;">🎯 Daily Challenges</h4>';
+    if (challenges && challenges.challenges) {
+      challenges.challenges.forEach(c => {
+        const pct = Math.min(100, (c.progress / c.target) * 100);
+        html += '<div style="margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;font-size:0.8rem;">';
+        html += '<span style="color:#b1bad2;">' + c.desc + '</span>';
+        html += '<span style="color:#b1bad2;">' + c.progress + '/' + c.target + '</span>';
+        html += '</div>';
+        html += '<div style="background:#14222d;border-radius:4px;height:6px;overflow:hidden;">';
+        html += '<div style="width:' + pct + '%;height:100%;background:linear-gradient(90deg,#00e701,#ffc700);"></div>';
+        html += '</div>';
+        if (c.completed && !c.claimed) {
+          html += '<button type="button" class="btn-play btn-full game-action-btn" style="margin-top:4px;font-size:0.8rem;padding:6px 12px;" onclick="claimChallenge(\'' + c.id + '\')">Claim ' + c.minReward + '-' + c.maxReward + ' SC</button>';
+        } else if (c.claimed) {
+          html += '<span style="font-size:0.75rem;color:#00e701;">Claimed ✓</span>';
+        } else {
+          html += '<span style="font-size:0.75rem;color:#b1bad2;">Reward: ' + c.minReward + '-' + c.maxReward + ' SC</span>';
+        }
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+
+    // Rakeback Cards
+    html += '<div class="bonus-card">';
+    html += '<h4 style="margin:0 0 8px;font-size:1.05rem;">💎 Rakeback Dashboard</h4>';
+    if (rakeback && rakeback.rakeback) {
+      ['daily', 'weekly', 'monthly'].forEach(tier => {
+        const r = rakeback.rakeback[tier];
+        const color = tier === 'daily' ? '#00b3ff' : tier === 'weekly' ? '#8248ff' : '#ff4d4d';
+        html += '<div style="background:rgba(' + hexToRgb(color) + ',0.06);border:1px solid rgba(' + hexToRgb(color) + ',0.3);border-radius:8px;padding:10px;margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;">';
+        html += '<span style="font-weight:700;color:' + color + '">' + tier.charAt(0).toUpperCase() + ' Rakeback</span>';
+        html += '<span style="font-size:0.75rem;color:#b1bad2;">' + r.period + '</span>';
+        html += '</div>';
+        html += '<div style="font-size:0.85rem;color:#b1bad2;margin-top:4px;">Loss tracked: <span style="color:#ff4d4d;">' + r.lossTracked.toFixed(2) + ' SC</span></div>';
+        html += '<div style="font-size:0.8rem;color:#b1bad2;">Rate: ' + r.rateMin + '% - ' + r.rateMax + '% • Claimable: <span style="color:#00e701;font-weight:700;">' + r.claimable.toFixed(2) + ' SC</span></div>';
+        if (r.canClaim) {
+          html += '<button type="button" class="btn-play btn-full game-action-btn" style="margin-top:6px;font-size:0.8rem;padding:6px 12px;" onclick="claimRakeback(\'' + tier + '\')">Claim ' + r.claimable.toFixed(2) + ' SC</button>';
+        } else if (r.claimable > 0) {
+          html += '<div style="font-family:monospace;font-size:0.9rem;color:#ff914d;margin-top:4px;">' + formatCountdown(r.nextClaimMs) + '</div>';
+        } else {
+          html += '<button type="button" class="btn-secondary-action btn-full" style="margin-top:6px;font-size:0.8rem;padding:6px 12px;" disabled>No losses to rebate</button>';
+        }
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+
+    content.innerHTML = html;
+
+    // Start countdown timers
+    if (bonusStatus && !bonusStatus.canClaim && bonusStatus.nextClaimMs > 0) {
+      startCountdown('daily-countdown', bonusStatus.nextClaimMs, 0);
+    }
+    if (rakeback && rakeback.rakeback) {
+      ['daily', 'weekly', 'monthly'].forEach(tier => {
+        const r = rakeback.rakeback[tier];
+        if (!r.canClaim && r.nextClaimMs > 0) {
+          startCountdown('rakeback-countdown-' + tier, r.nextClaimMs, 0);
+        }
+      });
+    }
+
+  } catch (err) {
+    content.innerHTML = '<div style="padding:20px;text-align:center;color:#ff4d4d;">Failed to load bonus data: ' + err.message + '</div>';
+  }
+}
+
+function formatCountdown(ms) {
+  if (ms <= 0) return '00:00:00';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return pad2(h) + ':' + pad2(m) + ':' + pad2(s);
+}
+
+function pad2(n) { return n < 10 ? '0' + n : n; }
+
+function startCountdown(elemId, ms, fallback) {
+  let remaining = ms;
+  const el = document.getElementById(elemId);
+  if (!el) return;
+  el.textContent = formatCountdown(remaining);
+  const interval = setInterval(() => {
+    remaining -= 1000;
+    if (remaining <= 0) {
+      clearInterval(interval);
+      el.textContent = formatCountdown(0);
+      el.innerHTML = '<span style="color:#00e701;font-weight:700;">READY!</span>';
+    } else {
+      el.textContent = formatCountdown(remaining);
+    }
+  }, 1000);
+}
+
+function hexToRgb(hex) {
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return parseInt(hex.slice(0,2),16) + ',' + parseInt(hex.slice(2,4),16) + ',' + parseInt(hex.slice(4,6),16);
+}
+
+async function claimDaily() {
+  playSound('chip');
+  try {
+    const data = await apiRequest('/api/bonus/daily-claim', 'POST');
+    if (data.success) {
+      state.balances = data.balances;
+      updateWalletUI();
+      playSound('win');
+      document.getElementById('bonus-content').innerHTML =
+        '<div style="padding:30px;text-align:center;">' +
+        '<div style="font-size:1.8rem;font-weight:900;color:#00e701;">✅ Claimed!</div>' +
+        '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">+' + data.claimed.gc + ' GC + ' + data.claimed.sc.toFixed(2) + ' SC</div>' +
+        '</div>';
+      setTimeout(() => loadBonusContent(), 1500);
+    }
+  } catch (err) {
+    alert(err.message || 'Daily claim failed');
+  }
+}
+
+async function claimChallenge(challengeId) {
+  playSound('chip');
+  try {
+    const data = await apiRequest('/api/challenges/claim', 'POST', { challengeId });
+    if (data.success) {
+      state.balances = data.balances;
+      updateWalletUI();
+      playSound('win');
+      alert('Challenge claimed! +' + data.reward.toFixed(2) + ' SC');
+      loadBonusContent();
+    }
+  } catch (err) {
+    alert(err.message || 'Challenge claim failed');
+  }
+}
+
+async function claimRakeback(tier) {
+  playSound('chip');
+  try {
+    const data = await apiRequest('/api/rakeback/claim', 'POST', { tier });
+    if (data.success) {
+      state.balances = data.balances;
+      updateWalletUI();
+      playSound('win');
+      alert(tier.charAt(0).toUpperCase() + tier.slice(1) + ' rakeback claimed! +' + data.claimed.toFixed(2) + ' SC');
+      loadBonusContent();
+    }
+  } catch (err) {
+    alert(err.message || 'Rakeback claim failed');
+  }
+}
 // ==========================================================================
 
 function confirmAge() {
@@ -2284,7 +2867,15 @@ async function continueAsGuest() {
 }
 
 async function initSessionFromToken() {
-  await fetchFairSeed();
+  try {
+    await fetchFairSeed();
+    const data = await apiRequest('/api/user/me');
+    if (data.balances) state.balances = data.balances;
+    if (data.username) state.profile = data;
+  } catch (err) {
+    console.warn('[initSessionFromToken]: Auth failure, clearing token.', err.message);
+    localStorage.removeItem('casino_token');
+  }
   updateWalletUI();
   if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
     connectWebSocket();
@@ -2372,3 +2963,22 @@ function setupGlobalEventListeners() {
 }
 
 window.addEventListener('DOMContentLoaded', initSession);
+['click', 'touchstart', 'keydown'].forEach(evt => {
+  window.addEventListener(evt, initAudioContext, { once: true });
+});
+
+window.addEventListener('hashchange', () => {
+  const hash = window.location.hash.slice(1);
+  if (hash && ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
+    if (state.currentGame !== hash) launchGame(hash);
+  }
+});
+
+if (window.location.hash) {
+  const hash = window.location.hash.slice(1);
+  if (['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
+    window.addEventListener('load', () => {
+      if (state.currentView !== 'game') launchGame(hash);
+    });
+  }
+}

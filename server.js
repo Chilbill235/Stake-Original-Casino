@@ -6,7 +6,11 @@ const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
+
+const DATA_DIR = path.join(__dirname, 'data');
+const DATA_FILE = path.join(DATA_DIR, 'casino-data.json');
 
 // -----------------------------------------------------------------------------
 // 1. CONFIGURATION & CONSTANTS
@@ -36,11 +40,61 @@ const COIN_PACKAGES = {
 // 2. IN-MEMORY DATA STORES
 // -----------------------------------------------------------------------------
 const users = new Map();
-const processedEvents = new Set(); 
-const transactions = new Map();   
-const activeSessions = new Map(); 
-const userSeeds = new Map();      
-const amoeRegistry = new Map();   
+const processedEvents = new Set();
+const transactions = new Map();
+const activeSessions = new Map();
+const userSeeds = new Map();
+const amoeRegistry = new Map();
+
+// -----------------------------------------------------------------------------
+// 2b. PERSISTENCE — save/load users to file so balances survive restarts
+// -----------------------------------------------------------------------------
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, 'utf8');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data.users) {
+        for (const u of data.users) { users.set(u.id, u); }
+      }
+      if (data.transactions) {
+        for (const [k, v] of Object.entries(data.transactions)) { transactions.set(Number(k), v); }
+      }
+      if (data.userSeeds) {
+        for (const [k, v] of Object.entries(data.userSeeds)) { userSeeds.set(Number(k), v); }
+      }
+      console.log('[Persistence]: Loaded ' + users.size + ' users from disk.');
+    }
+  } catch (e) {
+    console.error('[Persistence]: Failed to load data:', e.message);
+  }
+}
+
+function saveData() {
+  try {
+    ensureDataDir();
+    const data = {
+      users: Array.from(users.values()),
+      transactions: Object.fromEntries(transactions),
+      userSeeds: Object.fromEntries(userSeeds)
+    };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    console.error('[Persistence]: Failed to save data:', e.message);
+  }
+}
+
+// Save every 30 seconds and on key events
+setInterval(saveData, 30000);
+process.on('SIGINT', () => { saveData(); process.exit(); });
+process.on('SIGTERM', () => { saveData(); process.exit(); });
+
+loadData();   
 
 // Seed Initial Demo User
 users.set(1, { 
@@ -198,12 +252,13 @@ function debitBet(user, currency, amount) {
     }
     updateVipAndRakeback(user, amount, 0);
   }
+  saveData();
 }
 
-/** Credits winnings to the correct currency bucket. */
 function creditWin(user, currency, amount) {
   if (currency === 'GC') user.gc_balance += amount;
   else user.sc_played += amount;
+  saveData();
 }
 
 function balancesOf(user) {
@@ -231,7 +286,7 @@ function getOwnedSession(req, res, gameId) {
 // -----------------------------------------------------------------------------
 // 5. GAME ENGINES
 // -----------------------------------------------------------------------------
-const { GAMES, GAME_FLOAT_COUNTS } = require('./engine/serverGames');
+const { GAMES, GAME_FLOAT_COUNTS, round2 } = require('./engine/serverGames');
 // -----------------------------------------------------------------------------
 // 6. EXPRESS APP & MIDDLEWARES
 // -----------------------------------------------------------------------------
@@ -280,6 +335,7 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
       if (user) {
         user.gc_balance += gcAmount;
         user.sc_unplayed += scAmount;
+        saveData();
 
         logTransaction(userId, 'PURCHASE', `Purchased ${session.metadata.packageName || 'Coin Package'}`, gcAmount, scAmount, { stripeSessionId: session.id });
 
@@ -479,6 +535,7 @@ app.post('/api/auth/guest', (req, res) => {
   };
   users.set(guestId, newUser);
   transactions.set(guestId, []);
+  saveData();
 
   const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ 
@@ -541,6 +598,7 @@ app.post('/api/auth/register', async (req, res) => {
   };
   users.set(userId, newUser);
   transactions.set(userId, []);
+  saveData();
 
   const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '7d' });
   res.json({
@@ -681,6 +739,7 @@ app.post('/api/user/kyc/verify-sandbox', verifyToken, (req, res) => {
   user.kyc.tier = 2;
   user.kyc.verifiedAt = new Date().toISOString();
   user.kyc.rejectionReason = null;
+  saveData();
 
   res.json({
     success: true,
@@ -710,6 +769,7 @@ app.post('/api/user/claim-rakeback', verifyToken, (req, res) => {
   const amount = user.rakebackAccruedSC;
   user.sc_unplayed += amount;
   user.rakebackAccruedSC = 0;
+  saveData();
 
   logTransaction(user.id, 'RAKEBACK', `Claimed Rakeback`, 0, amount);
 
@@ -745,6 +805,7 @@ app.post('/api/user/daily-bonus', verifyToken, (req, res) => {
 
   user.gc_balance += gcReward;
   user.sc_unplayed += scReward;
+  saveData();
 
   logTransaction(user.id, 'BONUS', `Daily Claim (Day ${user.dailyStreak})`, gcReward, scReward);
 
@@ -776,6 +837,7 @@ app.post('/api/user/rewarded-ad', verifyToken, (req, res) => {
 
   user.gc_balance += gcReward;
   user.sc_unplayed += scReward;
+  saveData();
 
   logTransaction(user.id, 'AD_REWARD', `Watched Video Ad (#${user.adsWatchedToday})`, gcReward, scReward);
 
@@ -895,6 +957,7 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
     });
 
     user.sc_played -= amount;
+    saveData();
     logTransaction(user.id, 'WITHDRAWAL', `Redeemed ${amount} SC ($${amount.toFixed(2)} USD)`, 0, -amount);
 
     res.json({
@@ -949,7 +1012,10 @@ require('./engine/sessionGames').register(app, {
   creditWin,
   balancesOf,
   validateWager,
-  verifyToken
+  verifyToken,
+  ensureBonusFields,
+  updateTelemetry,
+  saveData
 });
 // -----------------------------------------------------------------------------
 // 12. GENERAL GAMES EXECUTION ENDPOINT
@@ -982,6 +1048,10 @@ app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
        currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
    }
 
+   // Track telemetry for challenges and rakeback
+   ensureBonusFields(user);
+   updateTelemetry(user, gameId, currency, amount, isWin, payout, outcome);
+
    broadcastLiveBet({
      username: user.username,
      game: gameId.toUpperCase(),
@@ -1006,8 +1076,402 @@ app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 12b. ERROR HANDLING & JSON 404 FALLBACK
+// 12. BONUS SYSTEMS: Daily Claim, Challenges, Rakeback
 // -----------------------------------------------------------------------------
+
+// In-memory lock map for idempotency (prevents race conditions on concurrent claims)
+const claimLocks = new Map();
+
+function acquireLock(userId, operation) {
+  const key = `${userId}:${operation}`;
+  if (claimLocks.has(key)) return false;
+  claimLocks.set(key, true);
+  return true;
+}
+
+function releaseLock(userId, operation) {
+  claimLocks.delete(`${userId}:${operation}`);
+}
+
+// Challenge definitions — pool to draw 3 from each day
+const CHALLENGE_POOL = [
+  { id: 'bet_100_sc',           desc: 'Wager 100 SC in 24 hours',           task: 'sc_wagered', target: 100,  minReward: 1.00,  maxReward: 5.00  },
+  { id: 'bet_50_gc',            desc: 'Wager 50,000 GC in 24 hours',         task: 'gc_wagered', target: 50000, minReward: 1.00,  maxReward: 5.00  },
+  { id: 'rounds_10',            desc: 'Play 10 rounds in 24 hours',          task: 'rounds',     target: 10,   minReward: 0.50,  maxReward: 3.00  },
+  { id: 'win_5_rounds',         desc: 'Win 5 rounds in 24 hours',            task: 'rounds_won', target: 5,    minReward: 1.00,  maxReward: 8.00  },
+  { id: 'play_3_games',         desc: 'Play 3 different games in 24 hours',  task: 'games_played', target: 3,  minReward: 0.50,  maxReward: 2.50 },
+  { id: 'lose_5_sc_max',        desc: 'Wager 100 SC on Dice (OVER 90)',      task: 'dice_over90', target: 100, minReward: 0.50,  maxReward: 15.00 },
+  { id: 'crash_2x_cashout',     desc: 'Cashout Crash at 2x or higher 3 times', task: 'crash_cashout_2x', target: 3, minReward: 0.50, maxReward: 7.00 },
+  { id: 'blackjack_3_hands',    desc: 'Play 3 Blackjack hands',              task: 'blackjack_hands', target: 3, minReward: 0.50, maxReward: 3.00 }
+];
+
+// Initialize user fields for bonus systems
+function ensureBonusFields(user) {
+  if (!user.bonus) user.bonus = {};
+  if (!user.bonus.lastClaimAt) user.bonus.lastClaimAt = 0;
+  if (!user.bonus.claimStreak) user.bonus.claimStreak = 0;
+  if (!user.bonus.dailyClaimed) user.bonus.dailyClaimed = false;
+  if (!user.bonus.challenges) user.bonus.challenges = [];
+  if (!user.bonus.challengeDate) user.bonus.challengeDate = '';
+  if (!user.bonus.telemetry) user.bonus.telemetry = {
+    scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+    gamesPlayed: [],
+    dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+    weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+    monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+    diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+    history: []
+  };
+  // Convert legacy Set to array if needed
+  if (user.bonus.telemetry && user.bonus.telemetry.gamesPlayed && !(user.bonus.telemetry.gamesPlayed instanceof Set)) {
+    if (!Array.isArray(user.bonus.telemetry.gamesPlayed)) {
+      user.bonus.telemetry.gamesPlayed = [];
+    }
+  }
+  if (!user.bonus.rakeback) user.bonus.rakeback = {
+    lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+    dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+  };
+  return user.bonus;
+}
+
+// Generate daily challenges for a user (3 random challenges, same day)
+function generateDailyChallenges(user) {
+  const today = new Date().toISOString().slice(0, 10);
+  const bonus = ensureBonusFields(user);
+  if (bonus.challengeDate === today && bonus.challenges.length === 3) return bonus.challenges;
+
+  const shuffled = [...CHALLENGE_POOL].sort(() => Math.random() - 0.5).slice(0, 3);
+  bonus.challenges = shuffled.map(c => ({
+    id: c.id,
+    desc: c.desc,
+    task: c.task,
+    target: c.target,
+    minReward: c.minReward,
+    maxReward: c.maxReward,
+    progress: 0,
+    claimed: false,
+    completed: false
+  }));
+  bonus.challengeDate = today;
+  return bonus.challenges;
+}
+
+// Evaluate a challenge against current telemetry
+function evaluateChallenge(user, challenge) {
+  const t = ensureBonusFields(user).telemetry;
+  const games = Array.isArray(t.gamesPlayed) ? t.gamesPlayed : [];
+  const uniqueGames = [...new Set(games)];
+  switch (challenge.task) {
+    case 'sc_wagered':         return t.scWagered || 0;
+    case 'gc_wagered':         return t.gcWagered || 0;
+    case 'rounds':             return t.rounds || 0;
+    case 'rounds_won':         return t.roundsWon || 0;
+    case 'games_played':       return uniqueGames.length;
+    case 'dice_over90':        return t.diceOver90 || 0;
+    case 'crash_cashout_2x':   return t.crashCashout2x || 0;
+    case 'blackjack_hands':    return t.blackjackHands || 0;
+    default:                   return 0;
+  }
+}
+
+// Update telemetry after a game round
+function updateTelemetry(user, gameId, currency, betAmount, won, payout, outcome) {
+  const bonus = ensureBonusFields(user);
+  const t = bonus.telemetry;
+
+  if (currency === 'GC') {
+    t.gcWagered += betAmount;
+    if (!won) t.dailyLossSC = 0;
+  } else {
+    t.scWagered += betAmount;
+    t.dailyWagerSC += betAmount;
+    t.weeklyWagerSC += betAmount;
+    t.monthlyWagerSC += betAmount;
+  }
+
+  t.rounds++;
+  if (won) {
+    t.roundsWon++;
+    if (currency === 'SC') {
+      t.dailyWinSC += payout;
+      t.weeklyWinSC += payout;
+      t.monthlyWinSC += payout;
+    }
+  }
+  t.gamesPlayed.push(gameId);
+  // Deduplicate for the games-played challenge
+  const uniqueGames = [...new Set(t.gamesPlayed)];
+
+  if (!won && currency === 'SC') {
+    const loss = betAmount;
+    t.dailyLossSC += loss;
+    t.weeklyLossSC += loss;
+    t.monthlyLossSC += loss;
+  }
+
+  // Challenge-specific tracking
+  if (gameId === 'dice' && currency === 'SC' && won && betAmount >= 1 && payout / betAmount >= 9) (t.diceOver90 = (t.diceOver90 || 0) + 1);
+  if (gameId === 'crash' && won && payout / betAmount >= 2) (t.crashCashout2x = (t.crashCashout2x || 0) + 1);
+  if (gameId === 'blackjack') (t.blackjackHands = (t.blackjackHands || 0) + 1);
+
+  // Push to history (cap at 200 entries)
+  t.history.push({ ts: Date.now(), game: gameId, currency, bet: betAmount, won, payout });
+  if (t.history.length > 200) t.history.shift();
+
+  // Re-evaluate challenges
+  bonus.challenges.forEach(c => {
+    c.progress = evaluateChallenge(user, c);
+    if (c.progress >= c.target && !c.completed) c.completed = true;
+  });
+}
+
+// Random bounded reward for challenges
+function calcChallengeReward(challenge) {
+  return round2(challenge.minReward + Math.random() * (challenge.maxReward - challenge.minReward));
+}
+
+// -----------------------------------------------------------------------------
+// 12a. DAILY CLAIM ENDPOINTS
+// -----------------------------------------------------------------------------
+// Fixed reward: 10,000 GC + 10.00 SC, strict 24-hour cooldown
+
+const DAILY_CLAIM_REWARD = { gc: 10000, sc: 10.00 };
+
+app.get('/api/bonus/status', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const bonus = ensureBonusFields(user);
+
+  const now = Date.now();
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const nextClaimMs = Math.max(0, (bonus.lastClaimAt + ONE_DAY) - now);
+  const canClaim = nextClaimMs <= 0;
+
+  res.json({
+    canClaim,
+    nextClaimMs,
+    streak: bonus.claimStreak,
+    lastClaimAt: bonus.lastClaimAt,
+    reward: DAILY_CLAIM_REWARD
+  });
+});
+
+app.post('/api/bonus/daily-claim', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const bonus = ensureBonusFields(user);
+
+  // Idempotency lock
+  if (!acquireLock(user.id, 'daily-claim')) {
+    return res.status(409).json({ error: 'Claim already in progress.' });
+  }
+
+  try {
+    const now = Date.now();
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    const elapsed = now - bonus.lastClaimAt;
+
+    if (elapsed < ONE_DAY) {
+      const remaining = ONE_DAY - elapsed;
+      return res.status(400).json({
+        error: 'Daily claim not ready.',
+        nextClaimMs: remaining
+      });
+    }
+
+    // Server-side strict cooldown
+    bonus.lastClaimAt = now;
+    bonus.claimStreak = (bonus.claimStreak || 0) + 1;
+
+    const gcReward = DAILY_CLAIM_REWARD.gc;
+    const scReward = DAILY_CLAIM_REWARD.sc;
+    user.gc_balance += gcReward;
+    user.sc_unplayed += scReward;
+
+    saveData();
+    logTransaction(user.id, 'BONUS', `Daily Claim #${bonus.claimStreak}`, gcReward, scReward);
+
+    res.json({
+      success: true,
+      claimed: { gc: gcReward, sc: scReward },
+      streak: bonus.claimStreak,
+      balances: balancesOf(user)
+    });
+  } finally {
+    releaseLock(user.id, 'daily-claim');
+  }
+});
+
+// -----------------------------------------------------------------------------
+// 12b. DAILY CHALLENGES ENDPOINTS
+// -----------------------------------------------------------------------------
+
+app.get('/api/challenges', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  ensureBonusFields(user);
+  const challenges = generateDailyChallenges(user);
+  const progress = challenges.map(c => ({
+    id: c.id,
+    desc: c.desc,
+    task: c.task,
+    target: c.target,
+    minReward: c.minReward,
+    maxReward: c.maxReward,
+    progress: Math.min(c.progress, c.target),
+    completed: c.completed,
+    claimed: c.claimed
+  }));
+  res.json({ challenges: progress });
+});
+
+app.post('/api/challenges/claim', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const { challengeId } = req.body || {};
+  if (!challengeId) return res.status(400).json({ error: 'challengeId required.' });
+
+  if (!acquireLock(user.id, 'challenge-claim-' + challengeId)) {
+    return res.status(409).json({ error: 'Claim already in progress.' });
+  }
+
+  try {
+    const bonus = ensureBonusFields(user);
+    const challenge = bonus.challenges.find(c => c.id === challengeId);
+
+    if (!challenge) return res.status(404).json({ error: 'Challenge not found.' });
+    if (challenge.claimed) return res.status(400).json({ error: 'Challenge already claimed.' });
+    if (!challenge.completed) return res.status(400).json({ error: 'Challenge not yet completed.' });
+
+    const reward = calcChallengeReward(challenge);
+    const scReward = reward;
+    const gcReward = Math.round(scReward * 1000);
+
+    user.gc_balance += gcReward;
+    user.sc_unplayed += scReward;
+
+    challenge.claimed = true;
+    challenge.reward = scReward;
+
+    saveData();
+    logTransaction(user.id, 'BONUS', `Challenge: ${challenge.desc}`, gcReward, scReward);
+
+    res.json({
+      success: true,
+      reward: scReward,
+      balances: balancesOf(user)
+    });
+  } finally {
+    releaseLock(user.id, 'challenge-claim-' + challengeId);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// 12c. TIERED RAKEBACK ENDPOINTS
+// -----------------------------------------------------------------------------
+
+const RAKEBACK_WINDOWS = {
+  daily: { ms: 24 * 60 * 60 * 1000,  field: 'lastDailyAt',  pool: 'dailyPool' },
+  weekly: { ms: 7 * 24 * 60 * 60 * 1000, field: 'lastWeeklyAt', pool: 'weeklyPool' },
+  monthly: { ms: 30 * 24 * 60 * 60 * 1000, field: 'lastMonthlyAt', pool: 'monthlyPool' }
+};
+
+function getRakebackLosses(user) {
+  const bonus = ensureBonusFields(user);
+  const t = bonus.telemetry;
+  // Net SC loss = SC wagered - SC won (for each window)
+  const dailyLoss = Math.max(0, (t.dailyLossSC || 0));
+  const weeklyLoss = Math.max(0, (t.weeklyLossSC || 0));
+  const monthlyLoss = Math.max(0, (t.monthlyLossSC || 0));
+  return { daily: dailyLoss, weekly: weeklyLoss, monthly: monthlyLoss };
+}
+
+app.get('/api/rakeback/status', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const bonus = ensureBonusFields(user);
+  const rb = bonus.rakeback;
+  const now = Date.now();
+  const losses = getRakebackLosses(user);
+
+  const tiers = ['daily', 'weekly', 'monthly'];
+  const result = {};
+
+  tiers.forEach(tier => {
+    const w = RAKEBACK_WINDOWS[tier];
+    const lastAt = rb[w.field];
+    const nextAvailable = lastAt + w.ms;
+    const remaining = Math.max(0, nextAvailable - now);
+    const canClaim = remaining <= 0;
+    const rate = 0.03 + Math.random() * 0.07; // 3% to 10% randomized
+    const claimable = canClaim ? round2(losses[tier] * rate * 0.5) : 0; // capped at 50% of loss
+    result[tier] = {
+      claimable: canClaim ? round2(claimable) : 0,
+      lossTracked: round2(losses[tier]),
+      rateMin: 3,
+      rateMax: 10,
+      canClaim: canClaim && claimable > 0,
+      nextClaimMs: remaining,
+      period: tier === 'daily' ? '24 hours' : tier === 'weekly' ? '7 days' : '30 days'
+    };
+  });
+
+  res.json({ rakeback: result });
+});
+
+app.post('/api/rakeback/claim', verifyToken, (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const { tier } = req.body || {};
+  if (!tier || !['daily', 'weekly', 'monthly'].includes(tier)) {
+    return res.status(400).json({ error: 'Invalid rakeback tier.' });
+  }
+
+  if (!acquireLock(user.id, 'rakeback-' + tier)) {
+    return res.status(409).json({ error: 'Claim already in progress.' });
+  }
+
+  try {
+    const bonus = ensureBonusFields(user);
+    const rb = bonus.rakeback;
+    const w = RAKEBACK_WINDOWS[tier];
+    const now = Date.now();
+
+    if (now - rb[w.field] < w.ms) {
+      const remaining = (rb[w.field] + w.ms) - now;
+      return res.status(400).json({ error: `${tier} rakeback not ready.`, nextClaimMs: remaining });
+    }
+
+    const losses = getRakebackLosses(user);
+    if (losses[tier] <= 0) {
+      return res.status(400).json({ error: 'No losses tracked for this period.' });
+    }
+
+    const rate = 0.03 + Math.random() * 0.07;
+    const amount = round2(losses[tier] * rate * 0.5);
+
+    if (amount <= 0) {
+      return res.status(400).json({ error: 'Calculated rakeback is 0.00.' });
+    }
+
+    rb[w.field] = now;
+    user.sc_unplayed += amount;
+
+    saveData();
+    logTransaction(user.id, 'RAKEBACK', `${tier.charAt(0).toUpperCase() + tier.slice(1)} Rakeback (${(rate * 100).toFixed(0)}%)`, 0, amount, { tier });
+
+    res.json({
+      success: true,
+      tier,
+      claimed: amount,
+      rate: round2(rate * 100),
+      balances: balancesOf(user)
+    });
+  } finally {
+    releaseLock(user.id, 'rakeback-' + tier);
+  }
+});
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {

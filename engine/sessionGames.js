@@ -67,8 +67,16 @@ const depsUsers = (deps, userId) => deps.users.get(userId);
 function register(app, deps) {
   const {
     HOUSE_EDGE, ProvablyFair, getUserSeedPair, activeSessions,
-    logTransaction, broadcastLiveBet, debitBet, creditWin, balancesOf, validateWager
+    logTransaction, broadcastLiveBet, debitBet, creditWin, balancesOf, validateWager,
+    ensureBonusFields, updateTelemetry, saveData
   } = deps;
+
+  function trackSession(user, gameType, session, won, payout) {
+    if (!ensureBonusFields || !updateTelemetry || !user) return;
+    ensureBonusFields(user);
+    updateTelemetry(user, gameType, session.currency, session.betAmount, won, payout || 0, {});
+    if (saveData) saveData();
+  }
 
   const post = (path, handler) => app.post(path, deps.verifyToken, handler);
 
@@ -139,6 +147,7 @@ function register(app, deps) {
     if (session.board[tile] === 'BOMB') {
       session.active = false;
       const user = depsUsers(deps, session.userId);
+      if (user) trackSession(user, 'mines', session, false, 0);
       broadcastLiveBet({
         username: user ? user.username : 'Anonymous', game: 'MINES',
         betAmount: session.betAmount, currency: session.currency,
@@ -169,9 +178,10 @@ function register(app, deps) {
     creditWin(user, session.currency, payout);
     session.active = false;
 
-    logTransaction(user.id, 'WIN', `Mines win @ ${mult.toFixed(2)}x (${session.revealed.length} gems)`,
-      session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
-    broadcastLiveBet({
+     logTransaction(user.id, 'WIN', `Mines win @ ${mult.toFixed(2)}x (${session.revealed.length} gems)`,
+       session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
+     trackSession(user, 'mines', session, true, payout);
+     broadcastLiveBet({
       username: user.username, game: 'MINES', betAmount: session.betAmount,
       currency: session.currency, multiplier: mult, win: true, payout
     });
@@ -260,6 +270,7 @@ function register(app, deps) {
     if (!isSafe) {
       session.active = false;
       const user = depsUsers(deps, session.userId);
+      if (user) trackSession(user, 'tower', session, false, 0);
       broadcastLiveBet({
         username: user.username, game: 'TOWER', betAmount: session.betAmount,
         currency: session.currency, multiplier: 0, win: false, payout: 0
@@ -282,6 +293,7 @@ function register(app, deps) {
       session.active = false;
       logTransaction(user.id, 'WIN', `Tower completed @ ${session.multiplier.toFixed(2)}x`,
         session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
+      trackSession(user, 'tower', session, true, payout);
       broadcastLiveBet({
         username: user.username, game: 'TOWER', betAmount: session.betAmount,
         currency: session.currency, multiplier: session.multiplier, win: true, payout
@@ -313,6 +325,7 @@ function register(app, deps) {
 
     logTransaction(user.id, 'WIN', `Cashed out Tower @ ${mult.toFixed(2)}x`,
       session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
+    trackSession(user, 'tower', session, true, payout);
     broadcastLiveBet({
       username: user.username, game: 'TOWER', betAmount: session.betAmount,
       currency: session.currency, multiplier: mult, win: true, payout
@@ -358,9 +371,10 @@ function register(app, deps) {
       if (dealerBJ) { multiplier = 1.00; outcome = 'PUSH'; }
       else { multiplier = BJ_NATURAL; outcome = 'BLACKJACK'; }
 
-      if (multiplier > 1) creditWin(user, currency, round2(multiplier * amount));
+     if (multiplier > 1) creditWin(user, currency, round2(multiplier * amount));
+     trackSession(user, 'blackjack', session, multiplier > 1, multiplier > 1 ? round2(multiplier * amount) : 0);
 
-      logTransaction(user.id, multiplier > 1 ? 'WIN' : 'BET',
+     logTransaction(user.id, multiplier > 1 ? 'WIN' : 'BET',
         `Blackjack ${outcome} @ ${multiplier.toFixed(2)}x`,
         multiplier > 1 ? (currency === 'GC' ? round2(multiplier * amount) : 0) : 0,
         multiplier > 1 ? (currency === 'SC' ? round2(multiplier * amount) : 0) : 0);
@@ -401,6 +415,7 @@ function register(app, deps) {
       `Blackjack ${outcome} @ ${multiplier.toFixed(2)}x`,
       multiplier !== 1 ? (session.currency === 'GC' ? payout : 0) : 0,
       multiplier !== 1 ? (session.currency === 'SC' ? payout : 0) : 0);
+    trackSession(user, 'blackjack', session, multiplier > 1, multiplier !== 1 ? payout : 0);
     broadcastLiveBet({
       username: user.username, game: 'BLACKJACK', betAmount: session.betAmount,
       currency: session.currency, multiplier,
@@ -522,6 +537,7 @@ function register(app, deps) {
     if (!win) {
       session.active = false;
       const user = depsUsers(deps, session.userId);
+      if (user) trackSession(user, 'hilo', session, false, 0);
       broadcastLiveBet({
         username: user.username, game: 'HILO', betAmount: session.betAmount,
         currency: session.currency, multiplier: 0, win: false, payout: 0
@@ -545,9 +561,10 @@ function register(app, deps) {
       const payout = round2(session.multiplier * session.betAmount);
       creditWin(user, session.currency, payout);
       session.active = false;
-      logTransaction(user.id, 'WIN', `HiLo auto-cashout @ ${session.multiplier.toFixed(2)}x`,
-        session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
-      broadcastLiveBet({
+       logTransaction(user.id, 'WIN', `HiLo auto-cashout @ ${session.multiplier.toFixed(2)}x`,
+         session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
+       trackSession(user, 'hilo', session, true, payout);
+       broadcastLiveBet({
         username: user.username, game: 'HILO', betAmount: session.betAmount,
         currency: session.currency, multiplier: session.multiplier, win: true, payout
       });
@@ -581,6 +598,7 @@ function register(app, deps) {
 
     logTransaction(user.id, 'WIN', `Cashed out HiLo @ ${mult.toFixed(2)}x`,
       session.currency === 'GC' ? payout : 0, session.currency === 'SC' ? payout : 0);
+    trackSession(user, 'hilo', session, true, payout);
     broadcastLiveBet({
       username: user.username, game: 'HILO', betAmount: session.betAmount,
       currency: session.currency, multiplier: mult, win: true, payout

@@ -64,6 +64,52 @@ const SLOT_SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣'];
 const SLOT_WEIGHTS = [0.40, 0.25, 0.18, 0.10, 0.05, 0.02];
 const SLOT_PAYOUTS = { '🍒': 1.5, '🍋': 3, '🍇': 5, '🔔': 10, '💎': 25, '7️⃣': 75 };
 
+// Jackpot tiers — mini pays 5x bet, minor 20x, major 150x, grand 1000x
+const SLOT_JACKPOTS = {
+  mini: { threshold: 3, payout: 5 },
+  minor: { threshold: 4, payout: 20 },
+  major: { threshold: 5, payout: 150 },
+  grand: { threshold: 6, payout: 1000 }
+};
+
+// Progressive jackpot seed (persists across rounds in memory)
+let SLOT_JACKPOT_POOL = { mini: 50, minor: 200, major: 1000, grand: 10000 };
+const SLOT_JACKPOT_CONTRIB = { mini: 0.01, minor: 0.02, minor: 0.03, major: 0.02, grand: 0.05 };
+
+function slotJackpotProgress(betAmount) {
+  SLOT_JACKPOT_POOL.mini += betAmount * SLOT_JACKPOT_CONTRIB.mini;
+  SLOT_JACKPOT_POOL.minor += betAmount * SLOT_JACKPOT_CONTRIB.minor;
+  SLOT_JACKPOT_POOL.major += betAmount * SLOT_JACKPOT_CONTRIB.major;
+  SLOT_JACKPOT_POOL.grand += betAmount * SLOT_JACKPOT_CONTRIB.grand;
+}
+
+function checkSlotJackpots(grid, betAmount) {
+  let jackpotHit = null;
+  const centerCount = (s => (grid[0].filter(x => x === s).length +
+    grid[1].filter(x => x === s).length +
+    grid[2].filter(x => x === s).length));
+  const sevens = centerCount('7️⃣');
+
+  if (sevens === 9) {
+    jackpotHit = { tier: 'grand', amount: SLOT_JACKPOT_POOL.grand, multiplier: SLOT_JACKPOTS.grand.payout };
+    SLOT_JACKPOT_POOL.grand = 10000;
+  } else if (sevens >= 7) {
+    jackpotHit = { tier: 'major', amount: SLOT_JACKPOT_POOL.major, multiplier: SLOT_JACKPOTS.major.payout };
+    SLOT_JACKPOT_POOL.major = 1000;
+  } else if (sevens >= 5) {
+    jackpotHit = { tier: 'minor', amount: SLOT_JACKPOT_POOL.minor, multiplier: SLOT_JACKPOTS.minor.payout };
+    SLOT_JACKPOT_POOL.minor = 200;
+  } else if (sevens >= 3) {
+    jackpotHit = { tier: 'mini', amount: SLOT_JACKPOT_POOL.mini, multiplier: SLOT_JACKPOTS.mini.payout };
+    SLOT_JACKPOT_POOL.mini = 50;
+  }
+
+  if (jackpotHit) {
+    return { ...jackpotHit, multiplier: round2(jackpotHit.multiplier) };
+  }
+  return null;
+}
+
 const BACCARAT_SUITS = ['♠', '♥', '♦', '♣'];
 const CARD_VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
@@ -79,9 +125,12 @@ function baccaratHandScore(hand) {
 
 const GAMES = {
   /**
-   * SLOTS — 3x3 grid, 5 paylines. RTP ≈ 92.9% by design of weights + paytable.
+   * SLOTS — 3x3 grid, 5 paylines, plus progressive mini/minor/major/grand jackpots.
    */
-  slots: (floats) => {
+  slots: (floats, params) => {
+    const betAmount = params.betAmount || 1;
+    slotJackpotProgress(parseFloat(betAmount));
+
     const grid = [];
     for (let r = 0; r < 3; r++) {
       const row = [];
@@ -116,8 +165,30 @@ const GAMES = {
       }
     });
 
+    // Check for jackpot trigger
+    const jackpot = checkSlotJackpots(grid, betAmount);
+    if (jackpot) {
+      rawMult += jackpot.multiplier;
+    }
+
     const multiplier = round2(rawMult);
-    return { win: multiplier > 0, multiplier, details: { grid, winningLines } };
+    const totalPayout = round2(multiplier * parseFloat(betAmount));
+    return {
+      win: multiplier > 0,
+      multiplier,
+      payout: totalPayout,
+      details: {
+        grid,
+        winningLines,
+        jackpot: jackpot || null,
+        jackpotPool: {
+          mini: round2(SLOT_JACKPOT_POOL.mini),
+          minor: round2(SLOT_JACKPOT_POOL.minor),
+          major: round2(SLOT_JACKPOT_POOL.major),
+          grand: round2(SLOT_JACKPOT_POOL.grand)
+        }
+      }
+    };
   },
 
   /**
@@ -299,13 +370,22 @@ const GAMES = {
       multiplier = 1.0;
     }
 
+    let sideBet = null;
+    if (params.sideBetPlayerPair && playerHand.length >= 2 && playerHand[0].value === playerHand[1].value) {
+      sideBet = { type: 'Player Pair', won: true, multiplier: 11.0 };
+    } else if (params.sideBetBankerPair && bankerHand.length >= 2 && bankerHand[0].value === bankerHand[1].value) {
+      sideBet = { type: 'Banker Pair', won: true, multiplier: 11.0 };
+    } else if (params.sideBetPlayerPair || params.sideBetBankerPair) {
+      sideBet = { type: params.sideBetPlayerPair ? 'Player Pair' : 'Banker Pair', won: false, multiplier: 0 };
+    }
+
     return {
       win,
       pushed,
       multiplier,
-      details: { playerHand, bankerHand, pScore, bScore, outcome, betOn }
+      details: { playerHand, bankerHand, pScore, bScore, outcome, betOn, sideBet }
     };
   }
 };
 
-module.exports = { GAMES, GAME_FLOAT_COUNTS };
+module.exports = { GAMES, GAME_FLOAT_COUNTS, round2 };

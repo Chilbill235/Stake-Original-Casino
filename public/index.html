@@ -24,59 +24,69 @@
     </div>
 
     <div class="navbar-center">
-      <div class="wallet-selector-container">
-        <div class="wallet-selector" onclick="toggleWalletDropdown(event)">
-          <div class="currency-badge-icon" id="curr-tag">GC</div>
-          <div class="wallet-balance-wrapper">
-            <span class="balance-label">BALANCE</span>
-            <span id="balance-val" class="balance-amount">10,000.00</span>
+      <div class="wallet-toolbar">
+        <div class="wallet-selector-container" id="wallet-selector">
+          <div class="wallet-selector" onclick="toggleWalletDropdown(event)">
+            <div class="currency-badge-icon" id="curr-tag">GC</div>
+            <div class="wallet-balance-wrapper">
+              <span class="balance-label">BALANCE</span>
+              <span id="balance-val" class="balance-amount">10,000.00</span>
+            </div>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--text-secondary)"><path d="M7 10l5 5 5-5z"/></svg>
           </div>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--text-secondary)"><path d="M7 10l5 5 5-5z"/></svg>
+
+          <div class="wallet-dropdown-menu hidden" id="wallet-dropdown-menu">
+            <div class="wallet-option" id="wallet-opt-gc" onclick="switchCurrency('GC')">
+              <span class="currency-badge-icon badge-gc">GC</span>
+              <div class="wallet-option-info">
+                <span class="opt-name">Gold Coins</span>
+                <span class="opt-val" id="menu-bal-gc">10,000.00</span>
+              </div>
+            </div>
+            <div class="wallet-option" id="wallet-opt-sc" onclick="switchCurrency('SC')">
+              <span class="currency-badge-icon badge-sc">SC</span>
+              <div class="wallet-option-info">
+                <span class="opt-name">Sweeps Coins</span>
+                <span class="opt-val" id="menu-bal-sc">10.00</span>
+              </div>
+            </div>
+            <div class="wallet-dropdown-divider"></div>
+            <div class="wallet-option wallet-opt-deposit" onclick="openStoreModalFromDropdown()">
+              <span class="wallet-opt-icon">🪙</span>
+              <div class="wallet-option-info">
+                <span class="opt-name">Buy Coins</span>
+                <span class="opt-val" style="color:var(--accent-gold);">Deposit</span>
+              </div>
+            </div>
+             <div class="wallet-option wallet-opt-redeem" onclick="openRedeemModalFromDropdown()">
+               <span class="wallet-opt-icon">💸</span>
+               <div class="wallet-option-info">
+                 <span class="opt-name">Redeem SC</span>
+                 <span class="opt-val" style="color:var(--accent-green);">Withdraw</span>
+               </div>
+             </div>
+             <div class="wallet-option wallet-opt-bonuses" onclick="openBonusModalFromDropdown()">
+               <span class="wallet-opt-icon">🎁</span>
+               <div class="wallet-option-info">
+                 <span class="opt-name">Bonuses</span>
+                 <span class="opt-val" style="color:var(--accent-purple);">Daily + Challenges</span>
+               </div>
+             </div>
+          </div>
         </div>
 
-        <div class="wallet-dropdown-menu hidden" id="wallet-dropdown-menu">
-          <div class="wallet-option" id="wallet-opt-gc" onclick="switchCurrency('GC')">
-            <span class="currency-badge-icon badge-gc">GC</span>
-            <div class="wallet-option-info">
-              <span class="opt-name">Gold Coins</span>
-              <span class="opt-val" id="menu-bal-gc">10,000.00</span>
-            </div>
-          </div>
-          <div class="wallet-option" id="wallet-opt-sc" onclick="switchCurrency('SC')">
-            <span class="currency-badge-icon badge-sc">SC</span>
-            <div class="wallet-option-info">
-              <span class="opt-name">Sweeps Coins</span>
-              <span class="opt-val" id="menu-bal-sc">10.00</span>
-            </div>
-          </div>
-          <div class="wallet-dropdown-divider"></div>
-          <div class="wallet-option" onclick="openStoreModalFromDropdown()">
-            <span class="wallet-opt-icon">🪙</span>
-            <div class="wallet-option-info">
-              <span class="opt-name">Buy Coins</span>
-              <span class="opt-val" style="color:var(--accent-gold);">Deposit</span>
-            </div>
-          </div>
-          <div class="wallet-option" onclick="openRedeemModalFromDropdown()">
-            <span class="wallet-opt-icon">💸</span>
-            <div class="wallet-option-info">
-              <span class="opt-name">Redeem SC</span>
-              <span class="opt-val" style="color:var(--accent-green);">Withdraw</span>
-            </div>
-          </div>
-        </div>
+        <button class="toolbar-deposit" onclick="openStoreModal()">
+          <span class="btn-icon">🪙</span>
+          <span class="btn-text">DEPOSIT</span>
+        </button>
+        <button class="toolbar-redeem" onclick="openRedeemModal()">
+          <span class="btn-icon">💸</span>
+          <span class="btn-text">REDEEM</span>
+        </button>
       </div>
     </div>
 
     <div class="navbar-right">
-      <button class="btn-action btn-buy-gc" onclick="openStoreModal()">
-        <span class="btn-icon">🪙</span>
-        <span class="btn-text">BUY COINS</span>
-      </button>
-      <button class="btn-action btn-redeem" onclick="openRedeemModal()">
-        <span class="btn-icon">💸</span>
-        <span class="btn-text">REDEEM</span>
-      </button>
       <button id="btn-toggle-sfx" class="btn-action btn-sfx-toggle">🔊 SFX ON</button>
       <div class="user-profile-badge" id="user-badge" title="User Profile & Settings" onclick="openProfileModal()">
         <div class="avatar-circle">👤</div>
@@ -114,6 +124,19 @@
         <div class="nav-item" onclick="launchGame('crash')"><span class="nav-icon">💥</span><span class="nav-label">Crash</span></div>
       </nav>
 
+      <div class="nav-section-header">BONUS CENTRE</div>
+      <nav>
+        <div class="nav-item" id="nav-bonuses" onclick="openBonusModal()">
+          <span class="nav-icon">🎁</span> <span class="nav-label">Daily Bonus</span>
+        </div>
+        <div class="nav-item" id="nav-challenges" onclick="openBonusModal()">
+          <span class="nav-icon">🎯</span> <span class="nav-label">Challenges</span>
+        </div>
+        <div class="nav-item" id="nav-rakeback" onclick="openBonusModal()">
+          <span class="nav-icon">💎</span> <span class="nav-label">Rakeback</span>
+        </div>
+      </nav>
+
       <div class="sidebar-footer">
         <div class="online-indicator">
           <span class="pulse-dot"></span>
@@ -141,18 +164,14 @@
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
-          <h2 class="section-title" style="margin:0;">🔥 Stake Originals & Games</h2>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="text" placeholder="Search games..." oninput="searchLobbyGames(this.value)" class="form-input" style="padding:6px 12px; font-size:0.85rem; width:180px;">
+        <div class="lobby-toolbar">
+          <div class="category-tabs">
+            <button class="btn-secondary-action cat-tab-btn active" data-category="ALL" onclick="filterLobbyGames('ALL')">All Games</button>
+            <button class="btn-secondary-action cat-tab-btn" data-category="ORIGINALS" onclick="filterLobbyGames('ORIGINALS')">Originals</button>
+            <button class="btn-secondary-action cat-tab-btn" data-category="TABLE" onclick="filterLobbyGames('TABLE')">Table Games</button>
+            <button class="btn-secondary-action cat-tab-btn" data-category="SLOTS" onclick="filterLobbyGames('SLOTS')">Slots</button>
           </div>
-        </div>
-
-        <div style="display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
-          <button class="btn-secondary-action cat-tab-btn active" data-category="ALL" onclick="filterLobbyGames('ALL')">All Games</button>
-          <button class="btn-secondary-action cat-tab-btn" data-category="ORIGINALS" onclick="filterLobbyGames('ORIGINALS')">Originals</button>
-          <button class="btn-secondary-action cat-tab-btn" data-category="TABLE" onclick="filterLobbyGames('TABLE')">Table Games</button>
-          <button class="btn-secondary-action cat-tab-btn" data-category="SLOTS" onclick="filterLobbyGames('SLOTS')">Slots</button>
+          <input type="text" placeholder="Search games..." oninput="searchLobbyGames(this.value)" class="form-input search-input" style="width:180px;">
         </div>
         
         <div class="games-grid">
@@ -238,6 +257,13 @@
             <div class="game-placeholder-text">Select a game to begin</div>
           </div>
 
+          <div class="crash-sidebar hidden" id="crash-sidebar">
+            <div class="crash-panel-header">
+              <h4>🔥 CRASH HISTORY</h4>
+            </div>
+            <div id="crash-history-panel" style="padding:8px 0;"></div>
+          </div>
+
           <div class="game-control-deck">
             <div id="game-controls-options" class="game-controls-options"></div>
 
@@ -245,6 +271,7 @@
               <div class="bet-input-wrapper">
                 <label for="bet-input" class="bet-label">BET AMOUNT</label>
                 <div class="bet-input-group">
+                  <span class="bet-currency-tag" id="bet-currency-tag">GC</span>
                   <input type="number" id="bet-input" value="10.00" min="0.01" step="0.01" class="bet-input">
                   <div class="quick-bet-buttons">
                     <button type="button" class="btn-quick-bet" onclick="adjustBet('HALF')">½</button>
@@ -252,6 +279,14 @@
                     <button type="button" class="btn-quick-bet" onclick="adjustBet('MAX')">MAX</button>
                   </div>
                 </div>
+              </div>
+
+              <div class="bet-auto-section">
+                <label class="bet-auto-toggle" style="display:flex;align-items:center;gap:6px;font-size:0.75rem;color:#b1bad2;cursor:pointer;">
+                  <input type="checkbox" id="auto-bet-toggle" style="margin:0;" onchange="toggleAutoBet()">
+                  Auto-Bet
+                </label>
+                <input type="number" id="auto-bet-count" value="0" min="0" placeholder="∞" class="bet-input-small" style="display:none;">
               </div>
 
               <button class="btn-play" id="btn-primary-action">PLACE BET</button>
@@ -285,6 +320,13 @@
           <span>MULT.</span>
         </div>
         <div class="bets-feed" id="bets-feed"></div>
+      </div>
+
+      <div class="game-results-header">
+        <h4>🔥 Recent Results</h4>
+      </div>
+      <div class="game-result-feed-container">
+        <div class="game-result-feed" id="game-result-feed"></div>
       </div>
     </aside>
   </div>
@@ -373,9 +415,9 @@
       <div id="checkout-success" class="checkout-success hidden">
         <div class="success-animation">
           <div class="success-checkmark">✓</div>
-          <div class="confetti"></div>
+          <div class="confetti-container" id="confetti-container"></div>
         </div>
-        <h4>Payment Successful!</h4>
+        <h4 style="color:var(--accent-green); font-weight:800; margin-bottom:6px;">Payment Successful!</h4>
         <p class="success-subtext">Your coins have been added to your account.</p>
         <div class="success-details" id="success-details"></div>
       </div>
@@ -398,10 +440,10 @@
         </div>
       </div>
 
-      <div class="modal-actions-flex" style="margin-top:15px;">
-        <button type="button" onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
-        <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action" style="margin-top:10px;">Cancel</button>
-      </div>
+       <div class="modal-actions-flex" style="margin-top:15px;">
+         <button type="button" onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
+         <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action btn-full">Cancel</button>
+       </div>
     </div>
   </div>
 
@@ -509,6 +551,7 @@
     </div>
   </div>
 
+  <script src="games/loader.js"></script>
   <script src="client.js"></script>
 </body>
 </html>
