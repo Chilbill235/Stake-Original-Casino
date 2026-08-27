@@ -168,7 +168,7 @@ async function initSession() {
   let token = localStorage.getItem('casino_token');
 
   if (!token) {
-    document.getElementById('modal-auth')?.classList.remove('hidden');
+    await continueAsGuest();
     return;
   }
 
@@ -178,9 +178,9 @@ async function initSession() {
     if (data.username) localStorage.setItem('casino_username', data.username);
     state.profile = data;
   } catch (err) {
-    console.warn('[Auth failure]: Token invalid, showing auth modal.', err.message);
+    console.warn('[Auth failure]: Token invalid, falling back to guest.', err.message);
     localStorage.removeItem('casino_token');
-    document.getElementById('modal-auth')?.classList.remove('hidden');
+    await continueAsGuest();
     return;
   }
 
@@ -191,6 +191,7 @@ async function initSession() {
   initProvablyFairUI();
   injectMobileAndNavigationDOM();
   applyEmbeddedModeRestrictions();
+  updateUserProfileBadge();
 }
 
 /**
