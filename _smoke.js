@@ -62,7 +62,7 @@ async function req(path, method = 'GET', body = null, token = null) {
      'keno resolves with 10 picks without undefined payout (old table broke at >5)');
 
   // ---- Wheel expected value is sane (< 1, was ~2.28x exploit) ----
-  let sum = 0, N = 300;
+  let sum = 0, N = 500;
   for (let i = 0; i < N; i++) {
     const w = await req('/api/play/wheel', 'POST', { currency: 'GC', betAmount: 1 }, T);
     if (w.status !== 200) break;

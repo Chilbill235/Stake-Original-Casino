@@ -178,8 +178,10 @@ async function initSession() {
     if (data.username) localStorage.setItem('casino_username', data.username);
     state.profile = data;
   } catch (err) {
-    console.warn('[Auth Guest Fallback Mode]: Using local balances.');
+    console.warn('[Auth failure]: Token invalid, showing auth modal.', err.message);
     localStorage.removeItem('casino_token');
+    document.getElementById('modal-auth')?.classList.remove('hidden');
+    return;
   }
 
   await fetchFairSeed();
@@ -617,11 +619,6 @@ async function buyCoinPackage(packageId) {
           closeStoreModal();
           initSessionFromToken();
         }, 1500);
-      },
-      onError: (err) => {
-        console.error('[Checkout Error]:', err);
-        container.innerHTML = '<div style="text-align:center; padding:20px; color:#ff4d4d; font-weight:600;">Payment failed: ' + escapeHTML(err.message || 'Please try again') + '</div>';
-        setTimeout(() => container.innerHTML = '', 3000);
       }
     });
 

@@ -43,7 +43,7 @@ const KENO_PAYTABLES = {
   10: [0, 0, 0, 0.3, 1, 2, 6, 17, 50, 100, 250]
 };
 
-// Weighted 12-segment wheel ring — weights tuned so EV ≈ 0.95x (95% RTP)
+// Weighted 12-segment wheel ring — weights tuned so EV ≈ 0.75x (75% RTP, 25% house edge)
 const WHEEL_SEGMENTS = [
   { color: 'GRAY',   mult: 0 },
   { color: 'BLUE',   mult: 1.2 },
@@ -58,7 +58,7 @@ const WHEEL_SEGMENTS = [
   { color: 'GOLD',   mult: 10 },
   { color: 'GOLD',   mult: 50 }
 ];
-const WHEEL_WEIGHTS = [6.7, 2.0, 1.0, 1.5, 0.8, 6.7, 2.0, 1.0, 1.5, 0.5, 0.15, 0.05];
+const WHEEL_WEIGHTS = [10.0, 2.0, 1.0, 1.5, 0.8, 10.0, 2.0, 1.0, 1.5, 0.5, 0.15, 0.05];
 
 const SLOT_SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣'];
 const SLOT_WEIGHTS = [0.40, 0.25, 0.18, 0.10, 0.05, 0.02];
@@ -218,7 +218,7 @@ const GAMES = {
   },
 
   /**
-   * WHEEL — weighted segment ring, EV ≈ 0.95x per spin (95% RTP).
+   * WHEEL — weighted segment ring, EV ≈ 0.75x per spin (75% RTP).
    */
   wheel: (floats) => {
     const totalWeight = WHEEL_WEIGHTS.reduce((a, b) => a + b, 0);

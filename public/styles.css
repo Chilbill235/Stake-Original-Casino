@@ -867,6 +867,23 @@ body.dark-theme {
   padding: 20px;
 }
 
+.redeem-modal {
+  max-width: 420px;
+}
+
+.pf-modal {
+  max-width: 520px;
+}
+
+.auth-modal {
+  max-width: 420px;
+  padding: 20px;
+}
+
+.checkout-embed-container {
+  min-height: 200px;
+}
+
 .store-modal .package-list {
   max-height: 220px;
   overflow-y: auto;
