@@ -550,6 +550,8 @@ function openStoreModal() {
   if (state.isEmbedded) return;
   playSound('click');
   document.getElementById('modal-store')?.classList.remove('hidden');
+  const pkgList = document.querySelector('.package-list');
+  if (pkgList) pkgList.style.display = 'flex';
 }
 
 function closeStoreModal() {
@@ -560,12 +562,11 @@ function closeStoreModal() {
     container.innerHTML = '';
     container.style.display = 'none';
   }
+  const pkgList = document.querySelector('.package-list');
+  if (pkgList) pkgList.style.display = 'flex';
+  document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
   if (state.activeCheckoutInstance) {
-    try {
-      state.activeCheckoutInstance.destroy();
-    } catch (e) {
-      console.warn('Checkout cleanup warning:', e);
-    }
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
     state.activeCheckoutInstance = null;
   }
 }
@@ -591,8 +592,12 @@ async function buyCoinPackage(packageId) {
     if (!container) return;
 
     container.style.display = 'block';
+    const packageList = document.querySelector('.package-list');
+    if (packageList) packageList.style.display = 'none';
+
     container.innerHTML =
       '<div style="text-align:center; padding:40px;">' +
+      '<button class="btn btn-sm btn-ghost" style="position:absolute; top:12px; left:12px;" onclick="closeStoreModal()">← Back</button>' +
       '<div style="display:inline-block; position:relative;">' +
       '<div style="width:44px; height:44px; border:3px solid var(--border-color); border-top-color:var(--accent-gold); border-radius:50%; animation:spin 0.8s linear infinite;"></div>' +
       '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.2rem;">💳</div>' +
@@ -616,7 +621,9 @@ async function buyCoinPackage(packageId) {
     const StripeSDK = await loadStripeSdk();
     const stripe = StripeSDK(data.publishableKey);
 
-    container.innerHTML = '';
+    container.innerHTML = '<button class="btn btn-sm btn-ghost" style="position:absolute; top:12px; left:12px; z-index:10;" onclick="closeStoreModal()">← Back</button><div id="stripe-checkout-root" style="margin-top:44px;"></div>';
+
+    const stripeRoot = document.getElementById('stripe-checkout-root');
 
     state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
       clientSecret: data.clientSecret,
@@ -630,7 +637,7 @@ async function buyCoinPackage(packageId) {
       }
     });
 
-    state.activeCheckoutInstance.mount('#checkout-container');
+    state.activeCheckoutInstance.mount(stripeRoot);
 
   } catch (err) {
     console.error('[Embedded Payment Error]:', err);
@@ -2184,13 +2191,22 @@ function setupGlobalEventListeners() {
   }
 
   const sidebarToggle = document.getElementById('sidebar-toggle');
+  const sidebarOverlay = document.getElementById('sidebar-overlay');
   if (sidebarToggle) {
     sidebarToggle.addEventListener('click', () => {
       const sidebar = document.getElementById('main-sidebar');
       if (sidebar) {
-        sidebar.classList.toggle('collapsed');
         sidebar.classList.toggle('mobile-open');
+        sidebar.classList.toggle('active');
       }
+      if (sidebarOverlay) sidebarOverlay.classList.toggle('active');
+    });
+  }
+  if (sidebarOverlay) {
+    sidebarOverlay.addEventListener('click', () => {
+      const sidebar = document.getElementById('main-sidebar');
+      sidebar?.classList.remove('mobile-open', 'active');
+      sidebarOverlay.classList.remove('active');
     });
   }
 
