@@ -590,7 +590,14 @@ async function buyCoinPackage(packageId) {
     if (!container) return;
 
     container.style.display = 'block';
-    container.innerHTML = '<div style="text-align:center; padding:40px; color:#b1bad2; font-weight:600;">💳 Connecting to secure payment gateway...</div>';
+    container.innerHTML =
+      '<div style="text-align:center; padding:40px;">' +
+      '<div style="display:inline-block; position:relative;">' +
+      '<div style="width:44px; height:44px; border:3px solid var(--border-color); border-top-color:var(--accent-gold); border-radius:50%; animation:spin 0.8s linear infinite;"></div>' +
+      '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.2rem;">💳</div>' +
+      '</div>' +
+      '<div style="margin-top:14px; font-weight:700; color:var(--text-secondary);">Initializing secure checkout...</div>' +
+      '</div>';
 
     document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '0.5');
 
