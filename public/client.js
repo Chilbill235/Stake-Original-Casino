@@ -549,26 +549,110 @@ function updateProvablyFairHash(hash) {
 function openStoreModal() {
   if (state.isEmbedded) return;
   playSound('click');
-  document.getElementById('modal-store')?.classList.remove('hidden');
-  const pkgList = document.querySelector('.package-list');
-  if (pkgList) pkgList.style.display = 'flex';
+  const modal = document.getElementById('modal-store');
+  if (modal) modal.classList.remove('hidden');
+
+  showPackageList();
 }
 
 function closeStoreModal() {
   playSound('click');
-  document.getElementById('modal-store')?.classList.add('hidden');
+  const modal = document.getElementById('modal-store');
+  if (modal) modal.classList.add('hidden');
+
   const container = document.getElementById('checkout-container');
   if (container) {
     container.innerHTML = '';
-    container.style.display = 'none';
   }
-  const pkgList = document.querySelector('.package-list');
-  if (pkgList) pkgList.style.display = 'flex';
-  document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
+
+  const checkoutSection = document.getElementById('checkout-section');
+  if (checkoutSection) checkoutSection.classList.add('hidden');
+
+  const successSection = document.getElementById('checkout-success');
+  if (successSection) successSection.classList.add('hidden');
+
+  showPackageList();
+
   if (state.activeCheckoutInstance) {
     try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
     state.activeCheckoutInstance = null;
   }
+}
+
+function showPackageList() {
+  const pkgList = document.querySelector('.package-selection');
+  const checkoutSection = document.getElementById('checkout-section');
+  const successSection = document.getElementById('checkout-success');
+  if (pkgList) pkgList.classList.remove('hidden');
+  if (checkoutSection) checkoutSection.classList.add('hidden');
+  if (successSection) successSection.classList.add('hidden');
+  document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
+}
+
+function showCheckoutSection() {
+  const pkgList = document.querySelector('.package-selection');
+  const checkoutSection = document.getElementById('checkout-section');
+  if (pkgList) pkgList.classList.add('hidden');
+  if (checkoutSection) checkoutSection.classList.remove('hidden');
+  document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '0.5');
+}
+
+function showCheckoutLoading() {
+  const checkoutSection = document.getElementById('checkout-section');
+  const container = document.getElementById('checkout-container');
+  if (!checkoutSection || !container) return;
+  checkoutSection.classList.remove('hidden');
+  checkoutSection.classList.add('checkout-loading');
+
+  container.innerHTML =
+    '<div style="text-align:center; padding:50px 20px;">' +
+    '<div style="display:inline-block; position:relative; margin-bottom:20px;">' +
+    '<div style="width:56px; height:56px; border:3px solid var(--border-color); border-top-color:var(--accent-gold); border-radius:50%; animation:spin 0.8s linear infinite;"></div>' +
+    '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.5rem;">💳</div>' +
+    '</div>' +
+    '<p class="checkout-loading-text">Initializing secure checkout...</p>' +
+    '<p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p>' +
+    '</div>';
+}
+
+function showCheckoutError(message) {
+  const checkoutSection = document.getElementById('checkout-section');
+  const container = document.getElementById('checkout-container');
+  if (!checkoutSection || !container) return;
+  checkoutSection.classList.remove('checkout-loading');
+
+  container.innerHTML =
+    '<div style="text-align:center; padding:40px 20px;">' +
+    '<div style="width:64px; height:64px; border:2px solid var(--accent-red); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; color:var(--accent-red); font-size:1.8rem;">!</div>' +
+    '<h4 style="color:var(--accent-red); margin-bottom:8px;">Checkout Error</h4>' +
+    '<p style="color:var(--text-secondary); margin-bottom:20px; font-size:0.9rem;">' + escapeHTML(message) + '</p>' +
+    '<div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">' +
+    '<button class="btn btn-primary" onclick="retryCheckout()" style="min-width:120px;">Retry</button>' +
+    '<button class="btn btn-secondary-action" onclick="showPackageList()">Back to Packages</button>' +
+    '</div>' +
+    '</div>';
+}
+
+function showCheckoutSuccess(gc, sc) {
+  const pkgList = document.querySelector('.package-selection');
+  const checkoutSection = document.getElementById('checkout-section');
+  const successSection = document.getElementById('checkout-success');
+  const successDetails = document.getElementById('success-details');
+
+  if (pkgList) pkgList.classList.add('hidden');
+  if (checkoutSection) checkoutSection.classList.add('hidden');
+  if (successSection) successSection.classList.remove('hidden');
+
+  if (successDetails) {
+    successDetails.innerHTML =
+      '<div class="summary-row"><span class="summary-label">Gold Coins Added</span><span class="summary-value gc-val">' + gc + '</span></div>' +
+      '<div class="summary-row"><span class="summary-label">Sweeps Coins Added</span><span class="summary-value sc-val">+' + sc + '</span></div>';
+  }
+
+  setTimeout(() => {
+    initSessionFromToken();
+    setTimeout(() => closeStoreModal(), 2000);
+  }, 1500);
 }
 
 async function loadStripeSdk() {
@@ -582,8 +666,38 @@ async function loadStripeSdk() {
   });
 }
 
+const PACKAGE_INFO = {
+  pack_10:  { gc: '15,000', sc: '15.00', price: '$10.00' },
+  pack_20:  { gc: '25,000', sc: '25.00', price: '$20.00' },
+  pack_50:  { gc: '55,000', sc: '55.00', price: '$50.00' },
+  pack_100: { gc: '100,000', sc: '105.00', price: '$100.00' }
+};
+
+function updatePackageSummary(packageId) {
+  const info = PACKAGE_INFO[packageId];
+  const summary = document.getElementById('package-summary');
+  if (!info || !summary) return;
+
+  document.getElementById('summary-gc').textContent = info.gc;
+  document.getElementById('summary-sc').textContent = '+' + info.sc;
+  document.getElementById('summary-total').textContent = info.price;
+  summary.classList.remove('hidden');
+}
+
+function showCheckoutBackButton() {
+  const existing = document.querySelector('.checkout-back-btn');
+  if (existing) return;
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-sm btn-ghost checkout-back-btn';
+  btn.style.cssText = 'position:absolute; top:16px; left:16px; z-index:10;';
+  btn.innerHTML = '← Back to Packages';
+  btn.onclick = showPackageList;
+  document.getElementById('checkout-container').appendChild(btn);
+}
+
 async function buyCoinPackage(packageId) {
   if (state.isEmbedded) return;
+  state.lastPackageId = packageId;
   try {
     playSound('click');
     openStoreModal();
@@ -591,21 +705,10 @@ async function buyCoinPackage(packageId) {
     const container = document.getElementById('checkout-container');
     if (!container) return;
 
-    container.style.display = 'block';
-    const packageList = document.querySelector('.package-list');
-    if (packageList) packageList.style.display = 'none';
-
-    container.innerHTML =
-      '<div style="text-align:center; padding:40px;">' +
-      '<button class="btn btn-sm btn-ghost" style="position:absolute; top:12px; left:12px;" onclick="closeStoreModal()">← Back</button>' +
-      '<div style="display:inline-block; position:relative;">' +
-      '<div style="width:44px; height:44px; border:3px solid var(--border-color); border-top-color:var(--accent-gold); border-radius:50%; animation:spin 0.8s linear infinite;"></div>' +
-      '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.2rem;">💳</div>' +
-      '</div>' +
-      '<div style="margin-top:14px; font-weight:700; color:var(--text-secondary);">Initializing secure checkout...</div>' +
-      '</div>';
-
-    document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '0.5');
+    updatePackageSummary(packageId);
+    showCheckoutBackButton();
+    showCheckoutSection();
+    showCheckoutLoading();
 
     if (state.activeCheckoutInstance) {
       try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
@@ -621,36 +724,38 @@ async function buyCoinPackage(packageId) {
     const StripeSDK = await loadStripeSdk();
     const stripe = StripeSDK(data.publishableKey);
 
-    container.innerHTML = '<button class="btn btn-sm btn-ghost" style="position:absolute; top:12px; left:12px; z-index:10;" onclick="closeStoreModal()">← Back</button><div id="stripe-checkout-root" style="margin-top:44px;"></div>';
-
-    const stripeRoot = document.getElementById('stripe-checkout-root');
+    const checkoutEl = document.createElement('div');
+    checkoutEl.id = 'stripe-checkout-root';
+    checkoutEl.style.marginTop = '20px';
+    container.innerHTML = '';
+    container.appendChild(checkoutEl);
 
     state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
       clientSecret: data.clientSecret,
       onComplete: (result) => {
         playSound('win');
-        container.innerHTML = '<div style="text-align:center; padding:20px; color:#00e701; font-weight:600;">&#10003; Payment successful! Updating balance...</div>';
-        setTimeout(() => {
-          closeStoreModal();
-          initSessionFromToken();
-        }, 1500);
+        const pkg = PACKAGE_INFO[packageId] || { gc: '0', sc: '0' };
+        showCheckoutSuccess(pkg.gc, pkg.sc);
       }
     });
 
-    state.activeCheckoutInstance.mount(stripeRoot);
+    state.activeCheckoutInstance.mount(checkoutEl);
+
+    const checkoutSection = document.getElementById('checkout-section');
+    if (checkoutSection) checkoutSection.classList.remove('checkout-loading');
 
   } catch (err) {
     console.error('[Embedded Payment Error]:', err);
-    const container = document.getElementById('checkout-container');
-    if (container) {
-      container.innerHTML =
-        '<div style="color:#ff4d4d; text-align:center; padding:20px; font-weight:700; border:1px solid #ff4d4d; border-radius:6px; background:rgba(255,77,77,0.05);">' +
-        escapeHTML(err.message || 'Failed to initialize in-page payment.') +
-        '</div>';
-    } else {
-      alert(err.message || 'Failed to connect to checkout service.');
-    }
+    showCheckoutError(err.message || 'Failed to initialize in-page payment.');
     document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
+  }
+}
+
+async function retryCheckout() {
+  if (state.lastPackageId) {
+    buyCoinPackage(state.lastPackageId);
+  } else {
+    showPackageList();
   }
 }
 
