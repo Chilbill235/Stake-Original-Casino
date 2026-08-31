@@ -165,12 +165,12 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       }
     }
 
-     if (res.status === 401 || res.status === 404) {
-       localStorage.removeItem('casino_token');
-       localStorage.removeItem('casino_username');
-       await initSession();
-       throw new Error(res.status === 404 ? 'Session expired. Please log in again.' : 'Session expired. Re-authenticated.');
-     }
+      if (res.status === 401) {
+        localStorage.removeItem('casino_token');
+        localStorage.removeItem('casino_username');
+        await initSession();
+        throw new Error('Session expired. Re-authenticated.');
+      }
 
     if (!res.ok) {
       const error = new Error(data.error || 'Server error occurred');
@@ -1747,7 +1747,8 @@ async function executeStandardBet(betAmount) {
         state.balances = data.balances || state.balances;
         updateWalletUI();
       } else if (state.currentGame === 'baccarat') {
-        state.baccaratPendingBalance = data.balances;
+        state.balances = data.balances || state.balances;
+        updateWalletUI();
       } else {
         setTimeout(() => {
           state.balances = data.balances || state.balances;
@@ -2405,10 +2406,10 @@ let kycControls = '';
     kycControls = '<button type="button" class="btn-secondary-action btn-full" disabled style="color:#b1bad2;">&#8230; Verification in Progress</button>';
   } else if (kyc.status === 'REJECTED') {
     kycControls = '<button type="button" class="btn-play btn-full" onclick="startKycVerification()" style="margin-bottom:8px;">Retry Verification</button>' +
-                  '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>';
+                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>' : '');
   } else {
     kycControls = '<button type="button" class="btn-play btn-full" onclick="startKycVerification()" style="margin-bottom:8px;">Verify Identity (Persona)</button>' +
-                  '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>';
+                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>' : '');
   }
 
   const vip = p.vip || {};
@@ -2448,6 +2449,10 @@ let kycControls = '';
        <div class="form-group">
          <label class="form-label">Redeemable SC</label>
          <input type="text" class="form-input" readonly value="${Number(state.balances.sc_played || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}">
+       </div>
+       <div class="form-group">
+         <label class="form-label">Rakeback Accrued</label>
+         <input type="text" class="form-input" readonly value="${Number(p.vip?.rakebackAccruedSC || 0).toFixed(2) + ' SC'}">
        </div>
       <div class="form-group" style="margin-top: 10px;">
         <label class="form-label">KYC Status</label>
@@ -2978,7 +2983,7 @@ if (window.location.hash) {
   const hash = window.location.hash.slice(1);
   if (['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
     window.addEventListener('load', () => {
-      if (state.currentView !== 'game') launchGame(hash);
+      if (state.currentGame !== hash) launchGame(hash);
     });
   }
 }

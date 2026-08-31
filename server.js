@@ -21,16 +21,16 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder'
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const PERSONA_WEBHOOK_SECRET = process.env.PERSONA_WEBHOOK_SECRET;
 const HOUSE_EDGE = 0.13; // 13% House Edge (86% RTP)
-const RAKEBACK_RATE = 5.00; // 5% of House Edge back to user
+const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user (0.13 * 0.05 = 0.0065 = 0.65%)
 
 const stripe = require('stripe')(STRIPE_SECRET_KEY);
 const bcrypt = require('bcryptjs');
 
-const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA', 'KY'];
+const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
 // Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
 const COIN_PACKAGES = {
-  'pack_10': { name: '15,000 GC + 15 Free SC', priceInCents: 1000, gcAmount: 15000, scAmount: 15 },
+  'pack_10': { name: '15,000 GC + 15 Free SC', priceInCents: 50, gcAmount: 15000, scAmount: 15 },
   'pack_20': { name: '25,000 GC + 25 Free SC', priceInCents: 2000, gcAmount: 25000, scAmount: 25 },
   'pack_50': { name: '55,000 GC + 55 Free SC', priceInCents: 5000, gcAmount: 55000, scAmount: 55 },
   'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 10000, gcAmount: 100000, scAmount: 105 }
@@ -45,6 +45,15 @@ const transactions = new Map();
 const activeSessions = new Map();
 const userSeeds = new Map();
 const amoeRegistry = new Map();
+
+// Generate a unique user ID (avoids collisions from deletions/counters)
+let nextUserId = 1;
+function generateUserId() {
+  while (users.has(nextUserId)) nextUserId++;
+  const id = nextUserId;
+  nextUserId++;
+  return id;
+}
 
 // -----------------------------------------------------------------------------
 // 2b. PERSISTENCE — save/load users to file so balances survive restarts
@@ -68,6 +77,12 @@ function loadData() {
       if (data.userSeeds) {
         for (const [k, v] of Object.entries(data.userSeeds)) { userSeeds.set(Number(k), v); }
       }
+      if (data.jackpotPool) {
+        SLOT_JACKPOT_POOL = data.jackpotPool;
+      }
+      if (data.amoeRegistry) {
+        for (const [k, v] of Object.entries(data.amoeRegistry)) { amoeRegistry.set(k, v); }
+      }
       console.log('[Persistence]: Loaded ' + users.size + ' users from disk.');
     }
   } catch (e) {
@@ -81,9 +96,14 @@ function saveData() {
     const data = {
       users: Array.from(users.values()),
       transactions: Object.fromEntries(transactions),
-      userSeeds: Object.fromEntries(userSeeds)
+      userSeeds: Object.fromEntries(userSeeds),
+      jackpotPool: SLOT_JACKPOT_POOL,
+      amoeRegistry: Object.fromEntries(amoeRegistry)
     };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+    // Async write to avoid blocking the event loop
+    fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8', (err) => {
+      if (err) console.error('[Persistence]: Failed to save data:', err.message);
+    });
   } catch (e) {
     console.error('[Persistence]: Failed to save data:', e.message);
   }
@@ -91,38 +111,57 @@ function saveData() {
 
 // Save every 30 seconds and on key events
 setInterval(saveData, 30000);
-process.on('SIGINT', () => { saveData(); process.exit(); });
-process.on('SIGTERM', () => { saveData(); process.exit(); });
 
-loadData();   
+// Graceful shutdown handler (single handler for both signals)
+function gracefulShutdown(signal) {
+  console.log(`${signal} signal received: saving data and closing server`);
+  saveData();
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+  // Force shutdown after 5 seconds
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-// Seed Initial Demo User
-users.set(1, { 
-  id: 1, 
-  username: 'Player_1001', 
-  email: 'player1001@example.com',
-  gc_balance: 10000.0, 
-  sc_unplayed: 50.0,
-  sc_played: 0.0,     
-  stripeAccountId: null,
-  kyc: {
-    status: 'VERIFIED', // UNVERIFIED | PENDING | VERIFIED | REJECTED
-    tier: 2,           // Tier 0: Unverified, Tier 1: Basic (Purchases), Tier 2: Full (Redemptions)
-    inquiryId: 'inq_demo123',
-    verifiedAt: new Date().toISOString(),
-    rejectionReason: null
-  },
-  lastDailyClaim: 0,
-  dailyStreak: 0,
-  adsWatchedToday: 0,
-  lastAdReset: Date.now(),
-  state: 'CA',
-  vipTier: 'Bronze',
-  totalWageredGC: 0,
-  totalWageredSC: 0,
-  rakebackAccruedSC: 0
-});
-transactions.set(1, []);
+loadData();
+
+// Initialize nextUserId after loading data
+if (users.size > 0) {
+  nextUserId = Math.max(...users.keys()) + 1;
+}
+
+// Seed Initial Demo User only if no users exist (don't clobber persisted data)
+if (users.size === 0) {
+  users.set(1, {
+    id: 1,
+    username: 'Player_1001',
+    email: 'player1001@example.com',
+    gc_balance: 10000.0,
+    sc_unplayed: 50.0,
+    sc_played: 0.0,
+    stripeAccountId: null,
+    kyc: {
+      status: 'VERIFIED',
+      tier: 2,
+      inquiryId: 'inq_demo123',
+      verifiedAt: new Date().toISOString(),
+      rejectionReason: null
+    },
+    lastDailyClaim: 0,
+    dailyStreak: 0,
+    adsWatchedToday: 0,
+    lastAdReset: Date.now(),
+    state: 'CA',
+    vipTier: 'Bronze',
+    totalWageredGC: 0,
+    totalWageredSC: 0,
+    rakebackAccruedSC: 0
+  });
+  transactions.set(1, []);
+}
 
 // -----------------------------------------------------------------------------
 // 3. PROVABLY FAIR ENGINE
@@ -168,7 +207,7 @@ function getUserSeedPair(userId) {
 
 function logTransaction(userId, type, description, gcDelta, scDelta, metadata = {}) {
   if (!transactions.has(userId)) transactions.set(userId, []);
-  
+
   const tx = {
     id: `tx_${crypto.randomUUID()}`,
     type, // 'BET', 'WIN', 'PURCHASE', 'WITHDRAWAL', 'BONUS', 'RAKEBACK', 'AD_REWARD'
@@ -183,6 +222,12 @@ function logTransaction(userId, type, description, gcDelta, scDelta, metadata = 
   };
 
   transactions.get(userId).unshift(tx);
+
+  // Cap transactions per user to prevent unbounded growth (keep last 100)
+  const userTx = transactions.get(userId);
+  if (userTx.length > 100) {
+    userTx.splice(100);
+  }
   return tx;
 }
 
@@ -192,6 +237,7 @@ function updateVipAndRakeback(user, scWagered, gcWagered) {
 
   if (scWagered > 0) {
     user.rakebackAccruedSC += (scWagered * HOUSE_EDGE * RAKEBACK_RATE);
+    user.rakebackAccruedSC = Math.round(user.rakebackAccruedSC * 100) / 100;
   }
 
   if (user.totalWageredSC >= 100000) user.vipTier = 'Diamond';
@@ -286,21 +332,37 @@ function getOwnedSession(req, res, gameId) {
 // -----------------------------------------------------------------------------
 // 5. GAME ENGINES
 // -----------------------------------------------------------------------------
-const { GAMES, GAME_FLOAT_COUNTS, round2 } = require('./engine/serverGames');
+const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
 // -----------------------------------------------------------------------------
 // 6. EXPRESS APP & MIDDLEWARES
 // -----------------------------------------------------------------------------
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'https://' + (process.env.HOST || 'localhost')
+    ];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 
 // Geofencing Compliance Middleware
 function enforceJurisdiction(req, res, next) {
-  const userState = req.headers['x-user-state'] || 'CA';
+  // Use server-side user state, not client-spoofable header
+  const user = users.get(req.user.id);
+  const userState = (user && user.state) || 'CA';
   if (RESTRICTED_STATES.includes(userState.toUpperCase())) {
-    return res.status(403).json({ 
-      error: `Sweepstakes play is unavailable in your jurisdiction (${userState}).` 
+    return res.status(403).json({
+      error: `Sweepstakes play is unavailable in your jurisdiction (${userState}).`
     });
   }
   next();
@@ -506,7 +568,7 @@ function broadcastLiveBet(betData) {
 // -----------------------------------------------------------------------------
 
 app.post('/api/auth/guest', (req, res) => {
-  const guestId = users.size + 1;
+  const guestId = generateUserId();
   const username = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
   const newUser = {
     id: guestId,
@@ -568,7 +630,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (u.username === username) return res.status(409).json({ error: 'Username already taken.' });
   }
 
-  const userId = users.size + 1;
+  const userId = generateUserId();
   const hashedPassword = await bcrypt.hash(password, 10);
   const newUser = {
     id: userId,
@@ -732,6 +794,10 @@ app.post('/api/user/kyc/start', verifyToken, (req, res) => {
 });
 
 app.post('/api/user/kyc/verify-sandbox', verifyToken, (req, res) => {
+  // Sandbox KYC is only available in development/test environments
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'Sandbox verification is not available in production.' });
+  }
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
@@ -1120,7 +1186,10 @@ function ensureBonusFields(user) {
     weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
     monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
     diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
-    history: []
+    history: [],
+    lastDailyReset: Date.now(),
+    lastWeeklyReset: Date.now(),
+    lastMonthlyReset: Date.now()
   };
   // Convert legacy Set to array if needed
   if (user.bonus.telemetry && user.bonus.telemetry.gamesPlayed && !(user.bonus.telemetry.gamesPlayed instanceof Set)) {
@@ -1132,7 +1201,38 @@ function ensureBonusFields(user) {
     lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
     dailyPool: 0, weeklyPool: 0, monthlyPool: 0
   };
+
+  // Reset telemetry windows if period has elapsed
+  resetTelemetryWindows(user.bonus.telemetry);
+
   return user.bonus;
+}
+
+// Reset telemetry counters when their period elapses
+function resetTelemetryWindows(t) {
+  const now = Date.now();
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const ONE_WEEK = 7 * ONE_DAY;
+  const ONE_MONTH = 30 * ONE_DAY;
+
+  if (!t.lastDailyReset || now - t.lastDailyReset >= ONE_DAY) {
+    t.dailyLossSC = 0;
+    t.dailyWagerSC = 0;
+    t.dailyWinSC = 0;
+    t.lastDailyReset = now;
+  }
+  if (!t.lastWeeklyReset || now - t.lastWeeklyReset >= ONE_WEEK) {
+    t.weeklyLossSC = 0;
+    t.weeklyWagerSC = 0;
+    t.weeklyWinSC = 0;
+    t.lastWeeklyReset = now;
+  }
+  if (!t.lastMonthlyReset || now - t.lastMonthlyReset >= ONE_MONTH) {
+    t.monthlyLossSC = 0;
+    t.monthlyWagerSC = 0;
+    t.monthlyWinSC = 0;
+    t.lastMonthlyReset = now;
+  }
 }
 
 // Generate daily challenges for a user (3 random challenges, same day)
@@ -1182,7 +1282,6 @@ function updateTelemetry(user, gameId, currency, betAmount, won, payout, outcome
 
   if (currency === 'GC') {
     t.gcWagered += betAmount;
-    if (!won) t.dailyLossSC = 0;
   } else {
     t.scWagered += betAmount;
     t.dailyWagerSC += betAmount;
@@ -1199,9 +1298,11 @@ function updateTelemetry(user, gameId, currency, betAmount, won, payout, outcome
       t.monthlyWinSC += payout;
     }
   }
-  t.gamesPlayed.push(gameId);
-  // Deduplicate for the games-played challenge
-  const uniqueGames = [...new Set(t.gamesPlayed)];
+  if (Array.isArray(t.gamesPlayed)) {
+    t.gamesPlayed.push(gameId);
+  } else {
+    t.gamesPlayed = [gameId];
+  }
 
   if (!won && currency === 'SC') {
     const loss = betAmount;
@@ -1211,13 +1312,21 @@ function updateTelemetry(user, gameId, currency, betAmount, won, payout, outcome
   }
 
   // Challenge-specific tracking
-  if (gameId === 'dice' && currency === 'SC' && won && betAmount >= 1 && payout / betAmount >= 9) (t.diceOver90 = (t.diceOver90 || 0) + 1);
+  // dice_over90: track SC wagered on OVER 90 bets (matches challenge description)
+  if (gameId === 'dice' && currency === 'SC' && outcome?.params?.target >= 90 && outcome?.params?.condition === 'OVER') {
+    t.diceOver90 = (t.diceOver90 || 0) + betAmount;
+  }
   if (gameId === 'crash' && won && payout / betAmount >= 2) (t.crashCashout2x = (t.crashCashout2x || 0) + 1);
   if (gameId === 'blackjack') (t.blackjackHands = (t.blackjackHands || 0) + 1);
 
-  // Push to history (cap at 200 entries)
+  // Push to history (cap at 100 entries)
   t.history.push({ ts: Date.now(), game: gameId, currency, bet: betAmount, won, payout });
-  if (t.history.length > 200) t.history.shift();
+  if (t.history.length > 100) t.history.shift();
+
+  // Cap gamesPlayed array to prevent unbounded growth (keep last 50)
+  if (t.gamesPlayed.length > 50) {
+    t.gamesPlayed = t.gamesPlayed.slice(-50);
+  }
 
   // Re-evaluate challenges
   bonus.challenges.forEach(c => {
@@ -1493,11 +1602,4 @@ app.use((req, res) => {
 // -----------------------------------------------------------------------------
 server.listen(PORT, () => {
   console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
-});
-
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
-    console.log('HTTP server closed');
-  });
 });

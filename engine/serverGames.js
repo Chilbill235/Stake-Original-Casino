@@ -72,9 +72,9 @@ const SLOT_JACKPOTS = {
   grand: { threshold: 6, payout: 1000 }
 };
 
-// Progressive jackpot seed (persists across rounds in memory)
+// Progressive jackpot seed (persists across rounds - saved/loaded from server.js)
 let SLOT_JACKPOT_POOL = { mini: 50, minor: 200, major: 1000, grand: 10000 };
-const SLOT_JACKPOT_CONTRIB = { mini: 0.01, minor: 0.02, minor: 0.03, major: 0.02, grand: 0.05 };
+const SLOT_JACKPOT_CONTRIB = { mini: 0.01, minor: 0.03, major: 0.02, grand: 0.05 };
 
 function slotJackpotProgress(betAmount) {
   SLOT_JACKPOT_POOL.mini += betAmount * SLOT_JACKPOT_CONTRIB.mini;
@@ -388,4 +388,4 @@ const GAMES = {
   }
 };
 
-module.exports = { GAMES, GAME_FLOAT_COUNTS, round2 };
+module.exports = { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL };
