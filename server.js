@@ -25,6 +25,7 @@ const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user (0.13 * 0.05 = 0.00
 
 const stripe = require('stripe')(STRIPE_SECRET_KEY);
 const bcrypt = require('bcryptjs');
+const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
@@ -71,6 +72,9 @@ function loadData() {
       if (data.users) {
         for (const u of data.users) { users.set(u.id, u); }
       }
+      for (const u of users.values()) {
+        if (!u.createdAt) u.createdAt = Date.now();
+      }
       if (data.transactions) {
         for (const [k, v] of Object.entries(data.transactions)) { transactions.set(Number(k), v); }
       }
@@ -78,7 +82,7 @@ function loadData() {
         for (const [k, v] of Object.entries(data.userSeeds)) { userSeeds.set(Number(k), v); }
       }
       if (data.jackpotPool) {
-        SLOT_JACKPOT_POOL = data.jackpotPool;
+        Object.assign(SLOT_JACKPOT_POOL, data.jackpotPool);
       }
       if (data.amoeRegistry) {
         for (const [k, v] of Object.entries(data.amoeRegistry)) { amoeRegistry.set(k, v); }
@@ -100,10 +104,8 @@ function saveData() {
       jackpotPool: SLOT_JACKPOT_POOL,
       amoeRegistry: Object.fromEntries(amoeRegistry)
     };
-    // Async write to avoid blocking the event loop
-    fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8', (err) => {
-      if (err) console.error('[Persistence]: Failed to save data:', err.message);
-    });
+    const json = JSON.stringify(data, null, 2);
+    fs.writeFileSync(DATA_FILE, json, 'utf8');
   } catch (e) {
     console.error('[Persistence]: Failed to save data:', e.message);
   }
@@ -158,7 +160,29 @@ if (users.size === 0) {
     vipTier: 'Bronze',
     totalWageredGC: 0,
     totalWageredSC: 0,
-    rakebackAccruedSC: 0
+    rakebackAccruedSC: 0,
+    bonus: {
+      lastClaimAt: 0,
+      claimStreak: 0,
+      dailyClaimed: false,
+      challenges: [],
+      challengeDate: '',
+      telemetry: {
+        scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+        gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+        weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+        monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+        diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+        history: [],
+        lastDailyReset: Date.now(),
+        lastWeeklyReset: Date.now(),
+        lastMonthlyReset: Date.now()
+      },
+      rakeback: {
+        lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+        dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+      }
+    }
   });
   transactions.set(1, []);
 }
@@ -249,7 +273,7 @@ function updateVipAndRakeback(user, scWagered, gcWagered) {
 
 /**
  * Validates a wager end-to-end (currency whitelist, numeric bet, rounding,
- * balance check). Returns { user, currency, amount } or sends an error
+ * balance check, max limit). Returns { user, currency, amount } or sends an error
  * response and returns null.
  */
 function validateWager(req, res) {
@@ -269,10 +293,16 @@ function validateWager(req, res) {
     return null;
   }
 
+  const MAX_BET = currency === 'GC' ? 100000 : 10000;
+  if (amount > MAX_BET) {
+    res.status(400).json({ error: `Maximum bet is ${MAX_BET.toLocaleString()} ${currency}.` });
+    return null;
+  }
+
   const rounded = Math.round(amount * 100) / 100;
   const balance = currency === 'GC'
     ? user.gc_balance
-    : user.sc_unplayed + user.sc_played;
+    : user.sc_unplayed;
 
   if (rounded > balance) {
     res.status(400).json({ error: `Insufficient ${currency} balance.` });
@@ -285,17 +315,10 @@ function validateWager(req, res) {
 /** Debits a stake from the correct currency bucket and accrues VIP/rakeback. */
 function debitBet(user, currency, amount) {
   if (currency === 'GC') {
-    user.gc_balance -= amount;
+    user.gc_balance = Math.max(0, user.gc_balance - amount);
     updateVipAndRakeback(user, 0, amount);
   } else {
-    let remaining = amount;
-    if (user.sc_unplayed >= remaining) {
-      user.sc_unplayed -= remaining;
-    } else {
-      remaining -= user.sc_unplayed;
-      user.sc_unplayed = 0;
-      user.sc_played = Math.max(0, user.sc_played - remaining);
-    }
+    user.sc_unplayed = Math.max(0, user.sc_unplayed - amount);
     updateVipAndRakeback(user, amount, 0);
   }
   saveData();
@@ -332,7 +355,7 @@ function getOwnedSession(req, res, gameId) {
 // -----------------------------------------------------------------------------
 // 5. GAME ENGINES
 // -----------------------------------------------------------------------------
-const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
+// (game engines imported above with bcrypt)
 // -----------------------------------------------------------------------------
 // 6. EXPRESS APP & MIDDLEWARES
 // -----------------------------------------------------------------------------
@@ -344,8 +367,9 @@ app.use(cors({
     const allowedOrigins = [
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      'https://' + (process.env.HOST || 'localhost')
-    ];
+      'https://' + (process.env.HOST || 'localhost'),
+      process.env.FRONTEND_URL
+    ].filter(Boolean);
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -470,6 +494,8 @@ app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, r
         message: 'Identity verification failed. Please check your documents and retry.'
       });
     }
+  } else {
+    console.warn(`[PERSONA WEBHOOK] User ${userId} not found for webhook event ${eventType}`);
   }
 
   res.json({ success: true });
@@ -477,6 +503,80 @@ app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, r
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Rate limiting middleware - only for API routes
+const rateLimitMap = new Map();
+
+function rateLimit(maxRequests, windowMs) {
+  return (req, res, next) => {
+    if (!req.path.startsWith('/api/')) {
+      return next();
+    }
+    const key = req.ip || req.connection.remoteAddress;
+    const now = Date.now();
+    const userRequests = rateLimitMap.get(key) || [];
+
+    const validRequests = userRequests.filter(time => now - time < windowMs);
+    if (validRequests.length >= maxRequests) {
+      return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+    }
+
+    validRequests.push(now);
+    rateLimitMap.set(key, validRequests);
+    next();
+  };
+}
+
+app.use(rateLimit(500, 60000));
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
+app.post('/api/auth/forgot-password', (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+  const user = Array.from(users.values()).find(u => u.email === email);
+  if (!user) {
+    return res.json({ success: true, message: 'If an account with that email exists, a password reset link has been sent.' });
+  }
+
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const resetExpiry = Date.now() + 3600000;
+
+  user.passwordResetToken = resetToken;
+  user.passwordResetExpiry = resetExpiry;
+  saveData();
+
+  res.json({ success: true, message: 'If an account with that email exists, a password reset link has been sent.' });
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body || {};
+  if (!token || !newPassword) {
+    return res.status(400).json({ error: 'Token and new password are required.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
+
+  const user = Array.from(users.values()).find(u => u.passwordResetToken === token && u.passwordResetExpiry > Date.now());
+  if (!user) {
+    return res.status(400).json({ error: 'Invalid or expired reset token.' });
+  }
+
+  user.password = await bcrypt.hash(newPassword, 10);
+  user.passwordResetToken = null;
+  user.passwordResetExpiry = null;
+  saveData();
+
+  res.json({ success: true, message: 'Password reset successfully.' });
+});
 
 function verifyToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -497,8 +597,8 @@ const wss = new WebSocket.Server({ noServer: true });
 const connectedClients = new Map();
 
 server.on('upgrade', (request, socket, head) => {
-  const urlParams = new URLSearchParams(request.url.replace(/^[^?]*\?/, ''));
-  const token = urlParams.get('token');
+  const authHeader = request.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     socket.destroy();
@@ -590,10 +690,33 @@ app.post('/api/auth/guest', (req, res) => {
     adsWatchedToday: 0,
     lastAdReset: Date.now(),
     state: 'CA',
+    createdAt: Date.now(),
     vipTier: 'Bronze',
     totalWageredGC: 0,
     totalWageredSC: 0,
-    rakebackAccruedSC: 0
+    rakebackAccruedSC: 0,
+    bonus: {
+      lastClaimAt: 0,
+      claimStreak: 0,
+      dailyClaimed: false,
+      challenges: [],
+      challengeDate: '',
+      telemetry: {
+        scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+        gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+        weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+        monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+        diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+        history: [],
+        lastDailyReset: Date.now(),
+        lastWeeklyReset: Date.now(),
+        lastMonthlyReset: Date.now()
+      },
+      rakeback: {
+        lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+        dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+      }
+    }
   };
   users.set(guestId, newUser);
   transactions.set(guestId, []);
@@ -653,10 +776,33 @@ app.post('/api/auth/register', async (req, res) => {
     adsWatchedToday: 0,
     lastAdReset: Date.now(),
     state: 'CA',
+    createdAt: Date.now(),
     vipTier: 'Bronze',
     totalWageredGC: 0,
     totalWageredSC: 0,
-    rakebackAccruedSC: 0
+    rakebackAccruedSC: 0,
+    bonus: {
+      lastClaimAt: 0,
+      claimStreak: 0,
+      dailyClaimed: false,
+      challenges: [],
+      challengeDate: '',
+      telemetry: {
+        scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+        gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+        weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+        monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+        diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+        history: [],
+        lastDailyReset: Date.now(),
+        lastWeeklyReset: Date.now(),
+        lastMonthlyReset: Date.now()
+      },
+      rakeback: {
+        lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+        dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+      }
+    }
   };
   users.set(userId, newUser);
   transactions.set(userId, []);
@@ -712,6 +858,7 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     username: user.username,
     email: user.email,
     state: user.state,
+    createdAt: user.createdAt,
     balances: { 
       gc: user.gc_balance, 
       sc: user.sc_unplayed + user.sc_played,
@@ -728,10 +875,18 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     hasPayoutAccount: !!user.stripeAccountId,
     transfersActive,
     dailyBonus: {
-      canClaim: Date.now() - user.lastDailyClaim > 24 * 60 * 60 * 1000,
-      nextClaimMs: Math.max(0, (user.lastDailyClaim + 24 * 60 * 60 * 1000) - Date.now()),
-      streak: user.dailyStreak
-    }
+      canClaim: Date.now() - (user.bonus?.lastClaimAt || user.lastDailyClaim || 0) > 24 * 60 * 60 * 1000,
+      nextClaimMs: Math.max(0, ((user.bonus?.lastClaimAt || user.lastDailyClaim || 0) + 24 * 60 * 60 * 1000) - Date.now()),
+      streak: user.bonus?.claimStreak || user.dailyStreak || 0
+    },
+    bonus: user.bonus ? {
+      lastClaimAt: user.bonus.lastClaimAt,
+      claimStreak: user.bonus.claimStreak,
+      dailyClaimed: user.bonus.dailyClaimed,
+      challengeDate: user.bonus.challengeDate,
+      challenges: user.bonus.challenges,
+      rakeback: user.bonus.rakeback
+    } : null
   });
 });
 
@@ -828,20 +983,37 @@ app.post('/api/user/amoe-code', verifyToken, (req, res) => {
 app.post('/api/user/claim-rakeback', verifyToken, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
-  if (user.rakebackAccruedSC <= 0) {
+
+  const bonus = ensureBonusFields(user);
+  const rak = bonus.rakeback || { dailyPool: 0, weeklyPool: 0, monthlyPool: 0 };
+  const totalRakeback = (rak.dailyPool || 0) + (rak.weeklyPool || 0) + (rak.monthlyPool || 0);
+
+  if (totalRakeback <= 0 && user.rakebackAccruedSC <= 0) {
     return res.status(400).json({ error: 'No rakeback available to claim.' });
   }
 
-  const amount = user.rakebackAccruedSC;
-  user.sc_unplayed += amount;
+  const legacyAmount = user.rakebackAccruedSC || 0;
+  const poolAmount = totalRakeback;
+  const totalClaim = round2(legacyAmount + poolAmount);
+
+  if (totalClaim <= 0) {
+    return res.status(400).json({ error: 'No rakeback available to claim.' });
+  }
+
+  user.sc_unplayed += totalClaim;
   user.rakebackAccruedSC = 0;
+  if (bonus.rakeback) {
+    bonus.rakeback.dailyPool = 0;
+    bonus.rakeback.weeklyPool = 0;
+    bonus.rakeback.monthlyPool = 0;
+  }
   saveData();
 
-  logTransaction(user.id, 'RAKEBACK', `Claimed Rakeback`, 0, amount);
+  logTransaction(user.id, 'RAKEBACK', `Claimed Rakeback (legacy endpoint)`, 0, totalClaim);
 
   res.json({
     success: true,
-    claimed: amount,
+    claimed: totalClaim,
     balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
   });
 });
@@ -850,35 +1022,37 @@ app.post('/api/user/daily-bonus', verifyToken, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
+  const bonus = ensureBonusFields(user);
   const now = Date.now();
   const ONE_DAY = 24 * 60 * 60 * 1000;
   const TWO_DAYS = 48 * 60 * 60 * 1000;
 
-  if (now - user.lastDailyClaim < ONE_DAY) {
-    const remainingMs = (user.lastDailyClaim + ONE_DAY) - now;
+  if (now - bonus.lastClaimAt < ONE_DAY) {
+    const remainingMs = (bonus.lastClaimAt + ONE_DAY) - now;
     return res.status(400).json({ error: 'Daily bonus is not ready yet.', nextClaimMs: remainingMs });
   }
 
-  if (now - user.lastDailyClaim > TWO_DAYS) {
-    user.dailyStreak = 1;
+  if (now - bonus.lastClaimAt > TWO_DAYS) {
+    bonus.claimStreak = 1;
   } else {
-    user.dailyStreak = (user.dailyStreak || 0) + 1;
+    bonus.claimStreak = (bonus.claimStreak || 0) + 1;
   }
 
-  user.lastDailyClaim = now;
-  const gcReward = 5000 + (user.dailyStreak * 1000);
-  const scReward = 1.00 + (user.dailyStreak * 0.25);
+  bonus.lastClaimAt = now;
+  bonus.dailyClaimed = true;
+  const gcReward = 5000 + (bonus.claimStreak * 1000);
+  const scReward = 1.00 + (bonus.claimStreak * 0.25);
 
   user.gc_balance += gcReward;
   user.sc_unplayed += scReward;
   saveData();
 
-  logTransaction(user.id, 'BONUS', `Daily Claim (Day ${user.dailyStreak})`, gcReward, scReward);
+  logTransaction(user.id, 'BONUS', `Daily Claim (Day ${bonus.claimStreak})`, gcReward, scReward);
 
   res.json({
     success: true,
     claimed: { gc: gcReward, sc: scReward },
-    streak: user.dailyStreak,
+    streak: bonus.claimStreak,
     balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
   });
 });
@@ -1151,13 +1325,23 @@ const claimLocks = new Map();
 function acquireLock(userId, operation) {
   const key = `${userId}:${operation}`;
   if (claimLocks.has(key)) return false;
-  claimLocks.set(key, true);
+  claimLocks.set(key, Date.now());
   return true;
 }
 
 function releaseLock(userId, operation) {
   claimLocks.delete(`${userId}:${operation}`);
 }
+
+// Auto-release locks after 30 seconds to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of claimLocks.entries()) {
+    if (now - timestamp > 30000) {
+      claimLocks.delete(key);
+    }
+  }
+}, 30000);
 
 // Challenge definitions — pool to draw 3 from each day
 const CHALLENGE_POOL = [
@@ -1557,17 +1741,16 @@ app.post('/api/rakeback/claim', verifyToken, (req, res) => {
       return res.status(400).json({ error: 'No losses tracked for this period.' });
     }
 
-    const rate = 0.03 + Math.random() * 0.07;
-    const amount = round2(losses[tier] * rate * 0.5);
+  const rate = 0.03 + Math.random() * 0.07;
+  const amount = round2(losses[tier] * rate * 0.5);
 
-    if (amount <= 0) {
-      return res.status(400).json({ error: 'Calculated rakeback is 0.00.' });
-    }
+  if (amount <= 0) {
+    return res.status(400).json({ error: 'Calculated rakeback is 0.00.' });
+  }
 
-    rb[w.field] = now;
-    user.sc_unplayed += amount;
-
-    saveData();
+  rb[w.field] = now;
+  user.sc_unplayed += amount;
+  saveData();
     logTransaction(user.id, 'RAKEBACK', `${tier.charAt(0).toUpperCase() + tier.slice(1)} Rakeback (${(rate * 100).toFixed(0)}%)`, 0, amount, { tier });
 
     res.json({
@@ -1588,6 +1771,11 @@ app.use((err, req, res, next) => {
   }
   console.error('[SERVER ERROR]', err);
   res.status(500).json({ error: 'Internal server error.' });
+});
+
+// SPA fallback: serve index.html for all non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // JSON 404 for any unknown API route (never leak an HTML stack page)

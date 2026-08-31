@@ -14,12 +14,13 @@ GameRenderers.renderPlinko = function(details, multiplier, payout) {
   const rows = details.rows;
   const path = details.path;
   const bucket = details.bucket;
-  const table = GameRenderers.PLINGO_CLIENT_TABLES[rows] || GameRenderers.PLINGO_CLIENT_TABLES[16];
+  const table = GameRenderers.PLINKO_CLIENT_TABLES[rows] || GameRenderers.PLINKO_CLIENT_TABLES[16];
   const won = multiplier >= 1;
+  const risk = details.risk || 'MEDIUM';
 
   let ballPos = 0;
   let step = 0;
-  const tickRate = Math.max(30, 500 / rows);
+  const tickRate = Math.max(20, 300 / rows);
 
   function renderFrame() {
     const progress = step + 0.5;
@@ -50,8 +51,8 @@ GameRenderers.renderPlinko = function(details, multiplier, payout) {
     const ballY = 10 + (progress * 26);
 
     display.innerHTML =
-      '<div style="position:relative;max-width:380px;margin:auto;height:380px;padding:10px;">' +
-      '<div style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:0.72rem;color:#b1bad2;font-weight:600;">Row ' + Math.min(ballRow + 1, rows) + ' / ' + rows + '</div>' +
+      '<div class="plinko-board" style="position:relative;max-width:380px;margin:auto;height:380px;padding:10px;">' +
+      '<div style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:0.72rem;color:#b1bad2;font-weight:600;">Row ' + Math.min(ballRow + 1, rows) + ' / ' + rows + ' • Risk: ' + risk + '</div>' +
       pins +
       '<div id="plinko-ball" style="position:absolute;left:' + ballX + '%;top:' + ballY + 'px;transform:translateX(-50%);font-size:1.4rem;width:24px;height:24px;">🔴</div>' +
       '</div>';
@@ -72,21 +73,21 @@ GameRenderers.renderPlinko = function(details, multiplier, payout) {
   function finish() {
     renderFrame();
 
-    let bucketsHtml = '<div style="display:flex;justify-content:center;gap:3px;margin-top:20px;">';
+    let bucketsHtml = '<div class="plinko-buckets" style="display:flex;justify-content:center;gap:3px;margin-top:20px;">';
     for (let i = 0; i <= rows; i++) {
       const hit = i === bucket;
       const m = table[i];
       const isBig = m >= 10;
       const isMid = m >= 2;
       const col = isBig ? '#00e701' : isMid ? '#8248ff' : m >= 1 ? '#00e701' : '#39424d';
-      bucketsHtml += '<div style="min-width:min(30px,7vw);padding:8px 4px;border-radius:4px;text-align:center;font-size:0.65rem;font-weight:800;color:#fff;background:' + col + ';opacity:' + (hit ? '1' : '0.55') + ';transform:' + (hit ? 'scale(1.2)' : 'none') + ';box-shadow:' + (hit ? '0 0 12px rgba(' + (isBig ? '0,231,1' : '130,72,255') + ',.6)' : 'none') + ';">' + m.toFixed(2) + 'x</div>';
+      bucketsHtml += '<div class="plinko-bucket ' + (hit ? 'bucket-hit' : '') + '" style="min-width:min(30px,7vw);padding:8px 4px;border-radius:4px;text-align:center;font-size:0.65rem;font-weight:800;color:#fff;background:' + col + ';opacity:' + (hit ? '1' : '0.55') + ';transform:' + (hit ? 'scale(1.2)' : 'none') + ';box-shadow:' + (hit ? '0 0 12px rgba(' + (isBig ? '0,231,1' : '130,72,255') + ',.6)' : 'none') + ';">' + m.toFixed(2) + 'x</div>';
     }
     bucketsHtml += '</div>';
 
     const ballEl = document.getElementById('plinko-ball');
 
     display.innerHTML =
-      '<div style="text-align:center;padding:20px;">' + bucketsHtml +
+      '<div class="plinko-result" style="text-align:center;padding:20px;">' + bucketsHtml +
       '<div style="font-size:2.5rem;font-weight:900;margin:14px 0;color:' + (won ? '#00e701' : '#ff4d4d') + ';">' +
       multiplier.toFixed(2) + 'x ' + (won ? '✅' : '💥') +
       '</div>' +

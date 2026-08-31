@@ -204,7 +204,7 @@ async function initSession() {
 
   try {
     const data = await apiRequest('/api/user/me');
-    if (data.balances) state.balances = data.balances;
+    if (data.balances) state.balances = mergeBalances(data.balances);
     if (data.username) localStorage.setItem('casino_username', data.username);
     state.profile = data;
   } catch (err) {
@@ -310,14 +310,21 @@ function connectWebSocket() {
             renderLiveBetRow(data);
             break;
           case 'BALANCE_UPDATE':
-            state.balances = { gc: data.balances.gc, sc: data.balances.sc_unplayed + data.balances.sc_played };
+            if (data.balances) {
+              state.balances = {
+                gc: data.balances.gc,
+                sc: data.balances.sc,
+                sc_unplayed: data.balances.sc_unplayed != null ? data.balances.sc_unplayed : state.balances.sc_unplayed,
+                sc_played: data.balances.sc_played != null ? data.balances.sc_played : state.balances.sc_played
+              };
+            }
             updateWalletUI();
             break;
           case 'KYC_STATUS_UPDATE':
             if (state.profile) state.profile.kyc = data.kyc;
             if (data.message) alert(data.message);
-            if (document.getElementById('modal-profile') && !document.getElementById('modal-profile').classList.contains('hidden')) {
-              refreshProfileModal();
+            if (document.getElementById('view-account') && !document.getElementById('view-account').classList.contains('hidden')) {
+              refreshAccountPage();
             }
             break;
           case 'GAME_RESULT':
@@ -370,7 +377,7 @@ function renderBetFeed() {
       `<span class="bet-game">${escapeHTML(data.game)}</span>` +
       `</div>` +
       `<span class="bet-mult ${winClass}">` +
-      `${winLabel} ${Number(data.multiplier).toFixed(2)}x (${Number(data.payout || 0).toFixed(2)} ${data.currency || 'GC'})` +
+      `${winLabel} ${Number(data.multiplier).toFixed(2)}x (${formatCoins(data.payout || 0)} ${data.currency || 'GC'})` +
       `</span>`;
     feed.appendChild(row);
   }
@@ -398,7 +405,7 @@ function renderGameResultFeed() {
     const isWin = item.win;
     const color = isWin ? '#00e701' : '#ff4d4d';
     const mult = item.multiplier ? item.multiplier.toFixed(2) + 'x' : '';
-    const payout = item.payout ? Number(item.payout).toFixed(2) : '';
+    const payout = item.payout ? formatCoins(item.payout) : '';
     html += '<div class="result-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05);font-size:0.82rem;">' +
       '<span style="color:' + color + ';font-weight:700;min-width:70px;text-transform:uppercase;font-size:0.72rem;">' + (item.game || '---') + '</span>' +
       '<span style="color:' + color + ';font-family:monospace;font-weight:700;flex:1;">' + mult + '</span>' +
@@ -412,6 +419,23 @@ function renderGameResultFeed() {
 // 6. WALLET & CURRENCY CONTROLLER
 // ==========================================================================
 
+function formatCoins(value) {
+  const num = Number(value || 0);
+  const parts = num.toFixed(2).split('.');
+  const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts[1] ? intPart + '.' + parts[1] : intPart;
+}
+
+function mergeBalances(newBalances) {
+  if (!newBalances) return state.balances;
+  return {
+    gc: newBalances.gc != null ? newBalances.gc : state.balances.gc,
+    sc: newBalances.sc != null ? newBalances.sc : state.balances.sc,
+    sc_unplayed: newBalances.sc_unplayed != null ? newBalances.sc_unplayed : state.balances.sc_unplayed,
+    sc_played: newBalances.sc_played != null ? newBalances.sc_played : state.balances.sc_played
+  };
+}
+
 function updateWalletUI() {
   const tag = document.getElementById('curr-tag');
   const val = document.getElementById('balance-val');
@@ -420,14 +444,8 @@ function updateWalletUI() {
   const balanceGcMenu = document.getElementById('menu-bal-gc');
   const balanceScMenu = document.getElementById('menu-bal-sc');
 
-  const formattedGc = Number(state.balances.gc || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-  const formattedSc = Number(state.balances.sc || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
+  const formattedGc = formatCoins(state.balances.gc || 0);
+  const formattedSc = formatCoins(state.balances.sc || 0);
 
   if (balanceGcMenu) balanceGcMenu.textContent = formattedGc;
   if (balanceScMenu) balanceScMenu.textContent = formattedSc;
@@ -893,7 +911,7 @@ async function submitRedeem() {
       return;
     }
 
-    state.balances = data.balances;
+    state.balances = mergeBalances(data.balances);
     updateWalletUI();
     alert(data.message || 'Redemption request submitted successfully.');
     closeRedeemModal();
@@ -901,7 +919,7 @@ async function submitRedeem() {
     if (err.requiresKyc) {
       alert(err.message + ' Please complete KYC verification in your Profile first.');
       closeRedeemModal();
-      setTimeout(() => openProfileModal(), 300);
+      setTimeout(() => openAccountPage(), 300);
     } else {
       alert(err.message || 'Redemption request failed.');
     }
@@ -916,10 +934,13 @@ function showLobby() {
   playSound('click');
   document.getElementById('view-lobby')?.classList.remove('hidden');
   document.getElementById('view-game')?.classList.add('hidden');
+  document.getElementById('view-account')?.classList.add('hidden');
+  document.getElementById('view-bonus')?.classList.add('hidden');
+  document.getElementById('view-challenges')?.classList.add('hidden');
+  document.getElementById('view-rakeback')?.classList.add('hidden');
   state.currentGame = null;
   state.activeGameState = null;
   state.isProcessing = false;
-  window.location.hash = '';
   clearGameControls();
 }
 
@@ -1043,6 +1064,10 @@ async function launchGame(gameId) {
         <div class="control-group" style="grid-column: 1 / -1;">
           <label class="control-label">Mines Count</label>
           <input type="number" id="mines-count" value="3" min="1" max="24" class="control-input">
+        </div>
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <label class="control-label">Auto Cashout Multiplier</label>
+          <input type="number" id="mines-auto-cashout" value="0" step="0.1" min="1.01" max="10000" class="control-input" placeholder="0 = disabled">
         </div>`;
       actionBtn.textContent = 'START MINES';
       break;
@@ -1097,10 +1122,24 @@ async function launchGame(gameId) {
     case 'keno':
       state.selectedKenoNumbers = [];
       if (window.GameRenderers && window.GameRenderers.renderKenoBoard) {
-        window.GameRenderers.renderKenoBoard();
+        window.GameRenderers.renderKenoBoard({ drawn: [], locked: false });
       } else {
         renderKenoBoard();
       }
+      options.innerHTML = `
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <label class="control-label">Picks</label>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button class="btn-quick-target" onclick="setKenoPicks(1)">1</button>
+            <button class="btn-quick-target" onclick="setKenoPicks(3)">3</button>
+            <button class="btn-quick-target" onclick="setKenoPicks(5)">5</button>
+            <button class="btn-quick-target" onclick="setKenoPicks(8)">8</button>
+            <button class="btn-quick-target" onclick="setKenoPicks(10)">10</button>
+          </div>
+        </div>
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <div id="keno-payout-table">${window.GameRenderers && GameRenderers.kenoPayoutTable ? GameRenderers.kenoPayoutTable() : ''}</div>
+        </div>`;
       break;
 
     case 'blackjack':
@@ -1116,6 +1155,10 @@ async function launchGame(gameId) {
             <label style="display:flex;align-items:center;gap:3px;font-size:0.7rem;color:#b1bad2;cursor:pointer;"><input type="checkbox" id="slots-lines-3" checked style="margin:0;"> 3 Lines</label>
             <label style="display:flex;align-items:center;gap:3px;font-size:0.7rem;color:#b1bad2;cursor:pointer;"><input type="checkbox" id="slots-lines-5" checked style="margin:0;"> 5 Lines</label>
           </div>
+        </div>
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <button class="btn-buy-bonus" onclick="buySlotsBonus()">BUY BONUS (100x bet)</button>
+          <div style="font-size:0.7rem;color:#b1bad2;margin-top:4px;text-align:center;">Free spins: 3+ ⭐ symbols trigger 10 free spins</div>
         </div>
         <div class="control-group" style="grid-column: 1 / -1;">
           <div style="text-align:center;font-size:0.7rem;color:#b1bad2;font-weight:600;">Progressive Jackpots: Mini • Minor • Major • Grand</div>
@@ -1173,6 +1216,7 @@ async function startMinesGame(betAmount) {
   state.isProcessing = true;
   playSound('chip');
   const mineCount = parseInt(document.getElementById('mines-count')?.value || 3);
+  const autoCashoutVal = parseFloat(document.getElementById('mines-auto-cashout')?.value || 0);
 
   try {
     const data = await apiRequest('/api/play/mines/start', 'POST', {
@@ -1181,7 +1225,7 @@ async function startMinesGame(betAmount) {
       mineCount
     });
 
-    state.balances = data.balances;
+    state.balances = mergeBalances(data.balances);
     updateWalletUI();
 
     state.activeGameState = {
@@ -1190,7 +1234,8 @@ async function startMinesGame(betAmount) {
       revealedTiles: [],
       mineCount,
       betAmount,
-      currentMultiplier: 1.00
+      currentMultiplier: 1.00,
+      autoCashout: autoCashoutVal > 0 ? autoCashoutVal : null
     };
 
     if (window.GameRenderers && window.GameRenderers.renderMinesBoard) {
@@ -1260,11 +1305,11 @@ async function revealMineTile(tileIndex) {
       }
 
       if (data.cashedOut || data.autoCashout) {
-        if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+        if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
         if (window.GameRenderers && window.GameRenderers.renderMinesWin) {
           window.GameRenderers.renderMinesWin(data);
         } else {
-          alert(`Board cleared! Auto-cashout ${data.multiplier.toFixed(2)}x — +${data.payout.toFixed(2)} ${state.currency}`);
+           alert(`Board cleared! Auto-cashout ${data.multiplier.toFixed(2)}x — +${formatCoins(data.payout)} ${state.currency}`);
         }
         setTimeout(() => { state.activeGameState = null; launchGame('mines'); }, 3000);
       } else {
@@ -1292,15 +1337,13 @@ async function cashoutMines() {
     if (window.GameRenderers && window.GameRenderers.renderMinesWin) {
       window.GameRenderers.renderMinesWin({ ...data, payout: data.payout });
       playSound('win');
-      setTimeout(() => {
-        state.balances = data.balances || state.balances;
-        updateWalletUI();
-      }, 1000);
+      state.balances = mergeBalances(data.balances);
+      updateWalletUI();
     } else {
-    state.balances = data.balances || state.balances;
-    updateWalletUI();
-    alert(`Cashed out successfully for ${Number(data.payout).toFixed(2)} ${state.currency}!`);
-  }
+      state.balances = mergeBalances(data.balances);
+      updateWalletUI();
+      alert(`Cashed out successfully for ${formatCoins(data.payout)} ${state.currency}!`);
+    }
   clearGameControls();
   state.activeGameState = null;
   setTimeout(() => { launchGame('mines'); }, 3000);
@@ -1324,7 +1367,7 @@ async function startTowerGame(betAmount) {
       difficulty
     });
 
-    state.balances = data.balances;
+    state.balances = mergeBalances(data.balances);
     updateWalletUI();
 
     state.activeGameState = {
@@ -1391,14 +1434,14 @@ async function pickTowerTile(floor, tile) {
       state.activeGameState.multiplier = data.multiplier;
 
       if (data.cashedOut || data.autoCashout) {
-        state.balances = data.balances;
+        state.balances = mergeBalances(data.balances);
         updateWalletUI();
         const display = document.getElementById('game-display-area');
         if (display) {
           display.innerHTML = '<div style="text-align:center;padding:24px;">' +
             '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">✅ TOWER COMPLETED</div>' +
             '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Final Multiplier: ' + data.multiplier.toFixed(2) + 'x</div>' +
-            '<div style="color:#00e701;font-weight:700;margin-top:4px;">Payout: ' + Number(data.payout).toFixed(2) + ' ' + state.currency + '</div>' +
+             '<div style="color:#00e701;font-weight:700;margin-top:4px;">Payout: ' + formatCoins(Number(data.payout)) + ' ' + state.currency + '</div>' +
             '</div>';
         }
         clearGameControls();
@@ -1419,7 +1462,7 @@ async function pickTowerTile(floor, tile) {
         display.innerHTML = '<div style="text-align:center;padding:24px;">' +
           '<div style="font-size:2.5rem;font-weight:900;color:#ff4d4d;">💥 TRAP HIT</div>' +
           '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Tower collapsed at floor ' + state.activeGameState.currentFloor + '</div>' +
-          '<div style="color:#ff4d4d;font-weight:700;margin-top:4px;">Lost ' + Number(state.activeGameState.betAmount).toFixed(2) + ' ' + state.currency + '</div>' +
+          '<div style="color:#ff4d4d;font-weight:700;margin-top:4px;">Lost ' + formatCoins(state.activeGameState.betAmount) + ' ' + state.currency + '</div>' +
           '</div>';
       }
       clearGameControls();
@@ -1448,12 +1491,12 @@ async function cashoutTower() {
       display.innerHTML = '<div style="text-align:center;padding:24px;">' +
         '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">✅ CASHED OUT</div>' +
         '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Multiplier: ' + data.multiplier.toFixed(2) + 'x</div>' +
-        '<div style="color:#00e701;font-weight:700;margin-top:4px;">+' + Number(data.payout).toFixed(2) + ' ' + state.currency + '</div>' +
+        '            <div style="color:#00e701;font-weight:700;margin-top:4px;">+' + formatCoins(Number(data.payout)) + ' ' + state.currency + '</div>' +
         '</div>';
     }
+    state.balances = mergeBalances(data.balances);
+    updateWalletUI();
     setTimeout(() => {
-      state.balances = data.balances || state.balances;
-      updateWalletUI();
       state.activeGameState = null;
       launchGame('tower');
     }, 2000);
@@ -1484,39 +1527,44 @@ async function executeLimboBet(betAmount) {
     syncFair(data);
 
     const finalResult = data.details.resultMultiplier;
-    let current = 1.00;
-    const duration = 1000;
-    const startTime = performance.now();
 
-    function animate(now) {
-      const elapsed = now - startTime;
-      const progress = Math.min(1, elapsed / duration);
-      current = 1.00 + (finalResult - 1.00) * Math.pow(progress, 2);
+    if (window.GameRenderers && GameRenderers.renderLimbo) {
+      GameRenderers.renderLimbo(finalResult, data.win, data.payout, targetMultiplier);
+      if (data.win) GameRenderers.addLimboHistory(finalResult, true);
+      else GameRenderers.addLimboHistory(finalResult, false);
+    } else {
+      let current = 1.00;
+      const duration = 1000;
+      const startTime = performance.now();
 
-      display.innerHTML = `
-        <div style="text-align:center; padding: 30px;">
-          <div style="font-size: 3.5rem; font-weight: 800; color: ${progress === 1 ? (data.win ? '#00e701' : '#ff4d4d') : '#fff'};">
-            ${current.toFixed(2)}x
-          </div>
-          <div style="color:#b1bad2; font-weight:600;">Target: ${targetMultiplier.toFixed(2)}x</div>
-          ${progress === 1 && data.win ? `<div style="margin-top:10px; color:#00e701; font-weight:800;">WIN — paid ${Number(data.payout).toFixed(2)} ${state.currency}</div>` : ''}
-        </div>`;
+      function animate(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
+        current = 1.00 + (finalResult - 1.00) * Math.pow(progress, 2);
 
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        if (data.win) playSound('win'); else playSound('loss');
-        actionBtn.disabled = false;
-        state.isProcessing = false;
+        display.innerHTML = `
+          <div style="text-align:center; padding: 30px;">
+            <div style="font-size: 3.5rem; font-weight: 800; color: ${progress === 1 ? (data.win ? '#00e701' : '#ff4d4d') : '#fff'};">
+              ${current.toFixed(2)}x
+            </div>
+            <div style="color:#b1bad2; font-weight:600;">Target: ${targetMultiplier.toFixed(2)}x</div>
+            ${progress === 1 && data.win ? `<div style="margin-top:10px; color:#00e701; font-weight:800;">WIN — paid ${formatCoins(data.payout)} ${state.currency}</div>` : ''}
+          </div>`;
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          if (data.win) playSound('win'); else playSound('loss');
+          actionBtn.disabled = false;
+          state.isProcessing = false;
+        }
       }
+
+      requestAnimationFrame(animate);
     }
 
-    requestAnimationFrame(animate);
-
-    setTimeout(() => {
-      state.balances = data.balances || state.balances;
-      updateWalletUI();
-    }, 1100);
+    state.balances = mergeBalances(data.balances);
+    updateWalletUI();
 
    } catch (err) {
     alert(err.message || 'Limbo bet failed');
@@ -1568,10 +1616,8 @@ async function executeDiceBet(betAmount) {
     }
     if (data.win) playSound('win'); else playSound('loss');
 
-    setTimeout(() => {
-      state.balances = data.balances || state.balances;
-      updateWalletUI();
-    }, 500);
+    state.balances = mergeBalances(data.balances);
+    updateWalletUI();
    } catch (err) {
     alert(err.message || 'Dice bet failed');
   } finally {
@@ -1679,6 +1725,63 @@ function toggleKenoNumber(num) {
   }
 }
 
+function setKenoPicks(count) {
+  const nums = [];
+  while (nums.length < count) {
+    const n = Math.floor(Math.random() * 40) + 1;
+    if (!nums.includes(n)) nums.push(n);
+  }
+  state.selectedKenoNumbers = nums;
+  playSound('chip');
+  if (window.GameRenderers && GameRenderers.renderKenoBoard) {
+    GameRenderers.renderKenoBoard({ drawn: [], locked: false });
+  } else {
+    renderKenoBoard();
+  }
+}
+
+function quickPickKeno() {
+  if (window.GameRenderers && GameRenderers.quickPickKeno) {
+    GameRenderers.quickPickKeno();
+  } else {
+    setKenoPicks(5);
+  }
+}
+
+async function buySlotsBonus() {
+  if (state.isProcessing) return;
+  const betInput = document.getElementById('bet-input');
+  const betAmount = parseFloat(betInput?.value || 0);
+  if (isNaN(betAmount) || betAmount <= 0) {
+    return alert('Please enter a valid bet amount.');
+  }
+  const bonusCost = betAmount * 100;
+  const currentBalance = state.currency === 'GC' ? state.balances.gc : state.balances.sc;
+  if (bonusCost > currentBalance) {
+    return alert(`Insufficient ${state.currency} balance. Bonus costs ${formatCoins(bonusCost)} ${state.currency}.`);
+  }
+  state.isProcessing = true;
+  playSound('chip');
+  try {
+    const data = await apiRequest('/api/play/slots/buy-bonus', 'POST', {
+      currency: state.currency,
+      betAmount,
+      bonusCost
+    });
+    state.balances = mergeBalances(data.balances);
+    updateWalletUI();
+    if (window.GameRenderers && typeof GameRenderers.renderSlots === 'function') {
+      GameRenderers.renderSlots(data.details, data.multiplier, data.payout);
+    } else {
+      renderSlotsResult(data.details, data.multiplier, data.payout);
+    }
+  } catch (err) {
+    alert(err.message || 'Buy bonus failed');
+  } finally {
+    state.isProcessing = false;
+  }
+}
+
 /* --- STANDARD BET DISPATCHER --- */
 async function executeStandardBet(betAmount) {
   if (!state.currentGame) return;
@@ -1706,6 +1809,10 @@ async function executeStandardBet(betAmount) {
     params.betType = document.getElementById('baccarat-bet')?.value || 'PLAYER';
     params.sideBetPlayerPair = !!document.getElementById('baccarat-sb-pair')?.checked;
     params.sideBetBankerPair = !!document.getElementById('baccarat-sb-banker')?.checked;
+    const sbPair = document.getElementById('baccarat-sb-pair');
+    const sbBanker = document.getElementById('baccarat-sb-banker');
+    if (sbPair) sbPair.checked = false;
+    if (sbBanker) sbBanker.checked = false;
   } else if (state.currentGame === 'crash') {
     params.targetMultiplier = parseFloat(document.getElementById('crash-target')?.value || 2.0);
   }
@@ -1721,14 +1828,48 @@ async function executeStandardBet(betAmount) {
 
       syncFair(data);
 
+      if (state.currentGame === 'baccarat') {
+        state.baccaratPendingBalance = data.balances;
+      }
+
       switch (state.currentGame) {
-        case 'slots':    GameRenderers.renderSlots(data.details, data.multiplier, data.payout); break;
-        case 'plinko':   GameRenderers.renderPlinko(data.details, data.multiplier, data.payout); break;
-        case 'keno':     GameRenderers.renderKeno(data.details, data.multiplier, data.payout); break;
-        case 'wheel':    GameRenderers.renderWheel(data.details, data.multiplier); break;
-        case 'baccarat': GameRenderers.renderBaccarat(data.details, data.payout); break;
-        case 'dice':     GameRenderers.renderDice(data.details, data.win); break;
-        case 'crash':    GameRenderers.renderCrashGame(data.details, data.win, data.payout); break;
+        case 'slots':
+          if (window.GameRenderers && typeof GameRenderers.renderSlots === 'function') {
+            GameRenderers.renderSlots(data.details, data.multiplier, data.payout);
+          } else {
+            renderSlotsResult(data.details, data.multiplier, data.payout);
+          }
+          break;
+        case 'plinko':
+          if (window.GameRenderers && typeof GameRenderers.renderPlinko === 'function') {
+            GameRenderers.renderPlinko(data.details, data.multiplier, data.payout);
+          }
+          break;
+        case 'keno':
+          if (window.GameRenderers && typeof GameRenderers.renderKeno === 'function') {
+            GameRenderers.renderKeno(data.details, data.multiplier, data.payout);
+          }
+          break;
+        case 'wheel':
+          if (window.GameRenderers && typeof GameRenderers.renderWheel === 'function') {
+            GameRenderers.renderWheel(data.details, data.multiplier);
+          }
+          break;
+        case 'baccarat':
+          if (window.GameRenderers && typeof GameRenderers.renderBaccarat === 'function') {
+            GameRenderers.renderBaccarat(data.details, data.payout);
+          }
+          break;
+        case 'dice':
+          if (window.GameRenderers && typeof GameRenderers.renderDice === 'function') {
+            GameRenderers.renderDice(data.details, data.win);
+          }
+          break;
+        case 'crash':
+          if (window.GameRenderers && typeof GameRenderers.renderCrashGame === 'function') {
+            GameRenderers.renderCrashGame(data.details, data.win, data.payout);
+          }
+          break;
         default:
           const display = document.getElementById('game-display-area');
           if (display) {
@@ -1737,23 +1878,18 @@ async function executeStandardBet(betAmount) {
                 <div style="font-size:2rem; font-weight:800; color:${data.multiplier > 1 ? '#00e701' : '#ff4d4d'}; margin-bottom: 12px;">
                   ${data.multiplier.toFixed(2)}x
                 </div>
-                <p style="font-weight: 600; color: #b1bad2;">Payout: ${Number(data.payout).toFixed(2)} ${state.currency}</p>
+                <p style="font-weight: 600; color: #b1bad2;">Payout: ${formatCoins(data.payout)} ${state.currency}</p>
               </div>`;
           }
           break;
       }
 
-      if (state.currentGame !== 'crash' && state.currentGame !== 'wheel' && state.currentGame !== 'slots' && state.currentGame !== 'plinko' && state.currentGame !== 'baccarat') {
-        state.balances = data.balances || state.balances;
-        updateWalletUI();
-      } else if (state.currentGame === 'baccarat') {
-        state.balances = data.balances || state.balances;
+      if (state.currentGame !== 'crash') {
+        state.balances = mergeBalances(data.balances);
         updateWalletUI();
       } else {
-        setTimeout(() => {
-          state.balances = data.balances || state.balances;
-          updateWalletUI();
-        }, 2800);
+        state.balances = mergeBalances(data.balances);
+        updateWalletUI();
       }
   } catch (err) {
     alert(err.message || (state.currentGame + ' failed'));
@@ -1862,10 +1998,10 @@ function renderSlotsResult(details, multiplier, payout) {
 
     if (jackpot && jackpot.tier === 'grand') {
       html += '<div style="text-align:center;margin-top:14px;"><div style="font-size:1.6rem;font-weight:900;color:#ff1744;">🎰 GRAND JACKPOT! 🎰</div>' +
-        '<div style="color:#ff4d4d;font-weight:700;">' + jackpot.amount.toFixed(2) + ' ' + state.currency + '</div></div>';
+        '<div style="color:#ff4d4d;font-weight:700;">' + formatCoins(jackpot.amount) + ' ' + state.currency + '</div></div>';
     } else if (jackpot) {
       html += '<div style="text-align:center;margin-top:12px;"><div style="font-weight:800;color:#ff4d4d;">' +
-        jackpot.tier.toUpperCase() + ' JACKPOT!</div><div style="font-size:0.78rem;color:#b1bad2;">' + jackpot.amount.toFixed(2) + ' ' + state.currency + '</div></div>';
+        jackpot.tier.toUpperCase() + ' JACKPOT!</div><div style="font-size:0.78rem;color:#b1bad2;">' + formatCoins(jackpot.amount) + ' ' + state.currency + '</div></div>';
     }
 
     if (winLines.length) {
@@ -1927,7 +2063,7 @@ function renderPlinkoResult(details, multiplier, payout) {
      display.innerHTML =
        '<div style="max-width:520px;margin:auto;text-align:center;">' + buckets +
        '<div style="margin-top:16px;font-size:2rem;font-weight:900;color:' + (won ? '#00e701' : '#ff4d4d') + ';">' + multiplier.toFixed(2) + 'x</div>' +
-       '<div style="color:#b1bad2;font-size:0.85rem;margin-top:4px;">Payout: ' + Number(payout || 0).toFixed(2) + ' ' + state.currency + '</div>' +
+        '<div style="color:#b1bad2;font-size:0.85rem;margin-top:4px;">Payout: ' + formatCoins(payout || 0) + ' ' + state.currency + '</div>' +
        '</div>';
      if (won) playSound('win'); else playSound('loss');
    }
@@ -1993,7 +2129,7 @@ function renderBaccaratResult(details, payout) {
     '<div class="hand-row">' + details.playerHand.map(c => cardHTML(c, false)).join('') + '</div>' +
     '<div style="text-align:center;margin-top:18px;font-size:1.3rem;font-weight:900;color:' + colorMap[outcome] + ';">' + outcome + (outcome === betOn ? ' — YOU WIN' : '') + '</div>' +
     '<div style="text-align:center;color:#b1bad2;font-size:0.85rem;margin-top:4px;">' +
-    (outcome === betOn ? 'Payout: ' + Number(payout).toFixed(2) + ' ' + state.currency :
+    (outcome === betOn ? 'Payout: ' + formatCoins(payout) + ' ' + state.currency :
      (outcome === 'TIE' && betOn !== 'TIE' ? 'Tie — your stake was pushed back' : '')) +
      '</div></div>';
    if (outcome === betOn) playSound('win');
@@ -2008,7 +2144,7 @@ function renderCrashResult(details, win, payout) {
     '<div style="text-align:center;padding:26px;">' +
     '<div style="font-size:3rem;font-weight:900;color:' + (win ? '#00e701' : '#ff4d4d') + ';">' + details.crashPoint.toFixed(2) + 'x</div>' +
     '<div style="color:#b1bad2;font-weight:600;margin-top:6px;">Crashed' + (win ? ' after your ' + details.target.toFixed(2) + 'x target ✓' : ' before your ' + details.target.toFixed(2) + 'x target') + '</div>' +
-    (win ? '<div style="margin-top:12px;font-weight:800;color:#00e701;">Paid ' + Number(payout).toFixed(2) + ' ' + state.currency + '</div>' : '') +
+    (win ? '<div style="margin-top:12px;font-weight:800;color:#00e701;">Paid ' + formatCoins(payout) + ' ' + state.currency + '</div>' : '') +
     '</div>';
   if (win) playSound('win'); else playSound('loss');
 }
@@ -2022,12 +2158,19 @@ function resetRoundUI(label) {
   actionBtn.disabled = false;
 }
 
+function resetBaccaratSideBets() {
+  const sbPair = document.getElementById('baccarat-sb-pair');
+  const sbBanker = document.getElementById('baccarat-sb-banker');
+  if (sbPair) sbPair.checked = false;
+  if (sbBanker) sbBanker.checked = false;
+}
+
 /* --- BLACKJACK (interactive hit / stand) --- */
 function blackjackOutcomeText(outcome, multiplier, payout) {
   const cur = state.currency;
   switch (outcome) {
-    case 'BLACKJACK': return { text: 'BLACKJACK! Paid ' + Number(payout).toFixed(2) + ' ' + cur, color: '#00e701' };
-    case 'WIN':       return { text: 'You win! Payout ' + Number(payout).toFixed(2) + ' ' + cur, color: '#00e701' };
+    case 'BLACKJACK': return { text: 'BLACKJACK! Paid ' + formatCoins(payout) + ' ' + cur, color: '#00e701' };
+    case 'WIN':       return { text: 'You win! Payout ' + formatCoins(payout) + ' ' + cur, color: '#00e701' };
     case 'PUSH':      return { text: 'Push — stake returned', color: '#ffc700' };
     case 'BUST':      return { text: 'Bust! Over 21', color: '#ff4d4d' };
     default:          return { text: 'Dealer wins', color: '#ff4d4d' };
@@ -2082,16 +2225,21 @@ async function startBlackjackGame(betAmount) {
       currency: state.currency,
       betAmount
     });
-    if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+    if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
 
      if (data.resolved) {
-        renderBlackjackHands(data.playerHand, data.dealerHand, false,
-          blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+        if (window.GameRenderers && GameRenderers.renderBlackjackHands) {
+          GameRenderers.renderBlackjackHands(data.playerHand, data.dealerHand, false,
+            blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+        } else {
+          renderBlackjackHands(data.playerHand, data.dealerHand, false,
+            blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+        }
         if (data.multiplier > 1) playSound('win'); else playSound('loss');
         clearGameControls();
         state.activeGameState = null;
         setTimeout(() => {
-          if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+          if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
           resetRoundUI('DEAL HAND');
         }, 2000);
      } else {
@@ -2101,10 +2249,17 @@ async function startBlackjackGame(betAmount) {
         dealerUp: data.dealerUpCard,
         betAmount
       };
-      renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+      if (window.GameRenderers && GameRenderers.renderBlackjackHands) {
+        GameRenderers.renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+      } else {
+        renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+      }
       document.getElementById('game-controls-options').innerHTML =
         '<button type="button" class="btn-play game-action-btn" onclick="blackjackAction(\'hit\')">HIT</button>' +
-        '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'stand\')">STAND</button>';
+        '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'stand\')">STAND</button>' +
+        (GameRenderers.canDoubleDown && GameRenderers.canDoubleDown(data) ? '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'double\')">DOUBLE</button>' : '') +
+        (GameRenderers.canSplit && GameRenderers.canSplit(data) ? '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'split\')">SPLIT</button>' : '') +
+        (GameRenderers.canInsurance && GameRenderers.canInsurance(data) ? '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'insurance\')">INSURANCE</button>' : '');
       resetRoundUI('IN PLAY…');
       document.getElementById('btn-primary-action').disabled = true;
     }
@@ -2116,7 +2271,7 @@ async function startBlackjackGame(betAmount) {
 }
 
 
-/* --- BLACKJACK (interactive HIT / STAND) --- */
+/* --- BLACKJACK (interactive HIT / STAND / DOUBLE / SPLIT / INSURANCE) --- */
 async function blackjackAction(action) {
   if (state.isProcessing || !state.activeGameState) return;
   state.isProcessing = true;
@@ -2125,20 +2280,29 @@ async function blackjackAction(action) {
       gameId: state.activeGameState.gameId
     });
 
-    if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+    if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
 
     if (data.resolved) {
-       renderBlackjackHands(data.playerHand, data.dealerHand, false,
-         blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+       if (window.GameRenderers && GameRenderers.renderBlackjackHands) {
+         GameRenderers.renderBlackjackHands(data.playerHand, data.dealerHand, false,
+           blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+       } else {
+         renderBlackjackHands(data.playerHand, data.dealerHand, false,
+           blackjackOutcomeText(data.outcome, data.multiplier, data.payout));
+       }
        if (data.multiplier > 1) playSound('win'); else playSound('loss');
        clearGameControls();
        state.activeGameState = null;
        setTimeout(() => {
-         if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+         if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
          resetRoundUI('DEAL HAND');
        }, 2000);
      } else {
-       renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+       if (window.GameRenderers && GameRenderers.renderBlackjackHands) {
+         GameRenderers.renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+       } else {
+         renderBlackjackHands(data.playerHand, [data.dealerUpCard], true, null);
+       }
      }
   } catch (err) {
     alert(err.message || 'Blackjack ' + action + ' failed');
@@ -2168,13 +2332,17 @@ function renderHiloControls() {
 function renderHiloBoard(msgObj) {
   const display = document.getElementById('game-display-area');
   const ags = state.activeGameState;
-  display.innerHTML =
-    '<div style="text-align:center;">' +
-    (ags.prevCard ? '<div class="hand-row" style="justify-content:center;opacity:.45;margin-bottom:6px;">' + cardHTML(ags.prevCard, false, true) + '</div>' : '') +
-    (ags.currentCard ? '<div class="hand-row" style="justify-content:center;">' + cardHTML(ags.currentCard, false, true) + '</div>' : '') +
-    '<div style="margin-top:10px;color:#b1bad2;font-weight:700;">Multiplier: <span style="color:#00e701;">' + ags.multiplier.toFixed(2) + 'x</span></div>' +
-    (msgObj ? '<div style="margin-top:8px;font-weight:800;color:' + msgObj.color + ';">' + msgObj.text + '</div>' : '') +
-    '</div>';
+  if (window.GameRenderers && GameRenderers.renderHiloBoard) {
+    GameRenderers.renderHiloBoard(msgObj);
+  } else {
+    display.innerHTML =
+      '<div style="text-align:center;">' +
+      (ags.prevCard ? '<div class="hand-row" style="justify-content:center;opacity:.45;margin-bottom:6px;">' + cardHTML(ags.prevCard, false, true) + '</div>' : '') +
+      (ags.currentCard ? '<div class="hand-row" style="justify-content:center;">' + cardHTML(ags.currentCard, false, true) + '</div>' : '') +
+      '<div style="margin-top:10px;color:#b1bad2;font-weight:700;">Multiplier: <span style="color:#00e701;">' + ags.multiplier.toFixed(2) + 'x</span></div>' +
+      (msgObj ? '<div style="margin-top:8px;font-weight:800;color:' + msgObj.color + ';">' + msgObj.text + '</div>' : '') +
+      '</div>';
+  }
 }
 
 
@@ -2186,7 +2354,7 @@ async function startHiloGame(betAmount) {
       currency: state.currency,
       betAmount
     });
-    if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+    if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
 
     state.activeGameState = {
       type: 'hilo',
@@ -2194,7 +2362,8 @@ async function startHiloGame(betAmount) {
       currentCard: data.currentCard,
       prevCard: null,
       multiplier: 1.00,
-      betAmount
+      betAmount,
+      history: []
     };
      if (window.GameRenderers && window.GameRenderers.renderHiloBoard) {
        window.GameRenderers.renderHiloBoard(null);
@@ -2224,18 +2393,19 @@ async function hiloGuess(guess) {
     });
 
      if (!data.win) {
+       state.activeGameState.history.push(state.activeGameState.currentCard);
        state.activeGameState.prevCard = state.activeGameState.currentCard;
        state.activeGameState.currentCard = data.nextCard;
        renderHiloBoard({ text: 'Wrong guess — you needed ' + guess.toLowerCase() + '. Round over.', color: '#ff4d4d' });
        playSound('loss');
        document.getElementById('game-controls-options').innerHTML = '';
        setTimeout(() => {
-         if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+         if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
          state.activeGameState = null;
          launchGame('hilo');
        }, 1500);
      } else if (data.cashedOut || data.autoCashout) {
-       const payout = Number(data.payout || 0).toFixed(2);
+        const payout = formatCoins(Number(data.payout || 0));
        state.activeGameState.multiplier = data.multiplier;
        state.activeGameState.currentCard = data.nextCard;
        state.activeGameState.prevCard = null;
@@ -2243,22 +2413,23 @@ async function hiloGuess(guess) {
        playSound('win');
        document.getElementById('game-controls-options').innerHTML = '';
        setTimeout(() => {
-         if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+         if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
          state.activeGameState = null;
          resetRoundUI('PLACE BET');
        }, 2000);
-    } else {
-      const ags = state.activeGameState;
-      ags.prevCard = ags.currentCard;
-      ags.currentCard = data.nextCard || data.currentCard;
-      ags.multiplier = data.multiplier;
-      renderHiloBoard(null);
-      renderHiloControls();
-      playSound('win');
-      const btn = document.getElementById('btn-primary-action');
-      btn.textContent = 'CASHOUT (' + ags.multiplier.toFixed(2) + 'x)';
-      btn.disabled = false;
-    }
+     } else {
+       const ags = state.activeGameState;
+       ags.history.push(ags.currentCard);
+       ags.prevCard = ags.currentCard;
+       ags.currentCard = data.nextCard || data.currentCard;
+       ags.multiplier = data.multiplier;
+       renderHiloBoard(null);
+       renderHiloControls();
+       playSound('win');
+       const btn = document.getElementById('btn-primary-action');
+       btn.textContent = 'CASHOUT (' + ags.multiplier.toFixed(2) + 'x)';
+       btn.disabled = false;
+     }
   } catch (err) {
     alert(err.message || 'HiLo guess failed');
   } finally {
@@ -2274,11 +2445,11 @@ async function cashoutHilo() {
     const data = await apiRequest('/api/play/hilo/cashout', 'POST', {
       gameId: state.activeGameState.gameId
     });
-    const payout = Number(data.payout || 0).toFixed(2);
+    const payout = formatCoins(Number(data.payout || 0));
     renderHiloBoard({ text: 'Cashed out ' + data.multiplier.toFixed(2) + 'x — +' + payout + ' ' + state.currency, color: '#00e701' });
     document.getElementById('game-controls-options').innerHTML = '';
     setTimeout(() => {
-      if (data.balances) { state.balances = data.balances; updateWalletUI(); }
+      if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
       state.activeGameState = null;
       resetRoundUI('PLACE BET');
     }, 2000);
@@ -2290,97 +2461,40 @@ async function cashoutHilo() {
 }
 
 // ==========================================================================
-// 11. PROFILE & MODAL CONTROLLERS
+// 11. PROFILE & ACCOUNT CONTROLLERS
 // ==========================================================================
 
-async function openProfileModal() {
+async function openAccountPage() {
   if (!state.profile) {
     openAuthModal();
     return;
   }
   playSound('click');
-  await refreshProfileModal();
-  document.getElementById('modal-profile')?.classList.remove('hidden');
+  history.pushState(null, '', '/account');
+  handleRouteChange();
 }
 
-function closeProfileModal() {
+function closeAccountPage() {
   playSound('click');
-  document.getElementById('modal-profile')?.classList.add('hidden');
+  history.pushState(null, '', '/');
+  handleRouteChange();
 }
 
-async function refreshProfileModal() {
-  const modal = document.getElementById('modal-profile');
-  if (!modal) return;
+async function refreshAccountPage() {
+  const container = document.getElementById('view-account');
+  if (!container) return;
   try {
     const data = await apiRequest('/api/user/me');
     state.profile = data;
-    state.balances = data.balances || state.balances;
+    state.balances = mergeBalances(data.balances);
     updateWalletUI();
   } catch (err) {
-    console.warn('[Profile] Could not refresh profile:', err.message);
+    console.warn('[Account] Could not refresh profile:', err.message);
   }
-  renderProfileModal(modal);
+  renderAccountPage(container);
 }
 
-async function startKycVerification() {
-  try {
-    playSound('click');
-    const data = await apiRequest('/api/user/kyc/start', 'POST');
-    if (data.personaConfig) {
-      const pc = data.personaConfig;
-
-      if (pc.templateId === 'itmpl_sandbox_default') {
-        alert('Persona template not configured. Using sandbox verification.');
-        await verifyKycSandbox();
-        return;
-      }
-
-      if (!window.Persona && !document.getElementById('persona-script')) {
-        const script = document.createElement('script');
-        script.id = 'persona-script';
-        script.src = `https://withpersona.com/${pc.templateId}/build.js`;
-        script.async = true;
-        script.onload = () => {
-          if (window.Persona) {
-            window.Persona.start({
-              templateId: pc.templateId,
-              referenceId: pc.referenceId,
-              environment: pc.environment
-            });
-          }
-        };
-        script.onerror = () => {
-          alert('Failed to load identity verification. Please try the sandbox option.');
-        };
-        document.head.appendChild(script);
-      } else if (window.Persona) {
-        window.Persona.start({
-          templateId: pc.templateId,
-          referenceId: pc.referenceId,
-          environment: pc.environment
-        });
-      } else {
-        alert('Persona SDK not available. Reference ID: ' + pc.referenceId);
-      }
-    }
-  } catch (err) {
-    alert(err.message || 'Failed to start KYC verification.');
-  }
-}
-
-async function verifyKycSandbox() {
-  try {
-    playSound('click');
-    const data = await apiRequest('/api/user/kyc/verify-sandbox', 'POST');
-    alert(data.message || 'KYC verified successfully!');
-    state.profile = data.kyc ? { ...state.profile, kyc: data.kyc } : state.profile;
-    await refreshProfileModal();
-  } catch (err) {
-    alert(err.message || 'KYC verification failed.');
-  }
-}
-
-function renderProfileModal(modal) {
+function renderAccountPage(container) {
   const p = state.profile || {};
   const kyc = p.kyc || { status: 'UNVERIFIED', tier: 0 };
   const kycStatusText = {
@@ -2396,76 +2510,159 @@ function renderProfileModal(modal) {
     REJECTED: 'kyc-badge-rejected'
   }[kyc.status] || 'kyc-badge-unverified';
 
-  const gc = Number(state.balances.gc || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const sc = Number(state.balances.sc || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-let kycControls = '';
-  if (kyc.status === 'VERIFIED') {
-    kycControls = '<button type="button" class="btn-secondary-action btn-full" disabled style="color:#00e701;">&#10003; Identity Verified</button>';
-  } else if (kyc.status === 'PENDING') {
-    kycControls = '<button type="button" class="btn-secondary-action btn-full" disabled style="color:#b1bad2;">&#8230; Verification in Progress</button>';
-  } else if (kyc.status === 'REJECTED') {
-    kycControls = '<button type="button" class="btn-play btn-full" onclick="startKycVerification()" style="margin-bottom:8px;">Retry Verification</button>' +
-                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>' : '');
-  } else {
-    kycControls = '<button type="button" class="btn-play btn-full" onclick="startKycVerification()" style="margin-bottom:8px;">Verify Identity (Persona)</button>' +
-                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '<button type="button" class="btn-secondary-action btn-full" onclick="verifyKycSandbox()" style="font-size:0.75rem;">Sandbox Verify (Test)</button>' : '');
-  }
-
+  const gc = formatCoins(state.balances.gc || 0);
+  const sc = formatCoins(state.balances.sc || 0);
   const vip = p.vip || {};
   const vipText = vip.tier || 'Bronze';
+  const totalWageredGC = formatCoins(vip.totalWageredGC || 0);
+  const totalWageredSC = formatCoins(vip.totalWageredSC || 0);
+  const memberSince = p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'N/A';
 
-  modal.innerHTML = `
-    <div class="modal-box" style="max-width: 420px;">
-      <div class="modal-header-flex">
-        <h3>👤 User Profile</h3>
-        <button class="x-close" onclick="closeProfileModal()">×</button>
+  container.innerHTML = `
+    <div class="page-container account-page">
+      <div class="account-hero">
+        <div class="account-avatar">👤</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">${escapeHTML(p.username || 'Guest')}</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+        </div>
+        <button class="btn-back" onclick="showLobby()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
       </div>
-      <p class="modal-subtitle">Manage your account and verification status.</p>
-      <div class="form-group">
-        <label class="form-label">Username</label>
-        <input type="text" class="form-input" readonly value="${escapeHTML(p.username || 'Guest')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Email</label>
-        <input type="text" class="form-input" readonly value="${escapeHTML(p.email || 'guest@casino')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">VIP Tier</label>
-        <input type="text" class="form-input" readonly value="${escapeHTML(vipText)}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Gold Coins (GC)</label>
-        <input type="text" class="form-input" readonly value="${gc}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Sweeps Coins (SC)</label>
-        <input type="text" class="form-input" readonly value="${sc}">
-       </div>
-       <div class="form-group">
-         <label class="form-label">Unplayed SC</label>
-         <input type="text" class="form-input" readonly value="${Number(state.balances.sc_unplayed || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}">
-       </div>
-       <div class="form-group">
-         <label class="form-label">Redeemable SC</label>
-         <input type="text" class="form-input" readonly value="${Number(state.balances.sc_played || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}">
-       </div>
-       <div class="form-group">
-         <label class="form-label">Rakeback Accrued</label>
-         <input type="text" class="form-input" readonly value="${Number(p.vip?.rakebackAccruedSC || 0).toFixed(2) + ' SC'}">
-       </div>
-      <div class="form-group" style="margin-top: 10px;">
-        <label class="form-label">KYC Status</label>
-        <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
-          <span class="kyc-badge ${kycClass}">${escapeHTML(kycStatusText)}</span>
-          <span style="font-size:0.75rem; color:#b1bad2;">Tier ${kyc.tier} of 2</span>
+
+      <div class="account-stats-row">
+        <div class="stat-card">
+          <div class="stat-icon">🪙</div>
+          <div class="stat-info">
+            <span class="stat-value">${totalWageredGC}</span>
+            <span class="stat-label">GC Wagered</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💎</div>
+          <div class="stat-info">
+            <span class="stat-value">${totalWageredSC}</span>
+            <span class="stat-label">SC Wagered</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💰</div>
+          <div class="stat-info">
+            <span class="stat-value">${gc}</span>
+            <span class="stat-label">Gold Coins</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💎</div>
+          <div class="stat-info">
+            <span class="stat-value">${sc}</span>
+            <span class="stat-label">Sweeps Coins</span>
+          </div>
         </div>
       </div>
-      ${kyc.rejectionReason ? `<div class="form-group"><label class="form-label">Rejection Reason</label><input type="text" class="form-input" readonly value="${escapeHTML(kyc.rejectionReason)}"></div>` : ''}
-      <div class="modal-actions-flex" style="margin-top: 20px; flex-direction:column; gap:8px;">
-        ${kycControls}
-        <button type="button" onclick="logout()" class="btn-secondary-action btn-full" style="color:var(--accent-red);">Logout</button>
-        <button type="button" onclick="closeProfileModal()" class="btn-secondary-action btn-full">Close</button>
+
+      <div class="account-details-grid">
+        <div class="account-card profile-card">
+          <h3 class="account-card-title">Profile Information</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item">
+              <span class="detail-label">Username</span>
+              <span class="detail-value">${escapeHTML(p.username || 'Guest')}</span>
+            </div>
+            <div class="account-detail-item">
+              <span class="detail-label">Email</span>
+              <span class="detail-value">${escapeHTML(p.email || 'guest@casino')}</span>
+            </div>
+            <div class="account-detail-item">
+              <span class="detail-label">Location</span>
+              <span class="detail-value">${escapeHTML(p.state || 'CA')}</span>
+            </div>
+            <div class="account-detail-item">
+              <span class="detail-label">Member Since</span>
+              <span class="detail-value">${memberSince}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="account-card balances-card">
+          <h3 class="account-card-title">Balances</h3>
+          <div class="balance-cards">
+            <div class="balance-card gc">
+              <div class="balance-card-header">
+                <span class="balance-icon">🪙</span>
+                <span class="balance-type">Gold Coins</span>
+              </div>
+              <div class="balance-amount">${gc}</div>
+              <div class="balance-sub">GC</div>
+            </div>
+            <div class="balance-card sc">
+              <div class="balance-card-header">
+                <span class="balance-icon">💎</span>
+                <span class="balance-type">Sweeps Coins</span>
+              </div>
+              <div class="balance-amount">${sc}</div>
+              <div class="balance-sub">Total SC</div>
+            </div>
+          </div>
+          <div class="balance-breakdown">
+            <div class="breakdown-item">
+              <span class="breakdown-label">Unplayed SC</span>
+               <span class="breakdown-value">${formatCoins(state.balances.sc_unplayed || 0)}</span>
+            </div>
+            <div class="breakdown-item">
+              <span class="breakdown-label">Redeemable SC</span>
+               <span class="breakdown-value">${formatCoins(state.balances.sc_played || 0)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="account-card kyc-card">
+          <h3 class="account-card-title">Identity Verification</h3>
+          <div class="kyc-status-badge ${kycClass}">${escapeHTML(kycStatusText)}</div>
+          ${kyc.rejectionReason ? `<div class="kyc-rejection">${escapeHTML(kyc.rejectionReason)}</div>` : ''}
+          <div class="kyc-tier-info">
+            <span>Verification Tier</span>
+            <span class="tier-value">Tier ${kyc.tier} of 2</span>
+          </div>
+          <div class="kyc-actions">
+            ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
+            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification in Progress</button>' : ''}
+            ${kyc.status === 'REJECTED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Retry Verification</button>' : ''}
+            ${kyc.status === 'UNVERIFIED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Verify Identity</button>' : ''}
+          </div>
+        </div>
+
+        <div class="account-card rewards-card">
+          <h3 class="account-card-title">Rewards & Bonuses</h3>
+          <div class="rewards-grid">
+            <div class="reward-item">
+              <span class="reward-label">Daily Streak</span>
+              <span class="reward-value">${p.bonus?.claimStreak || 0} days</span>
+            </div>
+            <div class="reward-item">
+              <span class="reward-label">Rakeback Accrued</span>
+              <span class="reward-value rakeback">${formatCoins(p.vip?.rakebackAccruedSC || 0)} SC</span>
+            </div>
+            <div class="reward-item">
+              <span class="reward-label">Last Claim</span>
+              <span class="reward-value">${p.bonus?.lastClaimAt ? new Date(p.bonus.lastClaimAt).toLocaleDateString() : 'Never'}</span>
+            </div>
+          </div>
+          <div class="rewards-actions">
+            <button class="btn-reward" onclick="openBonusModal()">🎁 Daily Bonus</button>
+            <button class="btn-reward" onclick="history.pushState(null,'','/challenges');handleRouteChange()">🎯 Challenges</button>
+            <button class="btn-reward" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Rakeback</button>
+          </div>
+        </div>
+
+        <div class="account-card security-card">
+          <h3 class="account-card-title">Account Security</h3>
+          <div class="security-actions">
+            <button class="btn-security" onclick="openForgotPasswordModal()">🔑 Reset Password</button>
+            <button class="btn-security logout" onclick="logout()">🚪 Logout</button>
+          </div>
+        </div>
       </div>
     </div>`;
 }
@@ -2488,161 +2685,337 @@ function closeProvablyFairModal() {
 }
 
 function injectMobileAndNavigationDOM() {
-  if (!document.getElementById('modal-profile')) {
-    const profileModal = document.createElement('div');
-    profileModal.id = 'modal-profile';
-    profileModal.className = 'modal-backdrop hidden';
-    profileModal.innerHTML = `
-      <div class="modal-box" style="max-width: 400px;">
+  if (!document.getElementById('modal-auth')) {
+    const authModal = document.createElement('div');
+    authModal.id = 'modal-auth';
+    authModal.className = 'modal-backdrop hidden';
+    authModal.innerHTML = `
+      <div class="modal-box auth-modal">
         <div class="modal-header-flex">
-          <h3>👤 User Profile</h3>
-          <button class="x-close" onclick="closeProfileModal()">×</button>
+          <h3 id="auth-title">Login to Your Account</h3>
+          <button class="x-close" onclick="closeAuthModal()">×</button>
         </div>
-        <p class="modal-subtitle">Loading...</p>
-        <div class="modal-actions-flex" style="margin-top: 20px;">
-          <button type="button" onclick="closeProfileModal()" class="btn-play btn-full">Close</button>
+        <p class="modal-subtitle" id="auth-subtitle">Enter your credentials to access your account.</p>
+        <div id="auth-form-login" class="auth-form-section">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" id="auth-email" class="form-input" placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="auth-password" class="form-input" placeholder="••••••••">
+          </div>
+          <div id="auth-login-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
+          <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+            <button type="button" onclick="submitLogin()" class="btn-play btn-full">LOGIN</button>
+            <button type="button" onclick="switchAuthMode('register')" class="btn-secondary-action btn-full">Create New Account</button>
+            <button type="button" onclick="continueAsGuest()" class="btn-secondary-action btn-full" style="font-size:0.8rem;">Continue as Guest</button>
+          </div>
+        </div>
+        <div id="auth-form-register" class="auth-form-section hidden">
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" id="reg-username" class="form-input" placeholder="Choose a username">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" id="reg-email" class="form-input" placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="reg-password" class="form-input" placeholder="Min 8 characters">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Birth Date</label>
+            <input type="date" id="reg-birthdate" class="form-input">
+          </div>
+          <div id="auth-register-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
+          <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+            <button type="button" onclick="submitRegister()" class="btn-play btn-full">REGISTER & PLAY</button>
+            <button type="button" onclick="switchAuthMode('login')" class="btn-secondary-action btn-full">Back to Login</button>
+          </div>
         </div>
       </div>`;
-    document.body.appendChild(profileModal);
+    document.body.appendChild(authModal);
   }
 
-  // Bonus Pages Modals
-  if (!document.getElementById('modal-bonus')) {
-    const bonusModal = document.createElement('div');
-    bonusModal.id = 'modal-bonus';
-    bonusModal.className = 'modal-backdrop hidden';
-    bonusModal.innerHTML = `
-      <div class="modal-box bonus-modal" style="max-width: 600px;">
+  if (!document.getElementById('modal-agegate')) {
+    const agegate = document.createElement('div');
+    agegate.id = 'modal-agegate';
+    agegate.className = 'modal-backdrop hidden';
+    agegate.innerHTML = `
+      <div class="modal-box" style="max-width: 400px; text-align: center;">
         <div class="modal-header-flex">
-          <h3>🎁 Daily Bonuses</h3>
-          <button class="x-close" onclick="closeBonusModal()">×</button>
+          <h3>🔞 Age Verification</h3>
         </div>
-        <p class="modal-subtitle">Claim daily rewards, complete challenges, and collect rakeback.</p>
-        <div id="bonus-content">
-          <div style="padding:20px;text-align:center;color:#b1bad2;">Loading bonus data...</div>
+        <p class="modal-subtitle">This casino contains gambling content and is restricted to adults 18 and older.</p>
+        <div style="margin: 20px 0; padding: 16px; background:#14222d; border-radius:8px; border:1px solid #243542;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem; color:#b1bad2;">
+            <input type="checkbox" id="age-confirm" style="transform:scale(1.3); margin:0;">
+            <span>I confirm I am 18 years of age or older</span>
+          </label>
         </div>
-        <div class="modal-actions-flex" style="margin-top:20px;">
-          <button type="button" onclick="closeBonusModal()" class="btn-secondary-action btn-full">Close</button>
+        <div style="margin-top: 15px;">
+          <button type="button" onclick="confirmAge()" class="btn-play btn-full">ENTER CASINO</button>
         </div>
       </div>`;
-    document.body.appendChild(bonusModal);
+    document.body.appendChild(agegate);
+  }
+
+  if (!document.getElementById('modal-forgot-password')) {
+    const forgotModal = document.createElement('div');
+    forgotModal.id = 'modal-forgot-password';
+    forgotModal.className = 'modal-backdrop hidden';
+    forgotModal.innerHTML = `
+      <div class="modal-box" style="max-width: 400px;">
+        <div class="modal-header-flex">
+          <h3>🔑 Reset Password</h3>
+          <button class="x-close" onclick="closeForgotPasswordModal()">×</button>
+        </div>
+        <p class="modal-subtitle">Enter your email to receive a password reset link.</p>
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input type="email" id="forgot-email" class="form-input" placeholder="you@example.com">
+        </div>
+        <div id="forgot-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
+        <div class="modal-actions-flex" style="margin-top:20px;">
+          <button type="button" onclick="submitForgotPassword()" class="btn-play btn-full">SEND RESET LINK</button>
+          <button type="button" onclick="closeForgotPasswordModal()" class="btn-secondary-action btn-full">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(forgotModal);
   }
 }
 
 function openBonusModal() {
   playSound('click');
-  document.getElementById('modal-bonus')?.classList.remove('hidden');
-  loadBonusContent();
+  history.pushState(null, '', '/bonus');
+  handleRouteChange();
 }
 
 function closeBonusModal() {
   playSound('click');
-  document.getElementById('modal-bonus')?.classList.add('hidden');
+  history.pushState(null, '', '/');
+  handleRouteChange();
+}
+
+function openForgotPasswordModal() {
+  playSound('click');
+  document.getElementById('modal-forgot-password')?.classList.remove('hidden');
+}
+
+function closeForgotPasswordModal() {
+  playSound('click');
+  document.getElementById('modal-forgot-password')?.classList.add('hidden');
+}
+
+async function submitForgotPassword() {
+  const email = document.getElementById('forgot-email')?.value.trim();
+  const errorEl = document.getElementById('forgot-error');
+  if (!email) {
+    if (errorEl) errorEl.textContent = 'Email is required.';
+    return;
+  }
+  try {
+    const data = await apiRequest('/api/auth/forgot-password', 'POST', { email });
+    if (data.success) {
+      if (errorEl) errorEl.textContent = '';
+      alert(data.message);
+      closeForgotPasswordModal();
+    }
+  } catch (err) {
+    if (errorEl) errorEl.textContent = err.message || 'Failed to send reset link.';
+  }
+}
+
+async function loadDailyBonusPage() {
+  const container = document.getElementById('view-bonus');
+  if (!container) return;
+  container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#b1bad2;">Loading daily bonus...</div></div>';
+
+  try {
+    const bonusStatus = await apiRequest('/api/bonus/status').catch(() => null);
+    const streak = bonusStatus?.streak || 0;
+    const canClaim = bonusStatus?.canClaim || false;
+    const nextClaimMs = bonusStatus?.nextClaimMs || 0;
+
+    container.innerHTML = `
+      <div class="page-container bonus-page">
+        <div class="page-header">
+          <button class="btn-back" onclick="showLobby()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            <span>Back to Lobby</span>
+          </button>
+          <h2 class="page-title">🎁 Daily Bonus</h2>
+        </div>
+
+        <div class="bonus-hero">
+          <div class="bonus-icon">🎁</div>
+          <h3 class="bonus-hero-title">Daily Rewards</h3>
+          <p class="bonus-hero-subtitle">Claim your daily bonus and build your streak!</p>
+          <div class="streak-display">
+            <span class="streak-number">${streak}</span>
+            <span class="streak-label">Day Streak</span>
+          </div>
+        </div>
+
+        <div class="bonus-card main-claim-card">
+          <div class="claim-reward">
+            <span class="reward-gc">10,000 GC</span>
+            <span class="reward-separator">+</span>
+            <span class="reward-sc">10.00 SC</span>
+          </div>
+          <div class="claim-timer">
+            ${canClaim ? '<span class="ready-badge">READY TO CLAIM!</span>' : '<span class="countdown-timer" id="daily-countdown">' + formatCountdown(nextClaimMs) + '</span>'}
+          </div>
+          <div class="claim-actions">
+            ${canClaim ? '<button type="button" class="btn-claim-main" onclick="claimDaily()">Claim Now</button>' : '<button type="button" class="btn-claim-main" disabled>Already Claimed</button>'}
+          </div>
+        </div>
+
+        <div class="bonus-card streak-card">
+          <h4 class="bonus-card-title">Streak Milestones</h4>
+          <div class="streak-milestones">
+            ${[1,3,7,14,30].map(day => `
+              <div class="milestone ${streak >= day ? 'achieved' : ''}">
+                <div class="milestone-day">Day ${day}</div>
+                <div class="milestone-reward">${day <= 7 ? '+1 SC' : day <= 14 ? '+3 SC' : '+10 SC'}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>`;
+
+    if (!canClaim && nextClaimMs > 0) {
+      startCountdown('daily-countdown', nextClaimMs, 0);
+    }
+  } catch (err) {
+    container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load daily bonus: ' + err.message + '</div></div>';
+  }
+}
+
+async function loadChallengesPage() {
+  const container = document.getElementById('view-challenges');
+  if (!container) return;
+  container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#b1bad2;">Loading challenges...</div></div>';
+
+  try {
+    const challenges = await apiRequest('/api/challenges').catch(() => null);
+    container.innerHTML = `
+      <div class="page-container bonus-page">
+        <div class="page-header">
+          <button class="btn-back" onclick="showLobby()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            <span>Back to Lobby</span>
+          </button>
+          <h2 class="page-title">🎯 Daily Challenges</h2>
+        </div>
+
+        <div class="challenges-grid">
+          ${challenges && challenges.challenges ? challenges.challenges.map(c => {
+            const pct = Math.min(100, (c.progress / c.target) * 100);
+            const isComplete = c.completed && !c.claimed;
+            const isClaimed = c.claimed;
+            return `
+              <div class="challenge-card ${isComplete ? 'complete' : ''} ${isClaimed ? 'claimed' : ''}">
+                <div class="challenge-header">
+                  <div class="challenge-icon">🎯</div>
+                  <div class="challenge-info">
+                    <h4 class="challenge-title">${c.desc}</h4>
+                    <span class="challenge-reward">${c.minReward}-${c.maxReward} SC</span>
+                  </div>
+                </div>
+                <div class="challenge-progress">
+                  <div class="progress-bar">
+                    <div class="progress-fill" style="width:${pct}%"></div>
+                  </div>
+                  <span class="progress-text">${c.progress} / ${c.target}</span>
+                </div>
+                <div class="challenge-actions">
+                  ${isComplete ? `<button type="button" class="btn-claim-challenge" onclick="claimChallenge('${c.id}')">Claim Reward</button>` : ''}
+                  ${isClaimed ? '<span class="claimed-badge">✓ Claimed</span>' : ''}
+                  ${!isComplete && !isClaimed ? '<span class="progress-label">In Progress</span>' : ''}
+                </div>
+              </div>
+            `;
+          }).join('') : '<div class="no-challenges">No challenges available. Check back later!</div>'}
+        </div>
+      </div>`;
+  } catch (err) {
+    container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load challenges: ' + err.message + '</div></div>';
+  }
+}
+
+async function loadRakebackPage() {
+  const container = document.getElementById('view-rakeback');
+  if (!container) return;
+  container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#b1bad2;">Loading rakeback...</div></div>';
+
+  try {
+    const rakeback = await apiRequest('/api/rakeback/status').catch(() => null);
+    container.innerHTML = `
+      <div class="page-container bonus-page">
+        <div class="page-header">
+          <button class="btn-back" onclick="showLobby()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            <span>Back to Lobby</span>
+          </button>
+          <h2 class="page-title">💎 Rakeback</h2>
+        </div>
+
+        <div class="rakeback-hero">
+          <div class="rakeback-icon">💎</div>
+          <h3 class="rakeback-title">Cashback on Every Bet</h3>
+          <p class="rakeback-subtitle">Get back a percentage of your losses automatically</p>
+        </div>
+
+        <div class="rakeback-tiers">
+          ${rakeback && rakeback.rakeback ? Object.entries(rakeback.rakeback).map(([tier, r]) => {
+            const color = tier === 'daily' ? '#00b3ff' : tier === 'weekly' ? '#8248ff' : '#ff4d4d';
+            const icon = tier === 'daily' ? '📅' : tier === 'weekly' ? '📆' : '📈';
+            return `
+              <div class="rakeback-tier-card tier-${tier}">
+                <div class="tier-header">
+                  <span class="tier-icon">${icon}</span>
+                  <span class="tier-name">${tier.charAt(0).toUpperCase() + tier.slice(1)} Rakeback</span>
+                  <span class="tier-period">${r.period}</span>
+                </div>
+                <div class="tier-stats">
+                  <div class="tier-stat">
+                    <span class="tier-stat-label">Loss Tracked</span>
+                     <span class="tier-stat-value loss">${formatCoins(r.lossTracked)} SC</span>
+                  </div>
+                  <div class="tier-stat">
+                    <span class="tier-stat-label">Rate</span>
+                    <span class="tier-stat-value">${r.rateMin}% - ${r.rateMax}%</span>
+                  </div>
+                  <div class="tier-stat">
+                    <span class="tier-stat-label">Claimable</span>
+                     <span class="tier-stat-value claimable">${formatCoins(r.claimable)} SC</span>
+                  </div>
+                </div>
+                <div class="tier-actions">
+                  ${r.canClaim ? `<button type="button" class="btn-claim-rake" onclick="claimRakeback('${tier}')">Claim ${formatCoins(r.claimable)} SC</button>` : ''}
+                  ${!r.canClaim && r.claimable > 0 ? `<div class="countdown-timer">${formatCountdown(r.nextClaimMs)}</div>` : ''}
+                  ${r.claimable <= 0 ? '<span class="no-claim">No losses to rebate</span>' : ''}
+                </div>
+              </div>
+            `;
+          }).join('') : '<div class="no-rakeback">No rakeback data available.</div>'}
+        </div>
+      </div>`;
+  } catch (err) {
+    container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load rakeback: ' + err.message + '</div></div>';
+  }
 }
 
 async function loadBonusContent() {
-  const content = document.getElementById('bonus-content');
-  if (!content) return;
-  content.innerHTML = '<div style="padding:20px;text-align:center;color:#b1bad2;">Loading bonus data...</div>';
-
+  const container = document.getElementById('view-bonus');
+  if (!container) return;
   try {
-    const [bonusStatus, challenges, rakeback] = await Promise.all([
-      apiRequest('/api/bonus/status').catch(() => null),
-      apiRequest('/api/challenges').catch(() => null),
-      apiRequest('/api/rakeback/status').catch(() => null)
-    ]);
-
-    let html = '';
-
-    // Daily Claim Card
-    html += '<div class="bonus-card" style="margin-bottom:16px;">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
-    html += '<h4 style="margin:0;font-size:1.05rem;">🎁 Daily Claim</h4>';
-    html += '</div>';
-    html += '<div style="font-size:0.85rem;color:#b1bad2;margin-bottom:10px;">Reward: <span style="color:#00e701;font-weight:700;">10,000 GC + 10.00 SC</span></div>';
-
-    if (bonusStatus && bonusStatus.canClaim) {
-      html += '<button type="button" class="btn-play btn-full game-action-btn" onclick="claimDaily()">Claim 10,000 GC + 10.00 SC</button>';
-    } else if (bonusStatus) {
-      const nextMs = bonusStatus.nextClaimMs || 0;
-      html += '<div style="display:flex;align-items:center;gap:8px;">';
-      html += '<span class="countdown-timer" id="daily-countdown" style="font-family:monospace;font-size:1.15rem;font-weight:800;color:#ff914d;">' + formatCountdown(nextMs) + '</span>';
-      html += '<span style="color:#b1bad2;font-size:0.8rem;">until next claim</span>';
-      html += '</div>';
-    } else {
-      html += '<button type="button" class="btn-play btn-full" onclick="claimDaily()">Claim Now</button>';
-    }
-    html += '</div>';
-
-    // Challenges Card
-    html += '<div class="bonus-card" style="margin-bottom:16px;">';
-    html += '<h4 style="margin:0 0 8px;font-size:1.05rem;">🎯 Daily Challenges</h4>';
-    if (challenges && challenges.challenges) {
-      challenges.challenges.forEach(c => {
-        const pct = Math.min(100, (c.progress / c.target) * 100);
-        html += '<div style="margin-bottom:8px;">';
-        html += '<div style="display:flex;justify-content:space-between;font-size:0.8rem;">';
-        html += '<span style="color:#b1bad2;">' + c.desc + '</span>';
-        html += '<span style="color:#b1bad2;">' + c.progress + '/' + c.target + '</span>';
-        html += '</div>';
-        html += '<div style="background:#14222d;border-radius:4px;height:6px;overflow:hidden;">';
-        html += '<div style="width:' + pct + '%;height:100%;background:linear-gradient(90deg,#00e701,#ffc700);"></div>';
-        html += '</div>';
-        if (c.completed && !c.claimed) {
-          html += '<button type="button" class="btn-play btn-full game-action-btn" style="margin-top:4px;font-size:0.8rem;padding:6px 12px;" onclick="claimChallenge(\'' + c.id + '\')">Claim ' + c.minReward + '-' + c.maxReward + ' SC</button>';
-        } else if (c.claimed) {
-          html += '<span style="font-size:0.75rem;color:#00e701;">Claimed ✓</span>';
-        } else {
-          html += '<span style="font-size:0.75rem;color:#b1bad2;">Reward: ' + c.minReward + '-' + c.maxReward + ' SC</span>';
-        }
-        html += '</div>';
-      });
-    }
-    html += '</div>';
-
-    // Rakeback Cards
-    html += '<div class="bonus-card">';
-    html += '<h4 style="margin:0 0 8px;font-size:1.05rem;">💎 Rakeback Dashboard</h4>';
-    if (rakeback && rakeback.rakeback) {
-      ['daily', 'weekly', 'monthly'].forEach(tier => {
-        const r = rakeback.rakeback[tier];
-        const color = tier === 'daily' ? '#00b3ff' : tier === 'weekly' ? '#8248ff' : '#ff4d4d';
-        html += '<div style="background:rgba(' + hexToRgb(color) + ',0.06);border:1px solid rgba(' + hexToRgb(color) + ',0.3);border-radius:8px;padding:10px;margin-bottom:8px;">';
-        html += '<div style="display:flex;justify-content:space-between;">';
-        html += '<span style="font-weight:700;color:' + color + '">' + tier.charAt(0).toUpperCase() + ' Rakeback</span>';
-        html += '<span style="font-size:0.75rem;color:#b1bad2;">' + r.period + '</span>';
-        html += '</div>';
-        html += '<div style="font-size:0.85rem;color:#b1bad2;margin-top:4px;">Loss tracked: <span style="color:#ff4d4d;">' + r.lossTracked.toFixed(2) + ' SC</span></div>';
-        html += '<div style="font-size:0.8rem;color:#b1bad2;">Rate: ' + r.rateMin + '% - ' + r.rateMax + '% • Claimable: <span style="color:#00e701;font-weight:700;">' + r.claimable.toFixed(2) + ' SC</span></div>';
-        if (r.canClaim) {
-          html += '<button type="button" class="btn-play btn-full game-action-btn" style="margin-top:6px;font-size:0.8rem;padding:6px 12px;" onclick="claimRakeback(\'' + tier + '\')">Claim ' + r.claimable.toFixed(2) + ' SC</button>';
-        } else if (r.claimable > 0) {
-          html += '<div style="font-family:monospace;font-size:0.9rem;color:#ff914d;margin-top:4px;">' + formatCountdown(r.nextClaimMs) + '</div>';
-        } else {
-          html += '<button type="button" class="btn-secondary-action btn-full" style="margin-top:6px;font-size:0.8rem;padding:6px 12px;" disabled>No losses to rebate</button>';
-        }
-        html += '</div>';
-      });
-    }
-    html += '</div>';
-
-    content.innerHTML = html;
-
-    // Start countdown timers
-    if (bonusStatus && !bonusStatus.canClaim && bonusStatus.nextClaimMs > 0) {
-      startCountdown('daily-countdown', bonusStatus.nextClaimMs, 0);
-    }
-    if (rakeback && rakeback.rakeback) {
-      ['daily', 'weekly', 'monthly'].forEach(tier => {
-        const r = rakeback.rakeback[tier];
-        if (!r.canClaim && r.nextClaimMs > 0) {
-          startCountdown('rakeback-countdown-' + tier, r.nextClaimMs, 0);
-        }
-      });
-    }
-
+    await loadDailyBonusPage();
   } catch (err) {
-    content.innerHTML = '<div style="padding:20px;text-align:center;color:#ff4d4d;">Failed to load bonus data: ' + err.message + '</div>';
+    container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load bonus data: ' + err.message + '</div></div>';
   }
 }
 
@@ -2684,15 +3057,10 @@ async function claimDaily() {
   try {
     const data = await apiRequest('/api/bonus/daily-claim', 'POST');
     if (data.success) {
-      state.balances = data.balances;
+      state.balances = mergeBalances(data.balances);
       updateWalletUI();
       playSound('win');
-      document.getElementById('bonus-content').innerHTML =
-        '<div style="padding:30px;text-align:center;">' +
-        '<div style="font-size:1.8rem;font-weight:900;color:#00e701;">✅ Claimed!</div>' +
-        '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">+' + data.claimed.gc + ' GC + ' + data.claimed.sc.toFixed(2) + ' SC</div>' +
-        '</div>';
-      setTimeout(() => loadBonusContent(), 1500);
+      loadBonusContent();
     }
   } catch (err) {
     alert(err.message || 'Daily claim failed');
@@ -2704,10 +3072,9 @@ async function claimChallenge(challengeId) {
   try {
     const data = await apiRequest('/api/challenges/claim', 'POST', { challengeId });
     if (data.success) {
-      state.balances = data.balances;
+      state.balances = mergeBalances(data.balances);
       updateWalletUI();
       playSound('win');
-      alert('Challenge claimed! +' + data.reward.toFixed(2) + ' SC');
       loadBonusContent();
     }
   } catch (err) {
@@ -2720,10 +3087,9 @@ async function claimRakeback(tier) {
   try {
     const data = await apiRequest('/api/rakeback/claim', 'POST', { tier });
     if (data.success) {
-      state.balances = data.balances;
+      state.balances = mergeBalances(data.balances);
       updateWalletUI();
       playSound('win');
-      alert(tier.charAt(0).toUpperCase() + tier.slice(1) + ' rakeback claimed! +' + data.claimed.toFixed(2) + ' SC');
       loadBonusContent();
     }
   } catch (err) {
@@ -2763,10 +3129,15 @@ function openAuthModal() {
   if (loginErr) loginErr.textContent = '';
   const regErr = document.getElementById('auth-register-error');
   if (regErr) regErr.textContent = '';
-  document.getElementById('auth-form-login').classList.remove('hidden');
-  document.getElementById('auth-form-register').classList.add('hidden');
-  document.getElementById('auth-title').textContent = 'Login to Your Account';
-  document.getElementById('auth-subtitle').textContent = 'Enter your credentials to access your account.';
+  const loginForm = document.getElementById('auth-form-login');
+  const registerForm = document.getElementById('auth-form-register');
+  const authTitle = document.getElementById('auth-title');
+  const authSubtitle = document.getElementById('auth-subtitle');
+
+  if (loginForm) loginForm.classList.remove('hidden');
+  if (registerForm) registerForm.classList.add('hidden');
+  if (authTitle) authTitle.textContent = 'Login to Your Account';
+  if (authSubtitle) authSubtitle.textContent = 'Enter your credentials to access your account.';
   document.getElementById('modal-auth')?.classList.remove('hidden');
 }
 
@@ -2775,16 +3146,23 @@ function closeAuthModal() {
 }
 
 function switchAuthMode(mode) {
+  const loginForm = document.getElementById('auth-form-login');
+  const registerForm = document.getElementById('auth-form-register');
+  const authTitle = document.getElementById('auth-title');
+  const authSubtitle = document.getElementById('auth-subtitle');
+
+  if (!loginForm || !registerForm) return;
+
   if (mode === 'register') {
-    document.getElementById('auth-form-login').classList.add('hidden');
-    document.getElementById('auth-form-register').classList.remove('hidden');
-    document.getElementById('auth-title').textContent = 'Create New Account';
-    document.getElementById('auth-subtitle').textContent = 'Register to unlock full features and higher limits.';
+    loginForm.classList.add('hidden');
+    registerForm.classList.remove('hidden');
+    if (authTitle) authTitle.textContent = 'Create New Account';
+    if (authSubtitle) authSubtitle.textContent = 'Register to unlock full features and higher limits.';
   } else {
-    document.getElementById('auth-form-login').classList.remove('hidden');
-    document.getElementById('auth-form-register').classList.add('hidden');
-    document.getElementById('auth-title').textContent = 'Login to Your Account';
-    document.getElementById('auth-subtitle').textContent = 'Enter your credentials to access your account.';
+    loginForm.classList.remove('hidden');
+    registerForm.classList.add('hidden');
+    if (authTitle) authTitle.textContent = 'Login to Your Account';
+    if (authSubtitle) authSubtitle.textContent = 'Enter your credentials to access your account.';
   }
 }
 
@@ -2802,7 +3180,7 @@ async function submitLogin() {
     const data = await apiRequest('/api/auth/login', 'POST', { email, password });
     localStorage.setItem('casino_token', data.token);
     state.profile = data.user;
-    state.balances = data.balances || state.balances;
+    state.balances = mergeBalances(data.balances);
     localStorage.setItem('casino_username', data.user?.username || '');
     updateUserProfileBadge();
     closeAuthModal();
@@ -2843,7 +3221,7 @@ async function submitRegister() {
     const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate });
     localStorage.setItem('casino_token', data.token);
     state.profile = data.user;
-    state.balances = data.balances || state.balances;
+    state.balances = mergeBalances(data.balances);
     localStorage.setItem('casino_username', data.user?.username || '');
     updateUserProfileBadge();
     closeAuthModal();
@@ -2862,7 +3240,7 @@ async function continueAsGuest() {
       if (data.user && data.user.username) {
         localStorage.setItem('casino_username', data.user.username);
       }
-      state.balances = data.balances || state.balances;
+      state.balances = mergeBalances(data.balances);
     }
   } catch (err) {
     console.warn('[Guest Fallback]:', err.message);
@@ -2875,7 +3253,7 @@ async function initSessionFromToken() {
   try {
     await fetchFairSeed();
     const data = await apiRequest('/api/user/me');
-    if (data.balances) state.balances = data.balances;
+    if (data.balances) state.balances = mergeBalances(data.balances);
     if (data.username) state.profile = data;
   } catch (err) {
     console.warn('[initSessionFromToken]: Auth failure, clearing token.', err.message);
@@ -2885,7 +3263,7 @@ async function initSessionFromToken() {
   if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
     connectWebSocket();
   }
-  if (!document.getElementById('modal-profile')) {
+  if (!document.getElementById('modal-auth')) {
     injectMobileAndNavigationDOM();
   }
   applyEmbeddedModeRestrictions();
@@ -2972,18 +3350,71 @@ window.addEventListener('DOMContentLoaded', initSession);
   window.addEventListener(evt, initAudioContext, { once: true });
 });
 
+function handleRouteChange() {
+  const path = window.location.pathname;
+  const hash = window.location.hash.slice(1);
+
+  if (hash && ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
+    if (state.currentGame !== hash) launchGame(hash);
+    return;
+  }
+
+  if (path === '/account') {
+    document.getElementById('view-lobby')?.classList.add('hidden');
+    document.getElementById('view-game')?.classList.add('hidden');
+    document.getElementById('view-account')?.classList.remove('hidden');
+    document.getElementById('view-bonus')?.classList.add('hidden');
+    document.getElementById('view-challenges')?.classList.add('hidden');
+    document.getElementById('view-rakeback')?.classList.add('hidden');
+    refreshAccountPage();
+  } else if (path === '/bonus') {
+    document.getElementById('view-lobby')?.classList.add('hidden');
+    document.getElementById('view-game')?.classList.add('hidden');
+    document.getElementById('view-account')?.classList.add('hidden');
+    document.getElementById('view-bonus')?.classList.remove('hidden');
+    document.getElementById('view-challenges')?.classList.add('hidden');
+    document.getElementById('view-rakeback')?.classList.add('hidden');
+    loadBonusContent();
+  } else if (path === '/challenges') {
+    document.getElementById('view-lobby')?.classList.add('hidden');
+    document.getElementById('view-game')?.classList.add('hidden');
+    document.getElementById('view-account')?.classList.add('hidden');
+    document.getElementById('view-bonus')?.classList.add('hidden');
+    document.getElementById('view-challenges')?.classList.remove('hidden');
+    document.getElementById('view-rakeback')?.classList.add('hidden');
+    loadChallengesPage();
+  } else if (path === '/rakeback') {
+    document.getElementById('view-lobby')?.classList.add('hidden');
+    document.getElementById('view-game')?.classList.add('hidden');
+    document.getElementById('view-account')?.classList.add('hidden');
+    document.getElementById('view-bonus')?.classList.add('hidden');
+    document.getElementById('view-challenges')?.classList.add('hidden');
+    document.getElementById('view-rakeback')?.classList.remove('hidden');
+    loadRakebackPage();
+  } else {
+    showLobby();
+  }
+}
+
+window.addEventListener('popstate', handleRouteChange);
 window.addEventListener('hashchange', () => {
   const hash = window.location.hash.slice(1);
   if (hash && ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
     if (state.currentGame !== hash) launchGame(hash);
+  } else if (!hash) {
+    showLobby();
   }
 });
 
-if (window.location.hash) {
-  const hash = window.location.hash.slice(1);
-  if (['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
-    window.addEventListener('load', () => {
-      if (state.currentGame !== hash) launchGame(hash);
-    });
-  }
+const initialHash = window.location.hash.slice(1);
+if (initialHash && ['account','bonus','challenges','rakeback'].includes(initialHash)) {
+  history.replaceState(null, '', '/' + initialHash);
+  handleRouteChange();
+} else if (initialHash && ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(initialHash)) {
+  window.addEventListener('load', () => {
+    if (state.currentGame !== initialHash) launchGame(initialHash);
+  });
+} else {
+  handleRouteChange();
 }
+

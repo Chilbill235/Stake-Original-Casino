@@ -65,13 +65,13 @@
                  <span class="opt-val" style="color:var(--accent-green);">Withdraw</span>
                </div>
              </div>
-             <div class="wallet-option wallet-opt-bonuses" onclick="openBonusModalFromDropdown()">
-               <span class="wallet-opt-icon">🎁</span>
-               <div class="wallet-option-info">
-                 <span class="opt-name">Bonuses</span>
-                 <span class="opt-val" style="color:var(--accent-purple);">Daily + Challenges</span>
-               </div>
-             </div>
+              <div class="wallet-option wallet-opt-bonuses" onclick="openBonusModal()">
+                <span class="wallet-opt-icon">🎁</span>
+                <div class="wallet-option-info">
+                  <span class="opt-name">Bonuses</span>
+                  <span class="opt-val" style="color:var(--accent-purple);">Daily + Challenges</span>
+                </div>
+              </div>
           </div>
         </div>
 
@@ -88,7 +88,7 @@
 
     <div class="navbar-right">
       <button id="btn-toggle-sfx" class="btn-action btn-sfx-toggle">🔊 SFX ON</button>
-      <div class="user-profile-badge" id="user-badge" title="User Profile & Settings" onclick="openProfileModal()">
+      <div class="user-profile-badge" id="user-badge" title="User Profile & Settings" onclick="openAccountPage()">
         <div class="avatar-circle">👤</div>
       </div>
     </div>
@@ -129,10 +129,10 @@
         <div class="nav-item" id="nav-bonuses" onclick="openBonusModal()">
           <span class="nav-icon">🎁</span> <span class="nav-label">Daily Bonus</span>
         </div>
-        <div class="nav-item" id="nav-challenges" onclick="openBonusModal()">
+        <div class="nav-item" id="nav-challenges" onclick="history.pushState(null,'','/challenges');handleRouteChange()">
           <span class="nav-icon">🎯</span> <span class="nav-label">Challenges</span>
         </div>
-        <div class="nav-item" id="nav-rakeback" onclick="openBonusModal()">
+        <div class="nav-item" id="nav-rakeback" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">
           <span class="nav-icon">💎</span> <span class="nav-label">Rakeback</span>
         </div>
       </nav>
@@ -299,6 +299,34 @@
             <span class="pf-label" style="margin-left:15px;">Nonce:</span>
             <code id="pf-nonce" class="pf-hash-code">0</code>
           </div>
+        </div>
+      </div>
+
+      <!-- ACCOUNT PAGE -->
+      <div id="view-account" class="game-view hidden">
+        <div class="game-display" id="account-display-area">
+          <div class="game-placeholder-text">Loading account...</div>
+        </div>
+      </div>
+
+      <!-- BONUS PAGE -->
+      <div id="view-bonus" class="game-view hidden">
+        <div class="game-display" id="bonus-display-area">
+          <div class="game-placeholder-text">Loading bonuses...</div>
+        </div>
+      </div>
+
+      <!-- CHALLENGES PAGE -->
+      <div id="view-challenges" class="game-view hidden">
+        <div class="game-display" id="challenges-display-area">
+          <div class="game-placeholder-text">Loading challenges...</div>
+        </div>
+      </div>
+
+      <!-- RAKEBACK PAGE -->
+      <div id="view-rakeback" class="game-view hidden">
+        <div class="game-display" id="rakeback-display-area">
+          <div class="game-placeholder-text">Loading rakeback...</div>
         </div>
       </div>
     </main>

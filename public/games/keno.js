@@ -11,30 +11,36 @@ GameRenderers.renderKenoBoard = function(opts = {}) {
   const pickSet = new Set(state.selectedKenoNumbers);
   const locked = !!opts.locked;
 
-  let html = '<div class="keno-counter" style="margin-bottom:8px;">' +
-    (locked ? 'Drawn: ' + drawn.length + ' numbers' : 'Select up to 10 numbers • <span class="count" style="color:var(--accent-gold);font-weight:800;">' + state.selectedKenoNumbers.length + '</span> / 10 chosen') +
-    '</div>' +
-    '<div style="display:grid; grid-template-columns: repeat(5, minmax(30px, 1fr)); gap:6px; max-width:420px; margin:auto;" id="keno-board">';
+  const hits = state.selectedKenoNumbers.filter(n => drawnSet.has(n)).length;
+
+  let html = '<div class="keno-board">';
+  html += '<div class="keno-header">';
+  html += '<div class="keno-count">' + (locked ? 'Drawn: ' + drawn.length + ' numbers' : state.selectedKenoNumbers.length + ' / 10 chosen') + '</div>';
+  html += '<button class="keno-quick-pick" onclick="quickPickKeno()">🎲 Quick Pick</button>';
+  html += '</div>';
+
+  html += '<div class="keno-grid" id="keno-board">';
   for (let i = 1; i <= 40; i++) {
     const isPicked = pickSet.has(i);
     const isDrawn = drawnSet.has(i);
-    let bg = '#14222d';
-    let color = '#fff';
-    let border = '1px solid #243542';
-    let glow = 'none';
-    if (locked) {
-      if (isDrawn && isPicked) { bg = '#00e701'; color = '#000'; border = '2px solid #fff'; glow = '0 0 10px rgba(0,231,1,.55)'; }
-      else if (isDrawn) { bg = '#8248ff'; color = '#fff'; }
-      else if (isPicked) { bg = '#00e701'; color = '#000'; }
-    } else {
-      if (isPicked) { bg = '#00e701'; color = '#000'; border = '1px solid #fff'; }
-    }
-    html += `<div style="background:${bg}; color:${color}; padding:10px 4px; border-radius:4px; font-weight:600; font-size:0.9rem; cursor:${locked ? 'default' : 'pointer'}; text-align:center; border:${border}; box-shadow:${glow};" onclick="${locked ? '' : 'toggleKenoNumber(' + i + ')'}">${i}</div>`;
+    let cls = 'keno-num';
+    if (isDrawn && isPicked) cls += ' keno-hit';
+    else if (isDrawn) cls += ' keno-drawn';
+    else if (isPicked) cls += ' keno-picked';
+    html += `<div class="${cls}" ${locked ? '' : `onclick="toggleKenoNumber(${i})"`}>${i}</div>`;
   }
   html += '</div>';
-  if (!locked && drawn.length === 0) {
-    html += '<div style="text-align:center;margin-top:10px;"><button class="game-btn-action" style="padding:6px 16px;font-weight:700;" onclick="placeKenoBet()">PLACE KENO BET (' + state.selectedKenoNumbers.length + ' numbers)</button></div>';
+
+  if (locked && hits > 0) {
+    html += '<div class="keno-result">' + hits + ' / ' + state.selectedKenoNumbers.length + ' hits</div>';
   }
+
+  if (!locked && drawn.length === 0) {
+    const canBet = state.selectedKenoNumbers.length > 0;
+    html += '<button class="keno-bet-btn ' + (canBet ? '' : 'disabled') + '" onclick="placeKenoBet()" ' + (!canBet ? 'disabled' : '') + '>PLACE KENO BET (' + state.selectedKenoNumbers.length + ' numbers)</button>';
+  }
+
+  html += '</div>';
   document.getElementById('game-display-area').innerHTML = html;
 };
 
@@ -44,4 +50,31 @@ GameRenderers.toggleKenoNumber = function(num) {
   if (idx > -1) state.selectedKenoNumbers.splice(idx, 1);
   else if (state.selectedKenoNumbers.length < 10) state.selectedKenoNumbers.push(num);
   GameRenderers.renderKenoBoard({ drawn: [], locked: false });
+};
+
+GameRenderers.quickPickKeno = function() {
+  const nums = [];
+  while (nums.length < 5) {
+    const n = Math.floor(Math.random() * 40) + 1;
+    if (!nums.includes(n)) nums.push(n);
+  }
+  state.selectedKenoNumbers = nums;
+  playSound('chip');
+  GameRenderers.renderKenoBoard({ drawn: [], locked: false });
+};
+
+GameRenderers.kenoPayoutTable = function() {
+  const payouts = [
+    { hits: 1, mult: 1.5 }, { hits: 2, mult: 3 }, { hits: 3, mult: 8 },
+    { hits: 4, mult: 20 }, { hits: 5, mult: 50 }, { hits: 6, mult: 100 },
+    { hits: 7, mult: 250 }, { hits: 8, mult: 500 }, { hits: 9, mult: 1000 }, { hits: 10, mult: 2500 }
+  ];
+  let html = '<div class="keno-payout-table">';
+  html += '<div class="payout-title">Payout Table (5 picks)</div>';
+  html += '<div class="payout-row payout-header"><span>Hits</span><span>Multiplier</span></div>';
+  payouts.forEach(p => {
+    html += '<div class="payout-row"><span>' + p.hits + '</span><span>' + p.mult + 'x</span></div>';
+  });
+  html += '</div>';
+  return html;
 };

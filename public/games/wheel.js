@@ -16,7 +16,7 @@ GameRenderers.renderWheel = function(details, multiplier) {
   };
   const winningIndex = details.index || 0;
   const won = multiplier > 0;
-  const finalRotation = ((winningIndex * 30) + 15) % 360;
+  const finalRotation = ((360 - (winningIndex * 30 + 15)) % 360);
   const totalSpins = 6;
   const totalRotation = totalSpins * 360 + finalRotation;
   const spinDuration = 3500;
@@ -28,7 +28,7 @@ GameRenderers.renderWheel = function(details, multiplier) {
     const radius = 80;
     const x = 100 + radius * Math.cos((midAngle - 90) * Math.PI / 180);
     const y = 100 + radius * Math.sin((midAngle - 90) * Math.PI / 180);
-    segmentsHtml += '<div style="position:absolute; left:' + x + 'px; top:' + y + 'px; transform:translate(-50%,-50%); font-size:0.55rem; font-weight:700; color:rgba(255,255,255,0.7); text-shadow:0 0 3px rgba(0,0,0,.8); pointer-events:none; white-space:nowrap; text-shadow:0 0 3px rgba(0,0,0,.9);">' + seg.label + '</div>';
+    segmentsHtml += '<div class="wheel-label" style="left:' + x + 'px; top:' + y + 'px; transform:translate(-50%,-50%) rotate(' + (midAngle + 90) + 'deg); font-size:clamp(0.5rem,1.5vw,0.7rem);">' + seg.label + '</div>';
   });
 
   const wonColor = won ? '#00e701' : '#ff4d4d';
@@ -44,8 +44,17 @@ GameRenderers.renderWheel = function(details, multiplier) {
     '<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:14px; height:14px; border-radius:50%; background:#ffc700; box-shadow:0 0 8px rgba(255,199,0,1); z-index:2;"></div>' +
     '</div>' +
     '<div id="wheel-multiplier" style="font-size:2.5rem; font-weight:900; color:#b1bad2; min-height:1.5em; margin:12px 0;">Spinning...</div>' +
-    '<div id="wheel-subtext" style="color:#b1bad2; font-weight:600; font-size:0.9rem;">Waiting for the wheel to stop...</div>' +
-    '</div>';
+    '<div id="wheel-subtext" style="color:#b1bad2; font-weight:600; font-size:0.9rem;">Waiting for the wheel to stop...</div>';
+
+  if (GameRenderers.wheelHistory && GameRenderers.wheelHistory.length > 0) {
+    display.innerHTML += '<div class="wheel-history"><div class="history-title">Previous</div><div class="history-items">';
+    GameRenderers.wheelHistory.slice(0, 8).forEach(h => {
+      display.innerHTML += '<div class="history-item ' + (h.won ? 'h-win' : 'h-loss') + '">' + h.value + 'x</div>';
+    });
+    display.innerHTML += '</div></div>';
+  }
+
+  display.innerHTML += '</div>';
 
   playSound('spin');
 
@@ -55,6 +64,8 @@ GameRenderers.renderWheel = function(details, multiplier) {
       wheel.style.transform = 'rotate(' + totalRotation + 'deg)';
     }, 50);
   }
+
+  GameRenderers.addWheelHistory(multiplier, won);
 
   setTimeout(() => {
     const multEl = document.getElementById('wheel-multiplier');
@@ -73,4 +84,10 @@ GameRenderers.renderWheel = function(details, multiplier) {
     }
     if (won) playSound('win'); else playSound('loss');
   }, spinDuration);
+};
+
+GameRenderers.addWheelHistory = function(multiplier, won) {
+  if (!GameRenderers.wheelHistory) GameRenderers.wheelHistory = [];
+  GameRenderers.wheelHistory.unshift({ value: multiplier.toFixed(2), won, time: Date.now() });
+  GameRenderers.wheelHistory = GameRenderers.wheelHistory.slice(0, 15);
 };

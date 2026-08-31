@@ -75,7 +75,6 @@ function register(app, deps) {
     if (!ensureBonusFields || !updateTelemetry || !user) return;
     ensureBonusFields(user);
     updateTelemetry(user, gameType, session.currency, session.betAmount, won, payout || 0, {});
-    if (saveData) saveData();
   }
 
   const post = (path, handler) => app.post(path, deps.verifyToken, handler);
@@ -218,16 +217,18 @@ function register(app, deps) {
 
     debitBet(user, currency, amount);
 
-    const floats = nextFloats(user.id, TOWER_FLOORS * cfg.tiles);
+    const floats = nextFloats(user.id, TOWER_FLOORS * (cfg.tiles - 1));
     const floors = []; // each floor: array of booleans; true = safe tile
     for (let f = 0; f < TOWER_FLOORS; f++) {
+      const indices = Array.from({ length: cfg.tiles }, (_, i) => i);
+      const base = f * (cfg.tiles - 1);
+      for (let i = cfg.tiles - 1; i > 0; i--) {
+        const j = Math.floor(floats[base + (cfg.tiles - 1 - i)] * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
       const row = Array(cfg.tiles).fill(false);
       for (let s = 0; s < cfg.safe; s++) {
-        let pos;
-        do {
-          pos = Math.floor(floats[f * cfg.tiles + s] * cfg.tiles);
-        } while (row[pos]);
-        row[pos] = true;
+        row[indices[s]] = true;
       }
       floors.push(row);
     }
@@ -554,7 +555,7 @@ function register(app, deps) {
     // Board boundary reached — no further guesses in this direction.
     const upGood = hiloOdds(nextRank, 'HIGHER').good;
     const downGood = hiloOdds(nextRank, 'LOWER').good;
-    const canContinue = nextRank > 1 && nextRank < 13 && (upGood > 0 || downGood > 0);
+    const canContinue = upGood > 0 || downGood > 0;
 
     if (!canContinue) {
       const user = depsUsers(deps, session.userId);

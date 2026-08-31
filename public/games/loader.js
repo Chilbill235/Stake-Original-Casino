@@ -24,7 +24,11 @@ window.GameLoader = {
       dice: 'games/dice.js',
       baccarat: 'games/baccarat.js',
       keno: 'games/keno.js',
-      tower: 'games/tower.js'
+      tower: 'games/tower.js',
+      mines: 'games/mines.js',
+      blackjack: 'games/blackjack.js',
+      hilo: 'games/hilo.js',
+      limbo: 'games/limbo.js'
     };
 
     return new Promise((resolve) => {

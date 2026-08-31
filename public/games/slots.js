@@ -21,6 +21,7 @@ GameRenderers.renderSlots = function(details, multiplier, payout) {
   const winLines = details.winningLines || [];
   const jackpot = details.jackpot || null;
   const jackpotPool = details.jackpotPool || null;
+  const bonusTriggered = details.bonusTriggered || false;
   const currency = (typeof window !== 'undefined' && window.__CASINO_CURRENCY) || 'GC';
 
   playSound('spin');
@@ -79,6 +80,14 @@ GameRenderers.renderSlots = function(details, multiplier, payout) {
     winLines.forEach(w => LINES[w.line].forEach(([r, c]) => hot.add(r + '-' + c)));
     let html = GameRenderers.slotsGridHTML(grid, hot, true);
 
+    if (bonusTriggered) {
+      html += '<div class="slots-bonus-overlay">';
+      html += '<div class="bonus-title">FREE SPINS!</div>';
+      html += '<div class="bonus-sub">3+ Scatter symbols triggered 10 free spins with increasing multiplier</div>';
+      html += '</div>';
+      playSound('win');
+    }
+
     if (jackpot && jackpot.tier === 'grand') {
       html += '<div style="text-align:center;margin-top:16px;">' +
         '<div style="font-size:2.2rem;font-weight:900;color:#ff1744;">🎰 GRAND JACKPOT! 🎰</div>' +
@@ -106,7 +115,7 @@ GameRenderers.renderSlots = function(details, multiplier, payout) {
       });
       html += '</div>';
       playSound('win');
-    } else if (!jackpot) {
+    } else if (!jackpot && !bonusTriggered) {
       html += '<div style="text-align:center;margin-top:14px;color:#ff4d4d;font-weight:700;">No winning lines 💀</div>';
       playSound('loss');
     }
@@ -126,6 +135,12 @@ GameRenderers.renderSlots = function(details, multiplier, payout) {
       html += '</div></div>';
     }
 
+    if (bonusTriggered) {
+      html += '<div style="margin-top:12px;text-align:center;">' +
+        '<div style="font-size:0.85rem;color:#ffc700;font-weight:700;">Multiplier during free spins: ' + (details.freeSpinMult || 1).toFixed(1) + 'x</div>' +
+        '</div>';
+    }
+
     display.innerHTML = html;
   }
 };
@@ -142,7 +157,8 @@ GameRenderers.slotsGridHTML = function(grid, hot, showLabels) {
       const isSeven = sym === '7️⃣';
       const isBar = sym === '🔔';
       const isDiamond = sym === '💎';
-      let bg = isSeven ? '#1a0a3d' : isBar ? '#14222d' : isDiamond ? '#1a0a3d' : '#1a2c38';
+      const isScatter = sym === '⭐';
+      let bg = isSeven ? '#1a0a3d' : isBar ? '#14222d' : isDiamond ? '#1a0a3d' : isScatter ? '#2d1f0b' : '#1a2c38';
       let border = '1px solid #243542';
       let glow = 'none';
       if (isHot) { bg = '#00e701'; border = '2px solid #fff'; glow = '0 0 16px rgba(0,231,1,.6)'; }
@@ -150,6 +166,7 @@ GameRenderers.slotsGridHTML = function(grid, hot, showLabels) {
       if (['🍒','🍋','🍇'].includes(sym)) symStyle = 'font-size:2rem;';
       else if (sym === '7️⃣') symStyle = 'font-size:2rem; filter:brightness(1.2) drop-shadow(0 0 6px #8248ff);';
       else if (sym === '💎') symStyle = 'font-size:2rem; filter:drop-shadow(0 0 6px #8248ff);';
+      else if (sym === '⭐') symStyle = 'font-size:2rem; filter:drop-shadow(0 0 6px #ffc700);';
       else symStyle = 'font-size:2.2rem;';
       html += '<div class="slot-reel" style="' + (isHot ? 'animation:hotTile 0.5s ease;' : '') +
         'background:' + bg + '; display:flex; align-items:center; justify-content:center; ' +
