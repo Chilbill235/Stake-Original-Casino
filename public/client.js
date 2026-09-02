@@ -707,6 +707,10 @@ function resetStoreModal() {
   if (checkoutSection) checkoutSection.classList.add('hidden');
   if (successSection) successSection.classList.add('hidden');
   document.querySelectorAll('.package-card').forEach(c => c.classList.remove('selected'));
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
 }
 
 function selectPackage(packageId) {
@@ -808,6 +812,12 @@ function selectPaymentMethod(method) {
     btn.classList.toggle('active', btn.dataset.method === method);
   });
   document.querySelectorAll('.payment-panel').forEach(panel => panel.classList.add('hidden'));
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
+  const container = document.getElementById('stripe-checkout-container');
+  if (container) container.innerHTML = '';
   const cardPanel = document.getElementById('payment-card');
   const cryptoPanel = document.getElementById('payment-crypto');
   if (method === 'card' && cardPanel) cardPanel.classList.remove('hidden');
@@ -865,8 +875,8 @@ function copyCryptoAmount() {
 async function initiateCryptoPayment() {
   const packageId = state.lastPackageId;
   if (!packageId) return;
-  const currency = document.querySelector('.crypto-btn.active .crypto-symbol');
-  const cryptoType = currency ? currency.textContent : 'BTC';
+  const symbolEl = document.querySelector('.crypto-btn.active .crypto-symbol');
+  const cryptoType = symbolEl ? symbolEl.textContent : 'BTC';
   playSound('click');
   try {
     const res = await apiRequest('/api/user/crypto-payment/initiate', 'POST', {
@@ -874,14 +884,44 @@ async function initiateCryptoPayment() {
       currency: cryptoType
     });
     if (res.success) {
-      alert('Payment initiated! Please send ' + res.amount + ' to ' + res.address + '. Your coins will be credited after confirmation.');
-      showCheckoutSuccess(res.gc, res.sc);
+      showCryptoPaymentConfirmation(res, cryptoType);
     } else {
       throw new Error(res.error || 'Failed to initiate crypto payment.');
     }
   } catch (err) {
     alert('Crypto payment error: ' + err.message);
   }
+}
+
+function showCryptoPaymentConfirmation(res, cryptoType) {
+  const container = document.getElementById('stripe-checkout-container');
+  if (!container) return;
+  const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
+  container.innerHTML =
+    '<div class="crypto-payment-confirm" style="text-align:center;padding:30px;">' +
+    '<div style="font-size:2.5rem;margin-bottom:12px;">✅</div>' +
+    '<h4 style="color:#00e701;font-weight:800;margin-bottom:8px;">Payment Initiated!</h4>' +
+    '<p style="color:var(--text-secondary);margin-bottom:16px;font-size:0.9rem;">Send <strong>' + res.amount + ' ' + cryptoType + '</strong> to the address below.</p>' +
+    '<div style="background:var(--bg-card);border:1px solid var(--border-default);border-radius:8px;padding:12px 16px;font-family:\'SF Mono\',monospace;font-size:0.85rem;word-break:break-all;margin-bottom:20px;cursor:pointer;" onclick="copyCryptoAddressHandler(\'' + res.address + '\')">' + res.address + ' <span style="color:var(--accent-green);font-size:0.75rem;">(click to copy)</span></div>' +
+    '<div style="background:var(--bg-tertiary);border:1px solid var(--border-default);border-radius:8px;padding:16px;margin-bottom:20px;text-align:left;">' +
+    '<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px;">You will receive after confirmation:</div>' +
+    '<div style="display:flex;gap:16px;justify-content:center;">' +
+    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-green);font-size:1.1rem;">' + pkg.gc + '</div><div style="font-size:0.7rem;color:var(--text-muted);">Gold Coins</div></div>' +
+    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-gold);font-size:1.1rem;">+' + pkg.sc + ' SC</div><div style="font-size:0.7rem;color:var(--text-muted);">Sweeps Coins</div></div>' +
+    '</div>' +
+    '</div>' +
+    '<p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:20px;">Payment will be confirmed after 1 network confirmation (10-30 min).</p>' +
+    '<button class="btn btn-primary" onclick="backToPackages()" style="min-width:140px;">Back to Packages</button>' +
+    '</div>';
+}
+
+function copyCryptoAddressHandler(address) {
+  navigator.clipboard.writeText(address).then(() => {
+    playSound('click');
+    alert('Address copied to clipboard!');
+  }).catch(() => {
+    alert('Address: ' + address);
+  });
 }
 
 function backToPackages() {
@@ -895,6 +935,10 @@ function backToPackages() {
   if (state.activeCheckoutInstance) {
     try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
     state.activeCheckoutInstance = null;
+  }
+  const container = document.getElementById('stripe-checkout-container');
+  if (container) {
+    container.innerHTML = '';
   }
 }
 
@@ -936,6 +980,10 @@ function showCheckoutError(message) {
     '<button class="btn btn-secondary-action" onclick="showPackageList()">Back to Packages</button>' +
     '</div>' +
     '</div>';
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
 }
 
 function showCheckoutSuccess(gc, sc) {
@@ -948,6 +996,11 @@ function showCheckoutSuccess(gc, sc) {
   if (pkgList) pkgList.classList.add('hidden');
   if (checkoutSection) checkoutSection.classList.add('hidden');
   if (successSection) successSection.classList.remove('hidden');
+
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
 
   if (confettiContainer) {
     confettiContainer.innerHTML = '';
@@ -3557,7 +3610,7 @@ async function claimChallenge(challengeId) {
       state.balances = mergeBalances(data.balances);
       updateWalletUI();
       playSound('win');
-      loadBonusContent();
+      loadChallengesPage();
     }
   } catch (err) {
     alert(err.message || 'Challenge claim failed');
@@ -3572,7 +3625,7 @@ async function claimRakeback(tier) {
       state.balances = mergeBalances(data.balances);
       updateWalletUI();
       playSound('win');
-      loadBonusContent();
+      loadRakebackPage();
     }
   } catch (err) {
     alert(err.message || 'Rakeback claim failed');

@@ -2257,6 +2257,23 @@ body.dark-theme::before {
   box-shadow: var(--shadow-xl);
 }
 
+.store-modal { 
+  max-width: 900px; 
+  padding: 24px;
+}
+
+@media (max-width: 768px) {
+  .store-modal {
+    padding: 16px;
+    max-width: 100vw;
+  }
+
+  .modal-box {
+    padding: 24px;
+    max-height: 95vh;
+  }
+}
+
 @keyframes modalSlideUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
@@ -2347,16 +2364,24 @@ body.dark-theme::before {
 
 .modal-actions-flex { display: flex; gap: 12px; margin-top: 24px; }
 
-.btn-full { flex: 1; text-align: center; }
+  .btn-full { flex: 1; text-align: center; }
 
-.store-modal { max-width: 600px; }
+  /* Crypto Payment Confirmation */
+  .crypto-payment-confirm {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-lg);
+  }
 
-.package-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
-}
+  .crypto-payment-confirm h4 {
+    font-size: 1.25rem;
+  }
+
+  .package-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
 
 .package-card {
   background: var(--gradient-card);
@@ -3829,7 +3854,29 @@ body.dark-theme::before {
 
 .streak-label { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
 
-.bonus-card { background: var(--gradient-card); border: 1px solid var(--glass-border); border-radius: var(--radius-xl); padding: 28px; margin-bottom: 20px; }
+.bonus-card {
+  background: var(--gradient-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  padding: 28px;
+  margin-bottom: 20px;
+}
+
+.bonus-card.main-claim-card {
+  border: 2px solid var(--accent-green);
+  position: relative;
+  overflow: hidden;
+}
+
+.bonus-card.main-claim-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--gradient-primary);
+}
 
 .claim-reward { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 20px; }
 
@@ -3936,7 +3983,53 @@ body.dark-theme::before {
 
 .btn-claim-challenge:hover { transform: scale(1.05); box-shadow: 0 4px 15px var(--accent-green-glow); }
 
-.claimed-badge { color: var(--accent-green); font-weight: 600; font-size: 0.85rem; }
+.claimed-badge {
+  color: var(--accent-green);
+  font-weight: 700;
+  font-size: 0.85rem;
+  background: rgba(0, 255, 65, 0.1);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--accent-green);
+}
+
+.countdown-timer {
+  font-size: 0.85rem;
+  color: var(--accent-gold);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.challenge-card .challenge-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-darker);
+  border-radius: var(--radius-md);
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.challenge-card.complete .challenge-icon {
+  background: var(--accent-green-glow);
+}
+
+.challenge-card.claimed .challenge-icon {
+  opacity: 0.5;
+}
+
+.challenge-card.claimed .challenge-reward {
+  color: var(--accent-gold);
+}
+
+.no-rakeback {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
 
 .rakeback-hero {
   background: var(--gradient-purple);
@@ -3965,9 +4058,30 @@ body.dark-theme::before {
   border-radius: var(--radius-lg);
   padding: 24px;
   transition: var(--transition-normal);
+  overflow: hidden;
+  position: relative;
 }
 
-.rakeback-tier-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
+.rakeback-tier-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple), var(--accent-gold));
+  opacity: 0.6;
+}
+
+.rakeback-tier-card.tier-daily::before { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue)); }
+.rakeback-tier-card.tier-weekly::before { background: linear-gradient(90deg, var(--accent-purple), var(--accent-pink)); }
+.rakeback-tier-card.tier-monthly::before { background: linear-gradient(90deg, var(--accent-gold), var(--accent-orange)); }
+
+.rakeback-tier-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent-green);
+}
 
 .tier-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--glass-border); }
 
@@ -4002,7 +4116,39 @@ body.dark-theme::before {
 
 .btn-claim-rake:hover { transform: scale(1.05); box-shadow: 0 4px 15px var(--accent-green-glow); }
 
-.no-claim { color: var(--text-muted); font-size: 0.85rem; }
+.no-claim { color: var(--text-muted); font-size: 0.85rem; font-style: italic; }
+
+.challenge-card .challenge-reward {
+  font-size: 0.8rem;
+  color: var(--accent-green);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.rakeback-tier-card.no-rakeback {
+  opacity: 0.6;
+}
+
+.rakeback-hero {
+  background: var(--gradient-purple);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  padding: 40px;
+  text-align: center;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.rakeback-hero::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 60%;
+  height: 200%;
+  background: radial-gradient(ellipse, rgba(168, 85, 247, 0.1), transparent 60%);
+}
 
 /* ==========================================================================
    11. GAME-SPECIFIC STYLES
@@ -4828,9 +4974,16 @@ body.dark-theme::before {
   .slot-featured-card .game-card-icon-wrapper { font-size: 2.5rem; width: 56px; height: 56px; }
   .featured-scroll { grid-template-columns: 1fr; }
   .featured-card { padding: 20px; }
-  .live-stats-bar { flex-direction: column; gap: 12px; padding: 20px; }
-  .stat-divider { width: 100%; height: 1px; }
-  .section-title { font-size: 1.2rem; }
+   .live-stats-bar { flex-direction: column; gap: 12px; padding: 20px; }
+   .stat-divider { width: 100%; height: 1px; }
+   .section-title { font-size: 1.2rem; }
+   .challenge-card { padding: 16px; }
+   .rakeback-tier-card { padding: 20px; }
+   .checkout-layout { grid-template-columns: 1fr; gap: 10px; }
+   .checkout-summary-panel,
+   .checkout-payment-panel { padding: 20px; }
+   .payment-method-btn { padding: 12px 8px; }
+   .crypto-btn { padding: 12px; }
 }
 
 /* ==========================================================================
@@ -6087,18 +6240,32 @@ body.dark-theme::before {
 @media (max-width: 900px) {
   .checkout-layout {
     grid-template-columns: 1fr;
+    gap: 20px;
   }
 
   .checkout-summary-panel {
     position: static;
+    padding: 20px;
+  }
+
+  .checkout-payment-panel {
+    padding: 20px;
   }
 
   .checkout-methods {
     flex-direction: column;
   }
 
+  .payment-method-btn {
+    padding: 16px 12px;
+  }
+
   .crypto-options {
     grid-template-columns: 1fr;
+  }
+
+  .crypto-details {
+    padding: 20px;
   }
 }
 
