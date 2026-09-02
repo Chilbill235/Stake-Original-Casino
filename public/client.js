@@ -1188,9 +1188,23 @@ function showLobby() {
   closeGlobalFeed();
 
   const betsSidebar = document.getElementById('global-bets-sidebar');
-  if (betsSidebar) betsSidebar.classList.remove('hidden');
+  if (betsSidebar) betsSidebar.classList.add('hidden');
+  const closeBtn = document.getElementById('global-bets-close');
+  if (closeBtn) closeBtn.classList.add('hidden');
+  const fab = document.getElementById('global-bets-fab');
+  if (fab) fab.classList.add('hidden');
+  const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+  if (lobbyBetsBtn) lobbyBetsBtn.classList.remove('hidden');
+}
+
+function openGlobalFeedFromLobby() {
+  playSound('click');
+  const sidebar = document.getElementById('global-bets-sidebar');
+  if (sidebar) sidebar.classList.remove('hidden');
   const closeBtn = document.getElementById('global-bets-close');
   if (closeBtn) closeBtn.classList.remove('hidden');
+  const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+  if (lobbyBetsBtn) lobbyBetsBtn.classList.add('hidden');
 }
 
 function closeGlobalFeed() {
@@ -1202,6 +1216,11 @@ function closeGlobalFeed() {
   if (fab) fab.classList.add('hidden');
   const closeBtn = document.getElementById('global-bets-close');
   if (closeBtn) closeBtn.classList.add('hidden');
+  const inGame = document.querySelector('.main-layout')?.classList.contains('is-game');
+  if (!inGame) {
+    const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+    if (lobbyBetsBtn) lobbyBetsBtn.classList.remove('hidden');
+  }
 }
 
 function showGlobalFeed() {
@@ -1211,6 +1230,8 @@ function showGlobalFeed() {
   if (fab) fab.classList.remove('hidden');
   const closeBtn = document.getElementById('global-bets-close');
   if (closeBtn) closeBtn.classList.remove('hidden');
+  const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+  if (lobbyBetsBtn) lobbyBetsBtn.classList.add('hidden');
 }
 
 function toggleGlobalFeed() {
@@ -1267,6 +1288,8 @@ async function launchGame(gameId) {
   // Show FAB during game for mobile toggling
   const betsFab = document.getElementById('global-bets-fab');
   if (betsFab) betsFab.classList.remove('hidden');
+  const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+  if (lobbyBetsBtn) lobbyBetsBtn.classList.add('hidden');
 
   if (window.location.hash !== '#' + gameId) {
     window.location.hash = '#' + gameId;

@@ -577,6 +577,12 @@
       </div>
     </aside>
 
+    <!-- Lobby-only button to open the Global Bets feed -->
+    <button class="lobby-bets-btn hidden" id="lobby-bets-btn" onclick="openGlobalFeedFromLobby()" aria-label="Open live bets feed">
+      <span class="lobby-bets-icon">📊</span>
+      <span class="lobby-bets-label">Live Bets</span>
+    </button>
+
     <!-- Floating toggle for Global Bets (visible during game play) -->
     <button class="global-bets-fab" id="global-bets-fab" onclick="toggleGlobalFeed()" aria-label="Toggle live bets feed">
       <span class="fab-icon">📊</span>

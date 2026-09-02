@@ -7674,4 +7674,37 @@ body.dark-theme::before {
   .affiliate-apply-row .btn-play { width: 100%; }
 }
 
+/* Lobby-only Live Bets toggle button (hidden in-game) */
+.lobby-bets-btn {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-tertiary) 100%);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  z-index: 850;
+  transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.lobby-bets-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.lobby-bets-btn .lobby-bets-icon {
+  font-size: 1.1rem;
+}
+
+.main-layout.is-game .lobby-bets-btn { display: none !important; }
+
 
