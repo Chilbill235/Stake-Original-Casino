@@ -999,6 +999,67 @@ body.dark-theme::before {
   75% { transform: translateY(-30px) translateX(5px); opacity: 0.4; }
 }
 
+/* Guest Verification Banner */
+.guest-verification-container {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: rgba(0, 255, 65, 0.15);
+  border: 1px solid rgba(0, 255, 65, 0.4);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 24px rgba(0, 255, 65, 0.3);
+  animation: slideDown 0.4s ease, pulse 2s ease-in-out infinite;
+}
+
+.verification-animation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.verification-step {
+  width: 28px;
+  height: 28px;
+  background: var(--accent-green);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: #000;
+  animation: checkmarkPop 0.5s ease;
+}
+
+.verification-text {
+  font-weight: 700;
+  color: var(--accent-green);
+}
+
+.verification-subtext {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-left: 8px;
+}
+
+@keyframes checkmarkPop {
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes slideDown {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+  100% { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 .hero-content {
   position: relative;
   z-index: 2;

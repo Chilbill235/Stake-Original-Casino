@@ -137,8 +137,6 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
         '</div>';
       const container = document.getElementById('crash-game-container');
       if (container) container.insertAdjacentHTML('beforeend', resultHTML);
-      if (window.state) window.state.balances = window.state.balances; // ensure no-op
-      if (typeof updateWalletUI === 'function') updateWalletUI();
       playSound('win');
     } else {
       playSound('loss');

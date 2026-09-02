@@ -273,7 +273,9 @@ const GAMES = {
       .filter(n => Number.isInteger(n) && n >= 1 && n <= 40)
       .slice(0, 10)
       .sort((a, b) => a - b);
-    if (picks.length === 0) picks = [1, 5, 10, 15, 20];
+    if (picks.length === 0) {
+      return { win: false, multiplier: 0, error: 'No valid Keno picks provided' };
+    }
 
     const pool = Array.from({ length: 40 }, (_, i) => i + 1);
     const drawn = [];

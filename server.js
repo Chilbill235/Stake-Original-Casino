@@ -430,20 +430,29 @@ function balancesOf(user) {
 const app = express();
 const server = http.createServer(app);
 
+function corsOptions(origin, callback) {
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+    process.env.FRONTEND_URL
+  ].filter(Boolean);
+
+  if (!origin || allowedOrigins.includes(origin) || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+    callback(null, true);
+  } else {
+    console.warn('[CORS]: Rejected origin:', origin);
+    callback(null, false);
+  }
+}
+
 app.use(cors({
-  origin: function (origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'https://' + (process.env.HOST || 'localhost'),
-      process.env.FRONTEND_URL
-    ].filter(Boolean);
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: corsOptions,
   credentials: true
 }));
 
@@ -659,7 +668,7 @@ function verifyToken(req, res, next) {
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Authentication token required.' });
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, (err, user) => {
     if (err) return res.status(403).json({ error: 'Invalid or expired session token.' });
     req.user = user;
     next();
@@ -684,7 +693,7 @@ server.on('upgrade', (request, socket, head) => {
     return;
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, (err, decoded) => {
     if (err) {
       socket.destroy();
       return;
@@ -769,10 +778,10 @@ app.post('/api/auth/guest', async (req, res) => {
       sc_played: 0.0,
       stripeAccountId: null,
       kyc: {
-        status: 'UNVERIFIED',
-        tier: 0,
+        status: process.env.NODE_ENV === 'production' ? 'UNVERIFIED' : 'VERIFIED',
+        tier: process.env.NODE_ENV === 'production' ? 0 : 2,
         inquiryId: null,
-        verifiedAt: null,
+        verifiedAt: process.env.NODE_ENV === 'production' ? null : new Date().toISOString(),
         rejectionReason: null
       },
       lastDailyClaim: 0,
@@ -2188,10 +2197,12 @@ app.post('/api/rakeback/claim', verifyToken, (req, res) => {
     releaseLock(user.id, 'rakeback-' + tier);
   }
 });
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Malformed JSON body.' });
+  }
+  if (err && err.status === 403) {
+    return res.status(403).json({ error: err.message || 'Forbidden.' });
   }
   console.error('[SERVER ERROR]', err);
   res.status(500).json({ error: 'Internal server error.' });

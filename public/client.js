@@ -3088,6 +3088,14 @@ async function startKycVerification() {
   }
 }
 
+function showGuestVerificationAnimation() {
+  const container = document.getElementById('guest-verification-container');
+  if (!container) return;
+  container.classList.remove('hidden');
+  container.innerHTML = '<div class="verification-animation"><div class="verification-step">✓</div><div class="verification-text">Identity Verified</div><div class="verification-subtext">Sandbox KYC auto-completed</div></div>';
+  setTimeout(() => container.classList.add('hidden'), 3000);
+}
+
 async function loadAccountTransactions() {
   const list = document.getElementById('account-transactions-list');
   if (!list) return;
@@ -3710,6 +3718,9 @@ async function continueAsGuest() {
         localStorage.setItem('casino_username', data.user.username);
       }
       state.balances = mergeBalances(data.balances);
+      if (data.user && data.user.kyc && data.user.kyc.status === 'VERIFIED') {
+        showGuestVerificationAnimation();
+      }
     }
   } catch (err) {
     console.warn('[Guest Fallback]:', err.message);
@@ -3732,6 +3743,10 @@ async function initSessionFromToken() {
     localStorage.removeItem('casino_token');
   }
   updateWalletUI();
+  setupGlobalEventListeners();
+  initScrollReveal();
+  initHeroParticles();
+  initProvablyFairUI();
   if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
     connectWebSocket();
   }
@@ -3851,6 +3866,8 @@ function initScrollReveal() {
 function initHeroParticles() {
   const container = document.getElementById('hero-particles');
   if (!container) return;
+
+  container.innerHTML = ''; // Clear any existing particles to avoid duplicates
 
   const particleCount = 20;
   const colors = ['#00ff41', '#ffd700', '#00b4ff', '#a855f7', '#ff8c00'];
