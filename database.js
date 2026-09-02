@@ -132,6 +132,30 @@ function createSchema() {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp)`);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS affiliates (
+      user_id INTEGER PRIMARY KEY,
+      referral_code TEXT UNIQUE NOT NULL,
+      referred_by INTEGER,
+      created_at INTEGER DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (referred_by) REFERENCES users(id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS affiliate_earnings (
+      id TEXT PRIMARY KEY,
+      affiliate_user_id INTEGER NOT NULL,
+      referred_user_id INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      amount_sc REAL DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_affiliate_earnings_user ON affiliate_earnings(affiliate_user_id)`);
 }
 
 function ensureSchema() {
@@ -275,6 +299,31 @@ function ensureSchema() {
       )
     `);
     db.run(`INSERT OR IGNORE INTO jackpot_pool (id) VALUES (1)`);
+  }
+
+  if (!tableNames.includes('affiliates')) {
+    db.run(`
+      CREATE TABLE affiliates (
+        user_id INTEGER PRIMARY KEY,
+        referral_code TEXT UNIQUE NOT NULL,
+        referred_by INTEGER,
+        created_at INTEGER DEFAULT 0
+      )
+    `);
+  }
+
+  if (!tableNames.includes('affiliate_earnings')) {
+    db.run(`
+      CREATE TABLE affiliate_earnings (
+        id TEXT PRIMARY KEY,
+        affiliate_user_id INTEGER NOT NULL,
+        referred_user_id INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        amount_sc REAL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_affiliate_earnings_user ON affiliate_earnings(affiliate_user_id)`);
   }
 }
 
@@ -477,5 +526,91 @@ module.exports = {
       totalGC: result[0].values[0][0] || 0,
       totalSC: result[0].values[0][1] || 0
     };
+  },
+
+  getAffiliateByUserId: async (userId) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM affiliates WHERE user_id = ?');
+    stmt.bind([userId]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  getAffiliateByCode: async (code) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM affiliates WHERE referral_code = ?');
+    stmt.bind([code]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  createAffiliate: async (userId, referralCode, referredBy = null) => {
+    const database = await getDb();
+    database.run(
+      'INSERT OR IGNORE INTO affiliates (user_id, referral_code, referred_by, created_at) VALUES (?, ?, ?, ?)',
+      [userId, referralCode, referredBy, Date.now()]
+    );
+    scheduleSave();
+  },
+
+  getReferredUsers: async (affiliateUserId) => {
+    const database = await getDb();
+    const stmt = database.prepare(
+      `SELECT u.id, u.username, u.created_at, a.created_at AS referred_at
+       FROM affiliates a
+       JOIN users u ON u.id = a.user_id
+       WHERE a.referred_by = ?
+       ORDER BY a.created_at DESC`
+    );
+    stmt.bind([affiliateUserId]);
+    const results = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return results;
+  },
+
+  addAffiliateEarning: async ({ id, affiliateUserId, referredUserId, source, amountSc }) => {
+    const database = await getDb();
+    database.run(
+      `INSERT INTO affiliate_earnings (id, affiliate_user_id, referred_user_id, source, amount_sc) VALUES (?, ?, ?, ?, ?)`,
+      [id, affiliateUserId, referredUserId, source, amountSc]
+    );
+    scheduleSave();
+  },
+
+  getAffiliateEarnings: async (affiliateUserId, limit = 100) => {
+    const database = await getDb();
+    const stmt = database.prepare(
+      `SELECT * FROM affiliate_earnings WHERE affiliate_user_id = ? ORDER BY created_at DESC LIMIT ?`
+    );
+    stmt.bind([affiliateUserId, limit]);
+    const results = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return results;
+  },
+
+  getAffiliateEarningsTotals: async (affiliateUserId) => {
+    const database = await getDb();
+    const stmt = database.prepare(
+      `SELECT source, COALESCE(SUM(amount_sc), 0) AS total
+       FROM affiliate_earnings
+       WHERE affiliate_user_id = ?
+       GROUP BY source`
+    );
+    stmt.bind([affiliateUserId]);
+    const results = {};
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      results[row.source] = row.total;
+    }
+    stmt.free();
+    return results;
   }
 };

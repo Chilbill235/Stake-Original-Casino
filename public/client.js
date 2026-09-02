@@ -1186,45 +1186,37 @@ function showLobby() {
   state.crashAutoTarget = null;
   clearGameControls();
   closeGlobalFeed();
+
+  const betsSidebar = document.getElementById('global-bets-sidebar');
+  if (betsSidebar) betsSidebar.classList.remove('hidden');
+  const closeBtn = document.getElementById('global-bets-close');
+  if (closeBtn) closeBtn.classList.remove('hidden');
 }
 
 function closeGlobalFeed() {
   const drawer = document.getElementById('global-bets-drawer');
   if (drawer) drawer.classList.remove('open');
+  const sidebar = document.getElementById('global-bets-sidebar');
+  if (sidebar) sidebar.classList.add('hidden');
+  const fab = document.getElementById('global-bets-fab');
+  if (fab) fab.classList.add('hidden');
+  const closeBtn = document.getElementById('global-bets-close');
+  if (closeBtn) closeBtn.classList.add('hidden');
+}
+
+function showGlobalFeed() {
+  const sidebar = document.getElementById('global-bets-sidebar');
+  if (sidebar) sidebar.classList.remove('hidden');
+  const fab = document.getElementById('global-bets-fab');
+  if (fab) fab.classList.remove('hidden');
+  const closeBtn = document.getElementById('global-bets-close');
+  if (closeBtn) closeBtn.classList.remove('hidden');
 }
 
 function toggleGlobalFeed() {
-  let drawer = document.getElementById('global-bets-drawer');
-  if (!drawer) {
-    drawer = document.createElement('aside');
-    drawer.id = 'global-bets-drawer';
-    drawer.className = 'global-bets-drawer';
-    drawer.innerHTML =
-      '<div class="global-bets-drawer-header">' +
-      '  <h3>⚡ Global Bets</h3>' +
-      '  <button class="x-close" onclick="closeGlobalFeed()" aria-label="Close feed">×</button>' +
-      '</div>' +
-      '<div style="display:flex; gap:4px; padding:8px 12px; background:#0f171e; border-bottom:1px solid #243542;">' +
-      '  <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter(\'ALL\')">All</button>' +
-      '  <button class="btn-secondary-action feed-tab-btn" data-filter="MY_BETS" onclick="setFeedFilter(\'MY_BETS\')">My Bets</button>' +
-      '  <button class="btn-secondary-action feed-tab-btn" data-filter="HIGH_ROLLERS" onclick="setFeedFilter(\'HIGH_ROLLERS\')">High Rollers</button>' +
-      '</div>' +
-      '<div class="bets-feed-header" style="padding:6px 12px;"><span>USER / GAME</span><span>MULT.</span></div>' +
-      '<div class="bets-feed" id="bets-feed-drawer"></div>' +
-      '<div class="game-results-header"><h4>🔥 Recent Results</h4></div>' +
-      '<div class="game-result-feed" id="game-result-feed-drawer"></div>';
-    document.body.appendChild(drawer);
-  }
-
-  drawer.classList.toggle('open');
-
-  if (drawer.classList.contains('open')) {
-    const drawerFeed = document.getElementById('bets-feed-drawer');
-    const drawerResults = document.getElementById('game-result-feed-drawer');
-    const mainFeed = document.getElementById('bets-feed');
-    const mainResults = document.getElementById('game-result-feed');
-    if (drawerFeed && mainFeed) drawerFeed.innerHTML = mainFeed.innerHTML;
-    if (drawerResults && mainResults) drawerResults.innerHTML = mainResults.innerHTML;
+  const sidebar = document.getElementById('global-bets-sidebar');
+  if (sidebar) {
+    sidebar.classList.toggle('hidden');
   }
 }
 
@@ -1270,7 +1262,11 @@ async function launchGame(gameId) {
   document.getElementById('view-game')?.classList.remove('hidden');
   document.getElementById('active-game-title').textContent = gameId.toUpperCase();
   document.querySelector('.main-layout')?.classList.add('is-game');
-  closeGlobalFeed();
+  const betsSidebar = document.getElementById('global-bets-sidebar');
+  if (betsSidebar) betsSidebar.classList.add('hidden');
+  // Show FAB during game for mobile toggling
+  const betsFab = document.getElementById('global-bets-fab');
+  if (betsFab) betsFab.classList.remove('hidden');
 
   if (window.location.hash !== '#' + gameId) {
     window.location.hash = '#' + gameId;
@@ -2796,6 +2792,8 @@ async function refreshAccountPage(page = 'overview') {
 
 function navigateToAccount(page) {
   playSound('click');
+  const path = page === 'overview' ? '/account' : '/account/' + page;
+  history.pushState(null, '', path);
   document.querySelectorAll('.account-nav-link').forEach(link => {
     link.classList.toggle('active', link.dataset.accountPage === page);
   });
@@ -2866,109 +2864,15 @@ function renderAccountPage(page = 'overview') {
             <span class="stat-label">Sweeps Coins</span>
           </div>
         </div>
-        <div class="stat-card">
-          <div class="stat-icon">🎲</div>
-          <div class="stat-info">
-            <span class="stat-value">${totalWageredSC}</span>
-            <span class="stat-label">SC Wagered</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">🏆</div>
-          <div class="stat-info">
-            <span class="stat-value">${formatCoins(vip.rakebackAccruedSC || 0)}</span>
-            <span class="stat-label">SC Rakeback</span>
-          </div>
-        </div>
       </div>
 
       <div class="account-details-grid">
         <div class="account-card">
-          <h3 class="account-card-title">Profile</h3>
+          <h3 class="account-card-title">Account</h3>
           <div class="account-detail-list">
             <div class="account-detail-item"><span class="detail-label">Username</span><span class="detail-value">${escapeHTML(p.username || 'Guest')}</span></div>
             <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || (isGuest ? 'guest@casino' : '—'))}</span></div>
-            <div class="account-detail-item"><span class="detail-label">State</span><span class="detail-value">${escapeHTML(p.state || 'CA')}</span></div>
             <div class="account-detail-item"><span class="detail-label">Member Since</span><span class="detail-value">${memberSince}</span></div>
-          </div>
-        </div>
-
-        <div class="account-card">
-          <h3 class="account-card-title">Identity Verification</h3>
-          <div class="kyc-status-badge ${kycClass}">${escapeHTML(kycStatusText)}</div>
-          ${kyc.rejectionReason ? `<div class="kyc-rejection">${escapeHTML(kyc.rejectionReason)}</div>` : ''}
-          <div class="kyc-tier-info">
-            <span>Verification Tier</span>
-            <span class="tier-value">Tier ${kyc.tier} of 2</span>
-          </div>
-          <div class="kyc-actions">
-            ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
-            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button>' : ''}
-            ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
-          </div>
-        </div>
-
-        <div class="account-card">
-          <h3 class="account-card-title">Balances</h3>
-          <div class="balance-cards">
-            <div class="balance-card gc">
-              <div class="balance-card-header"><span class="balance-icon">🪙</span><span class="balance-type">Gold Coins</span></div>
-              <div class="balance-amount">${gc}</div>
-              <div class="balance-sub">GC</div>
-            </div>
-            <div class="balance-card sc">
-              <div class="balance-card-header"><span class="balance-icon">💎</span><span class="balance-type">Sweeps Coins</span></div>
-              <div class="balance-amount">${sc}</div>
-              <div class="balance-sub">Total SC</div>
-            </div>
-          </div>
-          <div class="balance-breakdown">
-            <div class="breakdown-item"><span class="breakdown-label">Unplayed SC</span><span class="breakdown-value">${scUnplayed}</span></div>
-            <div class="breakdown-item"><span class="breakdown-label">Redeemable SC</span><span class="breakdown-value">${scPlayed}</span></div>
-          </div>
-        </div>
-
-        <div class="account-card">
-          <h3 class="account-card-title">Rewards & Bonuses</h3>
-          <div class="rewards-grid">
-            <div class="reward-item">
-              <span class="reward-label">Daily Streak</span>
-              <span class="reward-value">${p.bonus?.claimStreak || 0} days</span>
-            </div>
-            <div class="reward-item">
-              <span class="reward-label">Rakeback Accrued</span>
-              <span class="reward-value rakeback">${formatCoins(vip.rakebackAccruedSC || 0)} SC</span>
-            </div>
-            <div class="reward-item">
-              <span class="reward-label">Last Claim</span>
-              <span class="reward-value">${p.bonus?.lastClaimAt ? new Date(p.bonus.lastClaimAt).toLocaleDateString() : 'Never'}</span>
-            </div>
-            <div class="reward-item">
-              <span class="reward-label">VIP Tier</span>
-              <span class="reward-value">${escapeHTML(vipText)}</span>
-            </div>
-          </div>
-          <div class="rewards-actions">
-            <button class="btn-reward" onclick="history.pushState(null,'','/bonus');handleRouteChange()">🎁 Daily Bonus</button>
-            <button class="btn-reward" onclick="history.pushState(null,'','/challenges');handleRouteChange()">🎯 Challenges</button>
-            <button class="btn-reward" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Rakeback</button>
-          </div>
-        </div>
-
-        <div class="account-card">
-          <h3 class="account-card-title">Quick Actions</h3>
-          <div class="rewards-actions">
-            <button class="btn-reward" onclick="openStoreModal()">🪙 Buy Coins</button>
-            <button class="btn-reward" onclick="openRedeemModal()">💸 Redeem SC</button>
-            <button class="btn-reward" onclick="openProvablyFairModal()">🛡️ Provably Fair</button>
-          </div>
-        </div>
-
-        <div class="account-card">
-          <h3 class="account-card-title">Account Security</h3>
-          <div class="security-actions">
-            <button class="btn-security" onclick="openForgotPasswordModal()">🔑 Reset Password</button>
-            <button class="btn-security logout" onclick="logout()">🚪 Logout</button>
           </div>
         </div>
       </div>`;
@@ -3078,6 +2982,7 @@ function renderAccountPage(page = 'overview') {
         </div>
       </div>`;
   } else if (page === 'transactions') {
+    const sub = state.accountTxSub || 'deposits';
     html = `
       <div class="account-hero">
         <div class="account-avatar">📋</div>
@@ -3088,9 +2993,83 @@ function renderAccountPage(page = 'overview') {
       </div>
       <div class="account-details-grid">
         <div class="account-card" style="grid-column: 1 / -1;">
-          <h3 class="account-card-title">Recent Transactions</h3>
+          <div class="account-tx-tabs">
+            <button class="tx-tab-btn ${sub === 'deposits' ? 'active' : ''}" data-tx-sub="deposits" onclick="navigateToTxSub('deposits')">💰 Deposits</button>
+            <button class="tx-tab-btn ${sub === 'withdrawals' ? 'active' : ''}" data-tx-sub="withdrawals" onclick="navigateToTxSub('withdrawals')">💸 Withdrawals</button>
+            <button class="tx-tab-btn ${sub === 'bets-casino' ? 'active' : ''}" data-tx-sub="bets-casino" onclick="navigateToTxSub('bets-casino')">🎲 Bets / Casino</button>
+          </div>
           <div id="account-transactions-list">
             <div class="account-placeholder">Loading transactions...</div>
+          </div>
+        </div>
+      </div>`;
+  } else if (page === 'affiliates') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">🤝</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Affiliates</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card" style="grid-column: 1 / -1;">
+          <h3 class="account-card-title">Your Referral Link</h3>
+          <div class="affiliate-link-box">
+            <code id="affiliate-link-text">Loading...</code>
+            <button class="btn-secondary-action" onclick="copyAffiliateLink()">Copy Link</button>
+          </div>
+          <div class="affiliate-code-box">
+            <span class="detail-label">Referral Code</span>
+            <code id="affiliate-code-text">Loading...</code>
+            <button class="btn-secondary-action" onclick="copyAffiliateCode()">Copy Code</button>
+          </div>
+          <div class="affiliate-share-row">
+            <a id="affiliate-share-twitter" class="btn-secondary-action" target="_blank" rel="noopener">Share on X</a>
+            <a id="affiliate-share-telegram" class="btn-secondary-action" target="_blank" rel="noopener">Share on Telegram</a>
+          </div>
+        </div>
+
+        <div class="account-card">
+          <h3 class="account-card-title">Earnings Summary</h3>
+          <div class="rewards-grid">
+            <div class="reward-item"><span class="reward-label">From Deposits</span><span class="reward-value sc-val" id="aff-earnings-deposits">0.00 SC</span></div>
+            <div class="reward-item"><span class="reward-label">From Wagers</span><span class="reward-value sc-val" id="aff-earnings-wagers">0.00 SC</span></div>
+            <div class="reward-item"><span class="reward-label">Total Earned</span><span class="reward-value sc-val" id="aff-earnings-total">0.00 SC</span></div>
+            <div class="reward-item"><span class="reward-label">Referred Users</span><span class="reward-value" id="aff-referred-count">0</span></div>
+          </div>
+        </div>
+
+        <div class="account-card">
+          <h3 class="account-card-title">How You Earn</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Deposit commission</span><span class="detail-value" id="aff-rate-deposit">5%</span></div>
+            <div class="account-detail-item"><span class="detail-label">Wager commission</span><span class="detail-value" id="aff-rate-wager">0.1%</span></div>
+            <div class="account-detail-item"><span class="detail-label">Payout currency</span><span class="detail-value">Sweeps Coins (SC)</span></div>
+            <div class="account-detail-item"><span class="detail-label">Credited</span><span class="detail-value">Automatically to your wallet</span></div>
+          </div>
+        </div>
+
+        <div class="account-card">
+          <h3 class="account-card-title">Referred Users</h3>
+          <div id="affiliate-referred-list">
+            <div class="account-placeholder">Loading...</div>
+          </div>
+        </div>
+
+        <div class="account-card" style="grid-column: 1 / -1;">
+          <h3 class="account-card-title">Recent Earnings</h3>
+          <div id="affiliate-earnings-list">
+            <div class="account-placeholder">Loading...</div>
+          </div>
+        </div>
+
+        <div class="account-card" style="grid-column: 1 / -1;">
+          <h3 class="account-card-title">Got a Referral Code?</h3>
+          <p style="color:var(--text-secondary); margin-bottom:10px;">Enter a friend's referral code to attribute your account to them.</p>
+          <div class="affiliate-apply-row">
+            <input type="text" id="affiliate-input-code" class="form-input" placeholder="Enter referral code (e.g. PLAYER-AB12CD)">
+            <button class="btn-play" onclick="applyAffiliateCode()">Apply Code</button>
           </div>
         </div>
       </div>`;
@@ -3126,7 +3105,10 @@ function renderAccountPage(page = 'overview') {
 
   content.innerHTML = html;
   if (page === 'transactions') {
-    loadAccountTransactions();
+    loadAccountTransactions(state.accountTxSub || 'deposits');
+  }
+  if (page === 'affiliates') {
+    loadAffiliateData();
   }
 }
 
@@ -3149,20 +3131,25 @@ function showGuestVerificationAnimation() {
   setTimeout(() => container.classList.add('hidden'), 3000);
 }
 
-async function loadAccountTransactions() {
+async function loadAccountTransactions(sub = 'deposits') {
   const list = document.getElementById('account-transactions-list');
   if (!list) return;
+  const endpoint = {
+    deposits: '/api/user/transactions/deposits',
+    withdrawals: '/api/user/transactions/withdrawals',
+    'bets-casino': '/api/user/transactions/bets-casino'
+  }[sub] || '/api/user/transactions/deposits';
   try {
-    const data = await apiRequest('/api/user/transactions?limit=20');
+    const data = await apiRequest(endpoint + '?limit=50');
     const txs = data.transactions || [];
     if (txs.length === 0) {
       list.innerHTML = '<div class="account-placeholder">No transactions found.</div>';
       return;
     }
     list.innerHTML = '<div class="tx-list">' + txs.map(tx => {
-      const sign = (tx.sc_delta || 0) > 0 ? '+' : '';
-      const amt = Math.abs(tx.amount || tx.sc_delta || tx.gc_delta || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const cur = tx.currency || (tx.sc_delta ? 'SC' : (tx.gc_delta ? 'GC' : ''));
+      const sign = (tx.scDelta || 0) > 0 ? '+' : '';
+      const amt = Math.abs(tx.amount || tx.scDelta || tx.gcDelta || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cur = tx.currency || (tx.scDelta ? 'SC' : (tx.gcDelta ? 'GC' : ''));
       return '<div class="tx-item">' +
         '<span class="tx-type">' + escapeHTML(tx.type) + '</span>' +
         '<div class="tx-row-meta">' +
@@ -3174,6 +3161,117 @@ async function loadAccountTransactions() {
     }).join('') + '</div>';
   } catch (err) {
     list.innerHTML = '<div class="account-placeholder">Failed to load transactions.</div>';
+  }
+}
+
+function navigateToTxSub(sub) {
+  state.accountTxSub = sub;
+  document.querySelectorAll('.tx-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.txSub === sub);
+  });
+  if (window.location.pathname.startsWith('/account/transactions')) {
+    history.replaceState(null, '', '/account/transactions/' + sub);
+  } else {
+    history.pushState(null, '', '/account/transactions/' + sub);
+  }
+  loadAccountTransactions(sub);
+}
+
+async function loadAffiliateData() {
+  try {
+    const data = await apiRequest('/api/affiliate/status');
+    state.affiliate = data;
+
+    const linkEl = document.getElementById('affiliate-link-text');
+    const codeEl = document.getElementById('affiliate-code-text');
+    if (linkEl) linkEl.textContent = data.referralLink;
+    if (codeEl) codeEl.textContent = data.referralCode;
+
+    const twBtn = document.getElementById('affiliate-share-twitter');
+    const tgBtn = document.getElementById('affiliate-share-telegram');
+    const text = encodeURIComponent('Join me on this casino — use my referral link!');
+    if (twBtn) twBtn.href = `https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(data.referralLink)}`;
+    if (tgBtn) tgBtn.href = `https://t.me/share/url?url=${encodeURIComponent(data.referralLink)}&text=${text}`;
+
+    const depEl = document.getElementById('aff-earnings-deposits');
+    const wagEl = document.getElementById('aff-earnings-wagers');
+    const totEl = document.getElementById('aff-earnings-total');
+    const refEl = document.getElementById('aff-referred-count');
+    if (depEl) depEl.textContent = formatCoins(data.totals.deposits) + ' SC';
+    if (wagEl) wagEl.textContent = formatCoins(data.totals.wagers) + ' SC';
+    if (totEl) totEl.textContent = formatCoins(data.totals.total) + ' SC';
+    if (refEl) refEl.textContent = data.referredCount;
+
+    const rateDep = document.getElementById('aff-rate-deposit');
+    const rateWag = document.getElementById('aff-rate-wager');
+    if (rateDep) rateDep.textContent = data.rates.depositRatePct + '%';
+    if (rateWag) rateWag.textContent = data.rates.wagerRatePct + '%';
+
+    const referredList = document.getElementById('affiliate-referred-list');
+    if (referredList) {
+      if (!data.referredUsers || data.referredUsers.length === 0) {
+        referredList.innerHTML = '<div class="account-placeholder">No referred users yet — share your code to start earning.</div>';
+      } else {
+        referredList.innerHTML = '<div class="tx-list">' + data.referredUsers.map(u => (
+          '<div class="tx-item">' +
+          '<span class="tx-type">REFERRED</span>' +
+          '<div class="tx-row-meta">' +
+          '  <span class="tx-desc">' + escapeHTML(u.username) + '</span>' +
+          '  <span class="tx-date">' + new Date(u.referredAt).toLocaleDateString() + '</span>' +
+          '</div>' +
+          '</div>'
+        )).join('') + '</div>';
+      }
+    }
+
+    const earningsList = document.getElementById('affiliate-earnings-list');
+    if (earningsList) {
+      if (!data.recentEarnings || data.recentEarnings.length === 0) {
+        earningsList.innerHTML = '<div class="account-placeholder">No earnings yet. Earnings appear as soon as your referrals deposit or wager.</div>';
+      } else {
+        earningsList.innerHTML = '<div class="tx-list">' + data.recentEarnings.map(e => (
+          '<div class="tx-item">' +
+          '<span class="tx-type">' + escapeHTML(e.source) + '</span>' +
+          '<div class="tx-row-meta">' +
+          '  <span class="tx-desc">From user #' + escapeHTML(String(e.referredUserId)) + '</span>' +
+          '  <span class="tx-date">' + new Date(e.createdAt).toLocaleString() + '</span>' +
+          '</div>' +
+          '<span class="tx-amount sc-val">+' + formatCoins(e.amountSc) + ' SC</span>' +
+          '</div>'
+        )).join('') + '</div>';
+      }
+    }
+  } catch (err) {
+    console.error('[Affiliate] load failed:', err.message);
+  }
+}
+
+function copyAffiliateLink() {
+  const link = document.getElementById('affiliate-link-text')?.textContent;
+  if (!link) return;
+  navigator.clipboard.writeText(link).then(() => playSound('click') || alert('Referral link copied!'))
+    .catch(() => alert('Link: ' + link));
+}
+
+function copyAffiliateCode() {
+  const code = document.getElementById('affiliate-code-text')?.textContent;
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(() => playSound('click') || alert('Referral code copied!'))
+    .catch(() => alert('Code: ' + code));
+}
+
+async function applyAffiliateCode() {
+  const input = document.getElementById('affiliate-input-code');
+  if (!input) return;
+  const code = input.value.trim();
+  if (!code) return alert('Please enter a referral code.');
+  try {
+    const data = await apiRequest('/api/affiliate/apply', 'POST', { code });
+    alert(data.message || 'Referral code applied.');
+    input.value = '';
+    loadAffiliateData();
+  } catch (err) {
+    alert(err.message || 'Failed to apply referral code.');
   }
 }
 
@@ -3436,6 +3534,17 @@ async function loadChallengesPage() {
 
   try {
     const challenges = await apiRequest('/api/challenges').catch(() => null);
+    const taskIcons = {
+      slot_bonus: '🎰',
+      dice_over90_win: '🎲',
+      rounds: '🎮',
+      bj_hands: '♠️',
+      sc_wagered: '💎',
+      gc_wagered: '🪙',
+      unique_games: '🎯',
+      unique_wins: '🏆',
+      speed_rounds: '⚡'
+    };
     container.innerHTML = `
       <div class="page-container bonus-page">
         <div class="page-header">
@@ -3446,39 +3555,66 @@ async function loadChallengesPage() {
           <h2 class="page-title">🎯 Daily Challenges</h2>
         </div>
 
+        <div class="challenges-hero">
+          <div class="challenges-hero-content">
+            <div class="challenges-hero-icon">🎯</div>
+            <h3 class="challenges-hero-title">Complete Daily Challenges</h3>
+            <p class="challenges-hero-subtitle">Complete 3 challenges each day to earn up to <strong>50 SC</strong>!</p>
+          </div>
+        </div>
+
         <div class="challenges-grid">
           ${challenges && challenges.challenges ? challenges.challenges.map(c => {
             const pct = Math.min(100, (c.progress / c.target) * 100);
             const isComplete = c.completed && !c.claimed;
             const isClaimed = c.claimed;
+            const rewardTier = c.maxReward >= 10 ? 'high' : c.maxReward >= 5 ? 'medium' : 'low';
+            const icon = taskIcons[c.task] || '🎯';
             return `
               <div class="challenge-card ${isComplete ? 'complete' : ''} ${isClaimed ? 'claimed' : ''}">
                 <div class="challenge-header">
-                  <div class="challenge-icon">🎯</div>
+                  <div class="challenge-icon">${icon}</div>
                   <div class="challenge-info">
                     <h4 class="challenge-title">${c.desc}</h4>
-                    <span class="challenge-reward">${c.minReward}-${c.maxReward} SC</span>
+                    <span class="challenge-reward challenge-reward-${rewardTier}">${c.minReward}-${c.maxReward} SC</span>
                   </div>
+                  ${isClaimed ? '<span class="challenge-claimed-marker">✓</span>' : ''}
                 </div>
                 <div class="challenge-progress">
                   <div class="progress-bar">
-                    <div class="progress-fill" style="width:${pct}%"></div>
+                    <div class="progress-fill challenge-progress-fill" style="width:${pct}%"></div>
                   </div>
-                  <span class="progress-text">${c.progress} / ${c.target}</span>
+                  <div class="progress-meta">
+                    <span class="progress-text">${c.progress} / ${c.target}</span>
+                    <span class="challenge-tier-badge tier-${rewardTier}">${rewardTier.toUpperCase()}</span>
+                  </div>
                 </div>
                 <div class="challenge-actions">
-                  ${isComplete ? `<button type="button" class="btn-claim-challenge" onclick="claimChallenge('${c.id}')">Claim Reward</button>` : ''}
+                  ${isComplete ? `<button type="button" class="btn-claim-challenge" onclick="claimChallenge('${c.id}')">Claim <strong>${formatCoins(calcChallengeRewardDisplay(c))}</strong> SC</button>` : ''}
                   ${isClaimed ? '<span class="claimed-badge">✓ Claimed</span>' : ''}
-                  ${!isComplete && !isClaimed ? '<span class="progress-label">In Progress</span>' : ''}
+                  ${!isComplete && !isClaimed ? '<span class="progress-label">Keep playing to complete!</span>' : ''}
                 </div>
               </div>
             `;
           }).join('') : '<div class="no-challenges">No challenges available. Check back later!</div>'}
         </div>
       </div>`;
+
+    // Start countdown timers for non-ready rakeback tiers
+    if (rakeback && rakeback.rakeback) {
+      Object.entries(rakeback.rakeback).forEach(([tier, r]) => {
+        if (r.nextClaimMs > 0 && !r.canClaim) {
+          startCountdown('rakeback-countdown-' + tier, r.nextClaimMs, 0);
+        }
+      });
+    }
   } catch (err) {
     container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load challenges: ' + err.message + '</div></div>';
   }
+}
+
+function calcChallengeRewardDisplay(c) {
+  return ((c.minReward + c.maxReward) / 2).toFixed(1);
 }
 
 async function loadRakebackPage() {
@@ -3486,7 +3622,7 @@ async function loadRakebackPage() {
   if (!container) return;
   container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#b1bad2;">Loading rakeback...</div></div>';
 
-  try {
+   try {
     const rakeback = await apiRequest('/api/rakeback/status').catch(() => null);
     container.innerHTML = `
       <div class="page-container bonus-page">
@@ -3499,26 +3635,36 @@ async function loadRakebackPage() {
         </div>
 
         <div class="rakeback-hero">
-          <div class="rakeback-icon">💎</div>
-          <h3 class="rakeback-title">Cashback on Every Bet</h3>
-          <p class="rakeback-subtitle">Get back a percentage of your losses automatically</p>
+          <div class="rakeback-hero-bg"></div>
+          <div class="rakeback-hero-content">
+            <div class="rakeback-icon">💎</div>
+            <h3 class="rakeback-title">Cashback on Every Bet</h3>
+            <p class="rakeback-subtitle">Get back 3-10% of your losses automatically. The longer you play, the higher your rate!</p>
+            <div class="rakeback-rate-range">
+              <span>Rate: 3% - 10%</span>
+              <span>Cap: 50% of losses</span>
+            </div>
+          </div>
         </div>
 
         <div class="rakeback-tiers">
-          ${rakeback && rakeback.rakeback ? Object.entries(rakeback.rakeback).map(([tier, r]) => {
-            const color = tier === 'daily' ? '#00b3ff' : tier === 'weekly' ? '#8248ff' : '#ff4d4d';
+          ${rakeback && rakeback.rakeback ? Object.entries(rakeback.rakeback).map(([tier, r], idx) => {
             const icon = tier === 'daily' ? '📅' : tier === 'weekly' ? '📆' : '📈';
+            const tierColor = tier === 'daily' ? 'cyan' : tier === 'weekly' ? 'purple' : 'gold';
+            const isReady = r.canClaim;
+            const hasLosses = r.lossTracked > 0;
+            const hasClaimable = r.claimable > 0;
             return `
               <div class="rakeback-tier-card tier-${tier}">
                 <div class="tier-header">
                   <span class="tier-icon">${icon}</span>
                   <span class="tier-name">${tier.charAt(0).toUpperCase() + tier.slice(1)} Rakeback</span>
-                  <span class="tier-period">${r.period}</span>
+                  <span class="tier-badge tier-badge-${tierColor}">${tier}</span>
                 </div>
                 <div class="tier-stats">
                   <div class="tier-stat">
                     <span class="tier-stat-label">Loss Tracked</span>
-                     <span class="tier-stat-value loss">${formatCoins(r.lossTracked)} SC</span>
+                    <span class="tier-stat-value loss">${formatCoins(r.lossTracked)} SC</span>
                   </div>
                   <div class="tier-stat">
                     <span class="tier-stat-label">Rate</span>
@@ -3526,13 +3672,18 @@ async function loadRakebackPage() {
                   </div>
                   <div class="tier-stat">
                     <span class="tier-stat-label">Claimable</span>
-                     <span class="tier-stat-value claimable">${formatCoins(r.claimable)} SC</span>
+                    <span class="tier-stat-value claimable">${formatCoins(r.claimable)} SC</span>
+                  </div>
+                </div>
+                <div class="tier-progress">
+                  <div class="progress-bar">
+                    <div class="progress-fill tier-progress-fill" style="width:${hasLosses ? Math.min(100, (r.claimable / (r.lossTracked * 0.5)) * 100 || 0) : 0}%"></div>
                   </div>
                 </div>
                 <div class="tier-actions">
-                  ${r.canClaim ? `<button type="button" class="btn-claim-rake" onclick="claimRakeback('${tier}')">Claim ${formatCoins(r.claimable)} SC</button>` : ''}
-                  ${!r.canClaim && r.claimable > 0 ? `<div class="countdown-timer">${formatCountdown(r.nextClaimMs)}</div>` : ''}
-                  ${r.claimable <= 0 ? '<span class="no-claim">No losses to rebate</span>' : ''}
+                  ${isReady && hasClaimable ? `<button type="button" class="btn-claim-rake" onclick="claimRakeback('${tier}')">Claim <strong>${formatCoins(r.claimable)}</strong> SC</button>` : ''}
+                  ${!isReady && hasClaimable ? `<div class="countdown-timer" id="rakeback-countdown-${tier}">${formatCountdown(r.nextClaimMs)}</div>` : ''}
+                  ${!hasClaimable ? '<span class="no-claim">No losses to rebate yet</span>' : ''}
                 </div>
               </div>
             `;
@@ -3745,7 +3896,8 @@ async function submitRegister() {
   }
 
   try {
-    const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate, state: userState });
+    const refCode = new URLSearchParams(window.location.search).get('ref');
+    const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate, state: userState, ref: refCode });
     localStorage.setItem('casino_token', data.token);
     state.profile = data.user || { id: null, username, email, isGuest: false };
     state.balances = mergeBalances(data.balances);
@@ -3763,7 +3915,8 @@ async function continueAsGuest() {
     return;
   }
   try {
-    const data = await apiRequest('/api/auth/guest', 'POST');
+    const refCode = new URLSearchParams(window.location.search).get('ref');
+    const data = await apiRequest('/api/auth/guest', 'POST', refCode ? { ref: refCode } : {});
     if (data.token) {
       localStorage.setItem('casino_token', data.token);
       state.profile = data.user || null;
@@ -3949,16 +4102,42 @@ function handleRouteChange() {
   }
 
   document.querySelector('.main-layout')?.classList.remove('is-game');
+  closeGlobalFeed();
 
-  if (path === '/account') {
+  if (path === '/account' || path.startsWith('/account/')) {
     document.getElementById('view-lobby')?.classList.add('hidden');
     document.getElementById('view-game')?.classList.add('hidden');
     document.getElementById('view-account')?.classList.remove('hidden');
     document.getElementById('view-bonus')?.classList.add('hidden');
     document.getElementById('view-challenges')?.classList.add('hidden');
     document.getElementById('view-rakeback')?.classList.add('hidden');
-    refreshAccountPage();
-  } else if (path === '/bonus') {
+
+    let page = 'overview';
+    if (path.startsWith('/account/transactions/')) {
+      page = 'transactions';
+      const sub = path.replace('/account/transactions/', '');
+      if (['deposits', 'withdrawals', 'bets-casino'].includes(sub)) {
+        state.accountTxSub = sub;
+      }
+    } else if (path === '/account/affiliates') {
+      page = 'affiliates';
+    } else if (path === '/account/profile') {
+      page = 'profile';
+    } else if (path === '/account/wallet') {
+      page = 'wallet';
+    } else if (path === '/account/kyc') {
+      page = 'kyc';
+    } else if (path === '/account/security') {
+      page = 'security';
+    } else if (path === '/account/transactions') {
+      page = 'transactions';
+      state.accountTxSub = state.accountTxSub || 'deposits';
+    }
+    refreshAccountPage(page);
+    return;
+  }
+
+  if (path === '/bonus') {
     document.getElementById('view-lobby')?.classList.add('hidden');
     document.getElementById('view-game')?.classList.add('hidden');
     document.getElementById('view-account')?.classList.add('hidden');

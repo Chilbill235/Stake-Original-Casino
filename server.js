@@ -510,6 +510,9 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
 
         logTransaction(userId, 'PURCHASE', `Purchased ${session.metadata.packageName || 'Coin Package'}`, gcAmount, scAmount, { stripeSessionId: session.id });
 
+        const usdValue = (session.amount_total || 0) / 100;
+        creditReferrerForDeposit(user, usdValue);
+
         sendToUser(userId, {
           type: 'BALANCE_UPDATE',
           balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
@@ -768,6 +771,17 @@ app.post('/api/auth/guest', async (req, res) => {
       scBalance: 10
     });
 
+    if (req.body?.ref) {
+      try {
+        const referrerAff = await db.getAffiliateByCode(String(req.body.ref).trim());
+        if (referrerAff && referrerAff.user_id !== userId) {
+          await ensureAffiliateRecordFor(userId, generateReferralCode(username), referrerAff.user_id);
+        }
+      } catch (e) {
+        console.warn('[Guest Referral Hook]:', e.message);
+      }
+    }
+
     const newUser = {
       id: userId,
       username,
@@ -855,7 +869,7 @@ app.get('/api/geo/lookup', (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, email, password, birthDate, state } = req.body || {};
+    const { username, email, password, birthDate, state, ref } = req.body || {};
 
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'Username, email, and password are required.' });
@@ -923,6 +937,20 @@ app.post('/api/auth/register', async (req, res) => {
       kyc_status: 'UNVERIFIED',
       kyc_tier: 0
     });
+
+    // Auto-attribute referral if a valid code is provided and user has no existing referrer
+    let referredById = null;
+    if (ref) {
+      try {
+        const referrerAff = await db.getAffiliateByCode(String(ref).trim());
+        if (referrerAff && referrerAff.user_id !== userId) {
+          referredById = referrerAff.user_id;
+          await ensureAffiliateRecordFor(userId, generateReferralCode(username), referredById);
+        }
+      } catch (e) {
+        console.warn('[Register Referral Hook]:', e.message);
+      }
+    }
 
     const newUser = {
       id: userId,
@@ -1453,6 +1481,7 @@ app.post('/api/user/crypto-payment/webhook', express.json(), (req, res) => {
       user.sc_unplayed += payment.scAmount;
       saveData();
       logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment`, payment.gcAmount, payment.scAmount, { paymentId, crypto: payment.currency });
+      creditReferrerForDeposit(user, payment.usdAmount || 0);
     }
   }
 
@@ -1692,6 +1721,11 @@ app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
   // Track telemetry for challenges and rakeback
   ensureBonusFields(user);
   updateTelemetry(user, gameId, currency, amount, isWin, payout, outcome);
+
+  // Affiliate commission on SC wagers
+  if (currency === 'SC') {
+    creditReferrerForWager(user, amount);
+  }
 
   broadcastLiveBet({
     username: user.username,
@@ -2197,6 +2231,197 @@ app.post('/api/rakeback/claim', verifyToken, (req, res) => {
     releaseLock(user.id, 'rakeback-' + tier);
   }
 });
+// -----------------------------------------------------------------------------
+// 13. AFFILIATE / REFERRAL SYSTEM
+// -----------------------------------------------------------------------------
+
+const AFFILIATE_DEPOSIT_RATE = 0.05; // 5% of deposit USD value credited as SC to referrer
+const AFFILIATE_WAGER_RATE = 0.001;  // 0.1% of referred user's wagered SC credited to referrer
+
+function generateReferralCode(username) {
+  const base = (username || 'user').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'PLAYER';
+  const suffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+  return `${base}-${suffix}`;
+}
+
+async function ensureAffiliateRecord(user) {
+  let record = await db.getAffiliateByUserId(user.id);
+  if (!record) {
+    const code = generateReferralCode(user.username);
+    await db.createAffiliate(user.id, code, null);
+    record = await db.getAffiliateByUserId(user.id);
+  }
+  return record;
+}
+
+async function ensureAffiliateRecordFor(userId, code, referredBy) {
+  let record = await db.getAffiliateByUserId(userId);
+  if (!record) {
+    await db.createAffiliate(userId, code, referredBy);
+    record = await db.getAffiliateByUserId(userId);
+  }
+  return record;
+}
+
+async function creditReferrerForDeposit(referredUser, depositUsdValue) {
+  try {
+    const aff = await db.getAffiliateByUserId(referredUser.id);
+    if (!aff || !aff.referred_by) return;
+    const referrer = users.get(aff.referred_by);
+    if (!referrer) return;
+    const commission = round2(depositUsdValue * AFFILIATE_DEPOSIT_RATE);
+    if (commission <= 0) return;
+    referrer.sc_unplayed = round2((referrer.sc_unplayed || 0) + commission);
+    await db.addAffiliateEarning({
+      id: `afe_${crypto.randomUUID()}`,
+      affiliateUserId: referrer.id,
+      referredUserId: referredUser.id,
+      source: 'DEPOSIT',
+      amountSc: commission
+    });
+    saveData();
+    sendToUser(referrer.id, {
+      type: 'BALANCE_UPDATE',
+      balances: { gc: referrer.gc_balance, sc_unplayed: referrer.sc_unplayed, sc_played: referrer.sc_played },
+      message: `Affiliate commission: +${commission} SC from ${referredUser.username}'s deposit.`
+    });
+  } catch (e) {
+    console.error('[Affiliate Deposit Credit Error]:', e.message);
+  }
+}
+
+async function creditReferrerForWager(referredUser, scWagered) {
+  try {
+    if (scWagered <= 0) return;
+    const aff = await db.getAffiliateByUserId(referredUser.id);
+    if (!aff || !aff.referred_by) return;
+    const referrer = users.get(aff.referred_by);
+    if (!referrer) return;
+    const commission = round2(scWagered * AFFILIATE_WAGER_RATE);
+    if (commission <= 0) return;
+    referrer.sc_unplayed = round2((referrer.sc_unplayed || 0) + commission);
+    await db.addAffiliateEarning({
+      id: `afe_${crypto.randomUUID()}`,
+      affiliateUserId: referrer.id,
+      referredUserId: referredUser.id,
+      source: 'WAGER',
+      amountSc: commission
+    });
+    saveData();
+  } catch (e) {
+    console.error('[Affiliate Wager Credit Error]:', e.message);
+  }
+}
+
+app.get('/api/affiliate/status', verifyToken, async (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  try {
+    const aff = await ensureAffiliateRecord(user);
+    const referred = await db.getReferredUsers(user.id);
+    const totals = await db.getAffiliateEarningsTotals(user.id);
+    const earnings = await db.getAffiliateEarnings(user.id, 50);
+    const totalEarnings = Object.values(totals).reduce((s, v) => s + Number(v || 0), 0);
+
+    const baseUrl = (req.headers.origin || `https://${req.headers.host}`).replace(/\/$/, '');
+    const referralLink = `${baseUrl}/?ref=${aff.referral_code}`;
+
+    res.json({
+      referralCode: aff.referral_code,
+      referralLink,
+      totals: {
+        deposits: round2(totals.DEPOSIT || 0),
+        wagers: round2(totals.WAGER || 0),
+        total: round2(totalEarnings)
+      },
+      referredCount: referred.length,
+      referredUsers: referred.map((r) => ({
+        id: r.id,
+        username: r.username,
+        referredAt: r.referred_at
+      })),
+      recentEarnings: earnings.map((e) => ({
+        id: e.id,
+        referredUserId: e.referred_user_id,
+        source: e.source,
+        amountSc: round2(e.amount_sc),
+        createdAt: e.created_at
+      })),
+      rates: {
+        depositRatePct: AFFILIATE_DEPOSIT_RATE * 100,
+        wagerRatePct: AFFILIATE_WAGER_RATE * 100
+      }
+    });
+  } catch (e) {
+    console.error('[Affiliate Status Error]:', e.message);
+    res.status(500).json({ error: 'Failed to load affiliate status.' });
+  }
+});
+
+app.post('/api/affiliate/apply', verifyToken, async (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const code = String(req.body?.code || '').trim();
+  if (!code) return res.status(400).json({ error: 'Referral code is required.' });
+
+  try {
+    const existing = await db.getAffiliateByUserId(user.id);
+    if (existing && existing.referred_by) {
+      return res.status(400).json({ error: 'You already used a referral code.' });
+    }
+
+    const referrerAff = await db.getAffiliateByCode(code);
+    if (!referrerAff) return res.status(404).json({ error: 'Invalid referral code.' });
+    if (referrerAff.user_id === user.id) {
+      return res.status(400).json({ error: 'You cannot refer yourself.' });
+    }
+
+    const referrer = users.get(referrerAff.user_id);
+    if (!referrer) return res.status(404).json({ error: 'Referrer not found.' });
+
+    await ensureAffiliateRecord(user);
+    await db.createAffiliate(user.id, (await db.getAffiliateByUserId(user.id)).referral_code, referrer.id);
+
+    user.referred_by = referrer.id;
+    saveData();
+
+    sendToUser(referrer.id, {
+      type: 'BALANCE_UPDATE',
+      message: `${user.username} just joined using your referral link!`
+    });
+
+    res.json({ success: true, message: 'Referral code applied successfully.' });
+  } catch (e) {
+    console.error('[Affiliate Apply Error]:', e.message);
+    res.status(500).json({ error: 'Failed to apply referral code.' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// 14. TRANSACTION CATEGORY ENDPOINTS
+// -----------------------------------------------------------------------------
+
+app.get('/api/user/transactions/deposits', verifyToken, (req, res) => {
+  const all = transactions.get(req.user.id) || [];
+  const limit = parseInt(req.query.limit, 10) || 50;
+  const filtered = all.filter((tx) => tx.type === 'PURCHASE').slice(0, limit);
+  res.json({ transactions: filtered, category: 'deposits', count: filtered.length });
+});
+
+app.get('/api/user/transactions/withdrawals', verifyToken, (req, res) => {
+  const all = transactions.get(req.user.id) || [];
+  const limit = parseInt(req.query.limit, 10) || 50;
+  const filtered = all.filter((tx) => tx.type === 'WITHDRAWAL').slice(0, limit);
+  res.json({ transactions: filtered, category: 'withdrawals', count: filtered.length });
+});
+
+app.get('/api/user/transactions/bets-casino', verifyToken, (req, res) => {
+  const all = transactions.get(req.user.id) || [];
+  const limit = parseInt(req.query.limit, 10) || 50;
+  const filtered = all.filter((tx) => tx.type === 'BET' || tx.type === 'WIN').slice(0, limit);
+  res.json({ transactions: filtered, category: 'bets-casino', count: filtered.length });
+});
+
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Malformed JSON body.' });

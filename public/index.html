@@ -503,6 +503,10 @@
                 <span class="account-nav-icon">📋</span>
                 <span>Transactions</span>
               </a>
+              <a class="account-nav-link" data-account-page="affiliates" onclick="navigateToAccount('affiliates')">
+                <span class="account-nav-icon">🤝</span>
+                <span>Affiliates</span>
+              </a>
               <a class="account-nav-link" data-account-page="security" onclick="navigateToAccount('security')">
                 <span class="account-nav-icon">🔒</span>
                 <span>Security</span>
@@ -546,10 +550,11 @@
     </main>
 
     <!-- RIGHT SIDEBAR: Live Global Bets Feed (lobby only) -->
-    <aside class="bets-sidebar" id="global-bets-sidebar">
+    <aside class="bets-sidebar hidden" id="global-bets-sidebar">
       <div class="bets-header">
         <h3>⚡ Global Bets</h3>
         <span class="live-tag">LIVE</span>
+        <button class="bets-close-btn" id="global-bets-close" onclick="closeGlobalFeed()" aria-label="Close feed">×</button>
       </div>
       <div style="display:flex; gap:4px; padding:8px 12px; background:#0f171e; border-bottom:1px solid #243542;">
         <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter('ALL')">All</button>
