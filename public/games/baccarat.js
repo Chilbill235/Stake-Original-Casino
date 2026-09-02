@@ -68,8 +68,8 @@ GameRenderers.revealBaccaratCards = function() {
   GameRenderers.addBaccaratTrend(outcome);
 
   let step = 0;
-  const playerCards = document.querySelectorAll('#baccarat-player-hand .playing-card');
-  const bankerCards = document.querySelectorAll('#baccarat-banker-hand .playing-card');
+   const playerCards = document.querySelectorAll('.baccarat-hand.player-hand .playing-card');
+   const bankerCards = document.querySelectorAll('.baccarat-hand.banker-hand .playing-card');
   const totalCards = playerCards.length + bankerCards.length;
   let revealed = 0;
 

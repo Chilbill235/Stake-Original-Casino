@@ -6,36 +6,284 @@ const dbPath = path.join(__dirname, 'casino.sqlite');
 let db = null;
 let saveScheduled = false;
 
-// Shared initialization promise prevents race conditions
 const initPromise = (async () => {
   const SQL = await initSqlJs();
   if (fs.existsSync(dbPath)) {
     const filebuffer = fs.readFileSync(dbPath);
     db = new SQL.Database(filebuffer);
+    ensureSchema();
   } else {
     db = new SQL.Database();
-    db.run(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT,
-        gc_balance REAL DEFAULT 10000.0,
-        sc_balance REAL DEFAULT 10.0
-      )
-    `);
+    createSchema();
     persistSync();
   }
   return db;
 })();
 
-// Immediate sync save (used for initial creation or graceful shutdown)
+function createSchema() {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      email TEXT,
+      password TEXT,
+      gc_balance REAL DEFAULT 10000.0,
+      sc_unplayed REAL DEFAULT 10.0,
+      sc_played REAL DEFAULT 0.0,
+      stripe_account_id TEXT,
+      kyc_status TEXT DEFAULT 'UNVERIFIED',
+      kyc_tier INTEGER DEFAULT 0,
+      kyc_inquiry_id TEXT,
+      kyc_verified_at TEXT,
+      kyc_rejection_reason TEXT,
+      last_daily_claim INTEGER DEFAULT 0,
+      daily_streak INTEGER DEFAULT 0,
+      ads_watched_today INTEGER DEFAULT 0,
+      last_ad_reset INTEGER DEFAULT 0,
+      state TEXT DEFAULT 'CA',
+      created_at INTEGER DEFAULT 0,
+      vip_tier TEXT DEFAULT 'Bronze',
+      total_wagered_gc REAL DEFAULT 0,
+      total_wagered_sc REAL DEFAULT 0,
+      rakeback_accrued_sc REAL DEFAULT 0
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS provably_fair_seeds (
+      user_id INTEGER PRIMARY KEY,
+      server_seed TEXT NOT NULL,
+      client_seed TEXT DEFAULT 'default_client_seed',
+      nonce INTEGER DEFAULT 0
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT,
+      gc_delta REAL DEFAULT 0,
+      sc_delta REAL DEFAULT 0,
+      currency TEXT,
+      amount REAL,
+      status TEXT DEFAULT 'COMPLETED',
+      metadata TEXT,
+      timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS bonus_state (
+      user_id INTEGER PRIMARY KEY,
+      last_claim_at INTEGER DEFAULT 0,
+      claim_streak INTEGER DEFAULT 0,
+      daily_claimed INTEGER DEFAULT 0,
+      challenge_date TEXT DEFAULT '',
+      challenges TEXT DEFAULT '[]',
+      rakeback_last_daily INTEGER DEFAULT 0,
+      rakeback_last_weekly INTEGER DEFAULT 0,
+      rakeback_last_monthly INTEGER DEFAULT 0,
+      rakeback_daily_pool REAL DEFAULT 0,
+      rakeback_weekly_pool REAL DEFAULT 0,
+      rakeback_monthly_pool REAL DEFAULT 0
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS telemetry (
+      user_id INTEGER PRIMARY KEY,
+      sc_wagered REAL DEFAULT 0,
+      gc_wagered REAL DEFAULT 0,
+      rounds INTEGER DEFAULT 0,
+      rounds_won INTEGER DEFAULT 0,
+      games_played TEXT DEFAULT '[]',
+      daily_loss_sc REAL DEFAULT 0,
+      daily_wager_sc REAL DEFAULT 0,
+      daily_win_sc REAL DEFAULT 0,
+      weekly_loss_sc REAL DEFAULT 0,
+      weekly_wager_sc REAL DEFAULT 0,
+      weekly_win_sc REAL DEFAULT 0,
+      monthly_loss_sc REAL DEFAULT 0,
+      monthly_wager_sc REAL DEFAULT 0,
+      monthly_win_sc REAL DEFAULT 0,
+      dice_over90 REAL DEFAULT 0,
+      crash_cashout2x INTEGER DEFAULT 0,
+      blackjack_hands INTEGER DEFAULT 0,
+      history TEXT DEFAULT '[]',
+      last_daily_reset INTEGER DEFAULT 0,
+      last_weekly_reset INTEGER DEFAULT 0,
+      last_monthly_reset INTEGER DEFAULT 0
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS jackpot_pool (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      mini REAL DEFAULT 50,
+      minor REAL DEFAULT 200,
+      major REAL DEFAULT 1000,
+      grand REAL DEFAULT 10000
+    )
+  `);
+
+  db.run(`INSERT OR IGNORE INTO jackpot_pool (id) VALUES (1)`);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp)`);
+}
+
+function ensureSchema() {
+  const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
+  const tableNames = tables.length ? tables[0].values.map(r => r[0]) : [];
+
+  if (!tableNames.includes('users')) {
+    createSchema();
+    return;
+  }
+
+  const columns = db.exec("PRAGMA table_info(users)");
+  const colNames = columns.length ? columns[0].values.map(r => r[1]) : [];
+
+  const requiredColumns = [
+    'sc_unplayed', 'sc_played', 'stripe_account_id', 'kyc_status', 'kyc_tier',
+    'kyc_inquiry_id', 'kyc_verified_at', 'kyc_rejection_reason',
+    'last_daily_claim', 'daily_streak', 'ads_watched_today', 'last_ad_reset',
+    'state', 'created_at', 'vip_tier', 'total_wagered_gc', 'total_wagered_sc', 'rakeback_accrued_sc'
+  ];
+
+  for (const col of requiredColumns) {
+    if (!colNames.includes(col)) {
+      try {
+        const colDef = {
+          sc_unplayed: 'REAL DEFAULT 10.0',
+          sc_played: 'REAL DEFAULT 0.0',
+          stripe_account_id: 'TEXT',
+          kyc_status: "TEXT DEFAULT 'UNVERIFIED'",
+          kyc_tier: 'INTEGER DEFAULT 0',
+          kyc_inquiry_id: 'TEXT',
+          kyc_verified_at: 'TEXT',
+          kyc_rejection_reason: 'TEXT',
+          last_daily_claim: 'INTEGER DEFAULT 0',
+          daily_streak: 'INTEGER DEFAULT 0',
+          ads_watched_today: 'INTEGER DEFAULT 0',
+          last_ad_reset: 'INTEGER DEFAULT 0',
+          state: "TEXT DEFAULT 'CA'",
+          created_at: 'INTEGER DEFAULT 0',
+          vip_tier: "TEXT DEFAULT 'Bronze'",
+          total_wagered_gc: 'REAL DEFAULT 0',
+          total_wagered_sc: 'REAL DEFAULT 0',
+          rakeback_accrued_sc: 'REAL DEFAULT 0'
+        }[col];
+        db.run(`ALTER TABLE users ADD COLUMN ${col} ${colDef}`);
+      } catch (e) {
+        console.error(`[Migration]: Failed to add column ${col}:`, e.message);
+      }
+    }
+  }
+
+  if (colNames.includes('sc_balance') && !colNames.includes('sc_unplayed')) {
+    db.run("UPDATE users SET sc_unplayed = sc_balance WHERE sc_unplayed IS NULL");
+  }
+
+  if (!tableNames.includes('provably_fair_seeds')) {
+    db.run(`
+      CREATE TABLE provably_fair_seeds (
+        user_id INTEGER PRIMARY KEY,
+        server_seed TEXT NOT NULL,
+        client_seed TEXT DEFAULT 'default_client_seed',
+        nonce INTEGER DEFAULT 0
+      )
+    `);
+  }
+
+  if (!tableNames.includes('transactions')) {
+    db.run(`
+      CREATE TABLE transactions (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        description TEXT,
+        gc_delta REAL DEFAULT 0,
+        sc_delta REAL DEFAULT 0,
+        currency TEXT,
+        amount REAL,
+        status TEXT DEFAULT 'COMPLETED',
+        metadata TEXT,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  }
+
+  if (!tableNames.includes('bonus_state')) {
+    db.run(`
+      CREATE TABLE bonus_state (
+        user_id INTEGER PRIMARY KEY,
+        last_claim_at INTEGER DEFAULT 0,
+        claim_streak INTEGER DEFAULT 0,
+        daily_claimed INTEGER DEFAULT 0,
+        challenge_date TEXT DEFAULT '',
+        challenges TEXT DEFAULT '[]',
+        rakeback_last_daily INTEGER DEFAULT 0,
+        rakeback_last_weekly INTEGER DEFAULT 0,
+        rakeback_last_monthly INTEGER DEFAULT 0,
+        rakeback_daily_pool REAL DEFAULT 0,
+        rakeback_weekly_pool REAL DEFAULT 0,
+        rakeback_monthly_pool REAL DEFAULT 0
+      )
+    `);
+  }
+
+  if (!tableNames.includes('telemetry')) {
+    db.run(`
+      CREATE TABLE telemetry (
+        user_id INTEGER PRIMARY KEY,
+        sc_wagered REAL DEFAULT 0,
+        gc_wagered REAL DEFAULT 0,
+        rounds INTEGER DEFAULT 0,
+        rounds_won INTEGER DEFAULT 0,
+        games_played TEXT DEFAULT '[]',
+        daily_loss_sc REAL DEFAULT 0,
+        daily_wager_sc REAL DEFAULT 0,
+        daily_win_sc REAL DEFAULT 0,
+        weekly_loss_sc REAL DEFAULT 0,
+        weekly_wager_sc REAL DEFAULT 0,
+        weekly_win_sc REAL DEFAULT 0,
+        monthly_loss_sc REAL DEFAULT 0,
+        monthly_wager_sc REAL DEFAULT 0,
+        monthly_win_sc REAL DEFAULT 0,
+        dice_over90 REAL DEFAULT 0,
+        crash_cashout2x INTEGER DEFAULT 0,
+        blackjack_hands INTEGER DEFAULT 0,
+        history TEXT DEFAULT '[]',
+        last_daily_reset INTEGER DEFAULT 0,
+        last_weekly_reset INTEGER DEFAULT 0,
+        last_monthly_reset INTEGER DEFAULT 0
+      )
+    `);
+  }
+
+  if (!tableNames.includes('jackpot_pool')) {
+    db.run(`
+      CREATE TABLE jackpot_pool (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        mini REAL DEFAULT 50,
+        minor REAL DEFAULT 200,
+        major REAL DEFAULT 1000,
+        grand REAL DEFAULT 10000
+      )
+    `);
+    db.run(`INSERT OR IGNORE INTO jackpot_pool (id) VALUES (1)`);
+  }
+}
+
 function persistSync() {
   if (!db) return;
   const data = db.export();
   fs.writeFileSync(dbPath, Buffer.from(data));
 }
 
-// Batched asynchronous persistence to protect I/O performance
 function scheduleSave() {
   if (saveScheduled) return;
   saveScheduled = true;
@@ -45,7 +293,6 @@ function scheduleSave() {
   });
 }
 
-// Ensures db is fully initialized before executing queries
 async function getDb() {
   if (!db) await initPromise;
   return db;
@@ -53,20 +300,182 @@ async function getDb() {
 
 module.exports = {
   getDb,
+  persistSync,
+
   findById: async (id) => {
     const database = await getDb();
     const stmt = database.prepare('SELECT * FROM users WHERE id = :id');
-    const result = stmt.getAsObject({ ':id': id });
+    stmt.bind({ ':id': id });
+    const result = stmt.step() ? stmt.getAsObject() : null;
     stmt.free();
-    return result.id ? result : null;
+    return result;
   },
+
+  findByEmail: async (email) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM users WHERE email = :email');
+    stmt.bind({ ':email': email });
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  findByUsername: async (username) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM users WHERE username = :username');
+    stmt.bind({ ':username': username });
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  createUser: async ({ username, email, password, gcBalance, scBalance }) => {
+    const database = await getDb();
+    const createdAt = Date.now();
+    database.run(
+      `INSERT INTO users (username, email, password, gc_balance, sc_unplayed, sc_played, created_at, last_ad_reset, last_daily_claim)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [username, email, password, gcBalance || 10000, scBalance || 10, 0, createdAt, createdAt, createdAt]
+    );
+
+    const result = database.exec('SELECT last_insert_rowid()');
+    const userId = result[0].values[0][0];
+
+    database.run(
+      'INSERT INTO provably_fair_seeds (user_id, server_seed, client_seed, nonce) VALUES (?, ?, ?, ?)',
+      [userId, require('crypto').randomBytes(32).toString('hex'), 'default_client_seed', 0]
+    );
+
+    database.run(
+      'INSERT INTO bonus_state (user_id, last_claim_at, claim_streak, rakeback_last_daily, rakeback_last_weekly, rakeback_last_monthly) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, createdAt, 0, createdAt, createdAt, createdAt]
+    );
+
+    database.run(
+      'INSERT INTO telemetry (user_id, last_daily_reset, last_weekly_reset, last_monthly_reset) VALUES (?, ?, ?, ?)',
+      [userId, createdAt, createdAt, createdAt]
+    );
+
+    scheduleSave();
+    return userId;
+  },
+
+  updateUser: async (id, fields) => {
+    const database = await getDb();
+    const keys = Object.keys(fields);
+    const values = Object.values(fields);
+    const setClause = keys.map(k => `${k} = ?`).join(', ');
+    database.run(`UPDATE users SET ${setClause} WHERE id = ?`, [...values, id]);
+    scheduleSave();
+  },
+
   updateBalances: async ({ gcDelta, scDelta, userId }) => {
     const database = await getDb();
+    if (gcDelta) {
+      database.run('UPDATE users SET gc_balance = gc_balance + ? WHERE id = ?', [gcDelta, userId]);
+    }
+    if (scDelta) {
+      database.run(
+        'UPDATE users SET sc_unplayed = MAX(0, sc_unplayed + ?) WHERE id = ?',
+        [scDelta, userId]
+      );
+    }
+    scheduleSave();
+  },
+
+  addTransaction: async ({ id, userId, type, description, gcDelta, scDelta, currency, amount, status, metadata }) => {
+    const database = await getDb();
     database.run(
-      'UPDATE users SET gc_balance = gc_balance + :gc, sc_balance = sc_balance + :sc WHERE id = :id',
-      { ':gc': gcDelta, ':sc': scDelta, ':id': userId }
+      `INSERT OR REPLACE INTO transactions (id, user_id, type, description, gc_delta, sc_delta, currency, amount, status, metadata, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, userId, type, description, gcDelta || 0, scDelta || 0, currency, amount || 0, status || 'COMPLETED', metadata ? JSON.stringify(metadata) : null, new Date().toISOString()]
     );
     scheduleSave();
   },
-  persistSync
+
+  getTransactions: async (userId, limit = 50) => {
+    const database = await getDb();
+    const stmt = database.prepare(
+      'SELECT * FROM transactions WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?'
+    );
+    stmt.bind([userId, limit]);
+    const results = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return results;
+  },
+
+  getSeedPair: async (userId) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM provably_fair_seeds WHERE user_id = ?');
+    stmt.bind([userId]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  setSeedPair: async (userId, serverSeed, clientSeed, nonce) => {
+    const database = await getDb();
+    database.run(
+      'INSERT OR REPLACE INTO provably_fair_seeds (user_id, server_seed, client_seed, nonce) VALUES (?, ?, ?, ?)',
+      [userId, serverSeed, clientSeed, nonce]
+    );
+    scheduleSave();
+  },
+
+  incrementNonce: async (userId) => {
+    const database = await getDb();
+    database.run('UPDATE provably_fair_seeds SET nonce = nonce + 1 WHERE user_id = ?', [userId]);
+    scheduleSave();
+  },
+
+  getJackpotPool: async () => {
+    const database = await getDb();
+    const result = database.exec('SELECT * FROM jackpot_pool WHERE id = 1');
+    if (result.length && result[0].values.length) {
+      const cols = result[0].columns;
+      const vals = result[0].values[0];
+      const obj = {};
+      cols.forEach((c, i) => { obj[c] = vals[i]; });
+      return obj;
+    }
+    return { mini: 50, minor: 200, major: 1000, grand: 10000 };
+  },
+
+  updateJackpotPool: async (pool) => {
+    const database = await getDb();
+    database.run(
+      'UPDATE jackpot_pool SET mini = ?, minor = ?, major = ?, grand = ? WHERE id = 1',
+      [pool.mini, pool.minor, pool.major, pool.grand]
+    );
+    scheduleSave();
+  },
+
+  getUserCount: async () => {
+    const database = await getDb();
+    const result = database.exec('SELECT COUNT(*) FROM users');
+    return result[0].values[0][0];
+  },
+
+  getAllUsers: async () => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM users');
+    const results = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return results;
+  },
+
+  getTotalWagered: async () => {
+    const database = await getDb();
+    const result = database.exec('SELECT SUM(total_wagered_gc), SUM(total_wagered_sc) FROM users');
+    return {
+      totalGC: result[0].values[0][0] || 0,
+      totalSC: result[0].values[0][1] || 0
+    };
+  }
 };

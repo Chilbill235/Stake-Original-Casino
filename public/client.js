@@ -28,6 +28,8 @@ const state = {
 };
 window.__CASINO_CURRENCY = state.currency;
 
+const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
+
 // ==========================================================================
 // 2. SYNTHESIZED WEB AUDIO SFX ENGINE
 // ==========================================================================
@@ -176,9 +178,10 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       const error = new Error(data.error || 'Server error occurred');
       error.status = res.status;
       error.data = data;
-      error.requiresKyc = data.requiresKyc;
+       error.requiresKyc = data.requiresKyc;
       error.requiresOnboarding = data.requiresOnboarding;
       error.onboardingUrl = data.onboardingUrl;
+      error.requiresAccount = data.requiresAccount;
       throw error;
     }
     return data;
@@ -188,12 +191,33 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
   }
 }
 
+async function detectGeoLocation() {
+  try {
+    const data = await fetch('/api/geo/lookup').then(r => r.json());
+    state.detectedState = data.state || 'CA';
+    if (data.restricted) {
+      const stateSelect = document.getElementById('reg-state');
+      if (stateSelect) {
+        stateSelect.value = data.state;
+        stateSelect.disabled = true;
+        stateSelect.title = 'Restricted jurisdiction';
+      }
+      state.isRestrictedJurisdiction = true;
+    }
+    state.geoDetected = true;
+  } catch (e) {
+    state.detectedState = 'CA';
+  }
+}
+
 async function initSession() {
   const ageConfirmed = localStorage.getItem('casino_age_confirmed') === 'true';
   if (!ageConfirmed) {
     document.getElementById('modal-agegate')?.classList.remove('hidden');
     return;
   }
+
+  await detectGeoLocation();
 
   let token = localStorage.getItem('casino_token');
 
@@ -218,6 +242,8 @@ async function initSession() {
   updateWalletUI();
   connectWebSocket();
   setupGlobalEventListeners();
+  initScrollReveal();
+  initHeroParticles();
   initProvablyFairUI();
   injectMobileAndNavigationDOM();
   applyEmbeddedModeRestrictions();
@@ -437,35 +463,16 @@ function mergeBalances(newBalances) {
 }
 
 function updateWalletUI() {
-  const tag = document.getElementById('curr-tag');
   const val = document.getElementById('balance-val');
-  const optionGc = document.getElementById('wallet-opt-gc');
-  const optionSc = document.getElementById('wallet-opt-sc');
-  const balanceGcMenu = document.getElementById('menu-bal-gc');
-  const balanceScMenu = document.getElementById('menu-bal-sc');
-
   const formattedGc = formatCoins(state.balances.gc || 0);
   const formattedSc = formatCoins(state.balances.sc || 0);
 
-  if (balanceGcMenu) balanceGcMenu.textContent = formattedGc;
-  if (balanceScMenu) balanceScMenu.textContent = formattedSc;
+  document.querySelectorAll('.wallet-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.currency === state.currency);
+  });
 
-  if (state.currency === 'GC') {
-    if (tag) {
-      tag.textContent = 'GC';
-      tag.className = 'currency-badge-icon';
-    }
-    if (val) val.textContent = formattedGc;
-    if (optionGc) optionGc.classList.add('active');
-    if (optionSc) optionSc.classList.remove('active');
-  } else {
-    if (tag) {
-      tag.textContent = 'SC';
-      tag.className = 'currency-badge-icon sc-active';
-    }
-    if (val) val.textContent = formattedSc;
-    if (optionSc) optionSc.classList.add('active');
-    if (optionGc) optionGc.classList.remove('active');
+  if (val) {
+    val.textContent = state.currency === 'GC' ? formattedGc : formattedSc;
   }
 
   validateBetInputBounds();
@@ -474,7 +481,7 @@ function updateWalletUI() {
 function toggleWalletDropdown(event) {
   if (state.isEmbedded) return;
   if (event) event.stopPropagation();
-  const menu = document.getElementById('wallet-dropdown-menu');
+  const menu = document.getElementById('wallet-dropdown');
   if (menu) {
     menu.classList.toggle('hidden');
     playSound('click');
@@ -482,14 +489,14 @@ function toggleWalletDropdown(event) {
 }
 
 function closeWalletDropdown() {
-  const menu = document.getElementById('wallet-dropdown-menu');
+  const menu = document.getElementById('wallet-dropdown');
   if (menu) menu.classList.add('hidden');
 }
 
 function openWalletDropdown(event) {
   if (state.isEmbedded) return;
   if (event) event.stopPropagation();
-  const menu = document.getElementById('wallet-dropdown-menu');
+  const menu = document.getElementById('wallet-dropdown');
   if (menu) {
     menu.classList.toggle('hidden');
     playSound('click');
@@ -497,14 +504,20 @@ function openWalletDropdown(event) {
 }
 
 function openBonusModalFromDropdown() {
-  closeWalletDropdown();
   openBonusModal();
+}
+
+function openStoreModalFromDropdown() {
+  openStoreModal();
+}
+
+function openRedeemModalFromDropdown() {
+  openRedeemModal();
 }
 
 function switchCurrency(currency) {
   if (state.isProcessing) return;
   if (state.activeGameState) {
-    closeWalletDropdown();
     return alert('Cannot switch currency while an active game round is in progress.');
   }
 
@@ -514,7 +527,6 @@ function switchCurrency(currency) {
   localStorage.setItem('casino_currency', currency);
   updateWalletUI();
   updateBetCurrencyTag();
-  closeWalletDropdown();
 }
 
 function validateBetInputBounds() {
@@ -523,8 +535,10 @@ function validateBetInputBounds() {
   const currentBet = parseFloat(input.value) || 0;
   const maxBalance = state.currency === 'GC' ? state.balances.gc : state.balances.sc;
 
-  if (currentBet > maxBalance) {
-    input.value = maxBalance > 0 ? maxBalance.toFixed(2) : '1.00';
+  if (maxBalance <= 0) {
+    input.value = '0.01';
+  } else if (currentBet > maxBalance) {
+    input.value = maxBalance.toFixed(2);
   }
 }
 
@@ -590,16 +604,19 @@ async function updateClientSeed() {
   const newSeed = input.value.trim();
   if (!newSeed) return alert('Client seed cannot be empty.');
 
+  const oldSeed = state.clientSeed;
   state.clientSeed = newSeed;
   localStorage.setItem('casino_client_seed', newSeed);
   playSound('click');
 
   try {
-    // Rotating the server seed alongside the client seed keeps past results verifiable
     await apiRequest('/api/provably-fair/rotate-seed', 'POST', { newClientSeed: newSeed });
     await fetchFairSeed();
     alert('Client seed updated successfully!');
   } catch (err) {
+    state.clientSeed = oldSeed;
+    localStorage.setItem('casino_client_seed', oldSeed);
+    if (input) input.value = oldSeed;
     alert(err.message || 'Failed to update client seed.');
   }
 }
@@ -666,7 +683,7 @@ function closeStoreModal() {
   const modal = document.getElementById('modal-store');
   if (modal) modal.classList.add('hidden');
 
-  const container = document.getElementById('checkout-container');
+  const container = document.getElementById('stripe-checkout-container');
   if (container) {
     container.innerHTML = '';
   }
@@ -685,8 +702,9 @@ function closeStoreModal() {
   }
 }
 
-function showPackageList() {
-  const pkgList = document.querySelector('.package-selection');
+function resetStoreModal() {
+  state.lastPackageId = null;
+  const pkgList = document.getElementById('package-selection');
   const summary = document.getElementById('package-summary');
   const checkoutSection = document.getElementById('checkout-section');
   const successSection = document.getElementById('checkout-success');
@@ -694,7 +712,200 @@ function showPackageList() {
   if (summary) summary.classList.add('hidden');
   if (checkoutSection) checkoutSection.classList.add('hidden');
   if (successSection) successSection.classList.add('hidden');
-  document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
+  document.querySelectorAll('.package-card').forEach(c => c.classList.remove('selected'));
+}
+
+function selectPackage(packageId) {
+  playSound('click');
+  state.lastPackageId = packageId;
+  document.querySelectorAll('.package-card').forEach(c => c.classList.remove('selected'));
+  const selectedCard = document.querySelector('.package-card[data-package="' + packageId + '"]');
+  if (selectedCard) selectedCard.classList.add('selected');
+  const info = PACKAGE_INFO[packageId];
+  if (!info) return;
+  document.getElementById('summary-gc').textContent = info.gc;
+  document.getElementById('summary-sc').textContent = '+' + info.sc;
+  document.getElementById('summary-total').textContent = info.price;
+  const summary = document.getElementById('package-summary');
+  if (summary) summary.classList.remove('hidden');
+}
+
+function resetPackageSelection() {
+  playSound('click');
+  resetStoreModal();
+}
+
+async function proceedToCheckout() {
+  const packageId = state.lastPackageId;
+  if (!packageId) return;
+  playSound('click');
+  const pkgList = document.getElementById('package-selection');
+  const summary = document.getElementById('package-summary');
+  const checkoutSection = document.getElementById('checkout-section');
+  if (pkgList) pkgList.classList.add('hidden');
+  if (summary) summary.classList.add('hidden');
+  if (checkoutSection) checkoutSection.classList.remove('hidden');
+
+  updateCheckoutSummary(packageId);
+  state.selectedPaymentMethod = 'card';
+  selectPaymentMethod('card');
+
+  try {
+    if (state.activeCheckoutInstance) {
+      try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+      state.activeCheckoutInstance = null;
+    }
+    await loadStripeCheckout(packageId);
+  } catch (err) {
+    console.error('[Checkout Error]:', err);
+    if (err.requiresAccount) {
+      alert(err.message || 'Guest accounts cannot purchase coins. Please register a real account first.');
+    } else {
+      showCheckoutError(err.message || 'Failed to initialize payment.');
+    }
+    document.querySelectorAll('.package-card').forEach(c => c.classList.remove('selected'));
+  }
+}
+
+function updateCheckoutSummary(packageId) {
+  const info = PACKAGE_INFO[packageId];
+  if (!info) return;
+  const nameEl = document.getElementById('checkout-package-name');
+  const priceEl = document.getElementById('checkout-package-price');
+  const gcEl = document.getElementById('checkout-gc');
+  const scEl = document.getElementById('checkout-sc');
+  const totalEl = document.getElementById('checkout-total');
+  if (nameEl) nameEl.textContent = info.gc + ' GC + ' + info.sc + ' Free SC';
+  if (priceEl) priceEl.textContent = info.price;
+  if (gcEl) gcEl.textContent = info.gc;
+  if (scEl) scEl.textContent = '+' + info.sc;
+  if (totalEl) totalEl.textContent = info.price;
+}
+
+async function loadStripeCheckout(packageId) {
+  const container = document.getElementById('stripe-checkout-container');
+  if (!container) return;
+  container.innerHTML = '<div class="checkout-loading"><div class="checkout-spinner"></div><p class="checkout-loading-text">Initializing secure checkout...</p><p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p></div>';
+
+  const data = await apiRequest('/api/user/buy-coins', 'POST', { packageId });
+  if (!data.publishableKey || !data.clientSecret) {
+    throw new Error(data.error || 'Invalid session configuration returned from server.');
+  }
+  const StripeSDK = await loadStripeSdk();
+  const stripe = StripeSDK(data.publishableKey);
+  const checkoutEl = document.createElement('div');
+  checkoutEl.id = 'stripe-checkout-root';
+  container.innerHTML = '';
+  container.appendChild(checkoutEl);
+  state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
+    clientSecret: data.clientSecret,
+    onComplete: (result) => {
+      playSound('win');
+      const pkg = PACKAGE_INFO[packageId] || { gc: '0', sc: '0' };
+      showCheckoutSuccess(pkg.gc, pkg.sc);
+    }
+  });
+  state.activeCheckoutInstance.mount(checkoutEl);
+}
+
+function selectPaymentMethod(method) {
+  state.selectedPaymentMethod = method;
+  document.querySelectorAll('.payment-method-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.method === method);
+  });
+  document.querySelectorAll('.payment-panel').forEach(panel => panel.classList.add('hidden'));
+  const cardPanel = document.getElementById('payment-card');
+  const cryptoPanel = document.getElementById('payment-crypto');
+  if (method === 'card' && cardPanel) cardPanel.classList.remove('hidden');
+  if (method === 'crypto' && cryptoPanel) cryptoPanel.classList.remove('hidden');
+}
+
+function selectCrypto(currency) {
+  document.querySelectorAll('.crypto-btn').forEach(btn => btn.classList.remove('active'));
+  const activeBtn = document.querySelector('.crypto-btn[onclick="selectCrypto(\'' + currency + '\')"]');
+  if (activeBtn) activeBtn.classList.add('active');
+  const details = document.getElementById('crypto-payment-details');
+  if (!details) return;
+  details.classList.remove('hidden');
+
+  const addresses = {
+    BTC: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+    ETH: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+    USDT: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+    LTC: 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976'
+  };
+  const amounts = {
+    BTC: '0.00001 BTC',
+    ETH: '0.0005 ETH',
+    USDT: '10.00 USDT',
+    LTC: '0.05 LTC'
+  };
+  const addrEl = document.getElementById('crypto-address');
+  const amtEl = document.getElementById('crypto-amount');
+  if (addrEl) addrEl.textContent = addresses[currency] || '';
+  if (amtEl) amtEl.textContent = amounts[currency] || '';
+}
+
+function copyCryptoAddress() {
+  const addr = document.getElementById('crypto-address');
+  if (!addr || !addr.textContent) return;
+  navigator.clipboard.writeText(addr.textContent).then(() => {
+    playSound('click');
+    alert('Address copied to clipboard!');
+  }).catch(() => {
+    alert('Address: ' + addr.textContent);
+  });
+}
+
+function copyCryptoAmount() {
+  const amt = document.getElementById('crypto-amount');
+  if (!amt || !amt.textContent) return;
+  navigator.clipboard.writeText(amt.textContent).then(() => {
+    playSound('click');
+    alert('Amount copied to clipboard!');
+  }).catch(() => {
+    alert('Amount: ' + amt.textContent);
+  });
+}
+
+async function initiateCryptoPayment() {
+  const packageId = state.lastPackageId;
+  if (!packageId) return;
+  const currency = document.querySelector('.crypto-btn.active .crypto-symbol');
+  const cryptoType = currency ? currency.textContent : 'BTC';
+  playSound('click');
+  try {
+    const res = await apiRequest('/api/user/crypto-payment/initiate', 'POST', {
+      packageId,
+      currency: cryptoType
+    });
+    if (res.success) {
+      alert('Payment initiated! Please send ' + res.amount + ' to ' + res.address + '. Your coins will be credited after confirmation.');
+      showCheckoutSuccess(res.gc, res.sc);
+    } else {
+      throw new Error(res.error || 'Failed to initiate crypto payment.');
+    }
+  } catch (err) {
+    alert('Crypto payment error: ' + err.message);
+  }
+}
+
+function backToPackages() {
+  playSound('click');
+  const pkgList = document.getElementById('package-selection');
+  const summary = document.getElementById('package-summary');
+  const checkoutSection = document.getElementById('checkout-section');
+  if (checkoutSection) checkoutSection.classList.add('hidden');
+  if (pkgList) pkgList.classList.remove('hidden');
+  if (state.lastPackageId && summary) summary.classList.remove('hidden');
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
+}
+
+function showPackageList() {
+  resetStoreModal();
 }
 
 function showCheckoutSection() {
@@ -707,13 +918,11 @@ function showCheckoutSection() {
 
 function showCheckoutLoading() {
   const checkoutSection = document.getElementById('checkout-section');
-  const container = document.getElementById('checkout-container');
+  const container = document.getElementById('stripe-checkout-container');
   if (!checkoutSection || !container) return;
   checkoutSection.classList.remove('hidden');
-  checkoutSection.classList.add('checkout-loading');
-
   container.innerHTML =
-    '<div style="text-align:center;">' +
+    '<div class="checkout-loading">' +
     '<div class="checkout-spinner"></div>' +
     '<p class="checkout-loading-text">Initializing secure checkout...</p>' +
     '<p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p>' +
@@ -721,11 +930,8 @@ function showCheckoutLoading() {
 }
 
 function showCheckoutError(message) {
-  const checkoutSection = document.getElementById('checkout-section');
-  const container = document.getElementById('checkout-container');
-  if (!checkoutSection || !container) return;
-  checkoutSection.classList.remove('checkout-loading');
-
+  const container = document.getElementById('stripe-checkout-container');
+  if (!container) return;
   container.innerHTML =
     '<div style="text-align:center; padding:40px 20px;">' +
     '<div style="width:64px; height:64px; border:2px solid var(--accent-red); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; color:var(--accent-red); font-size:1.8rem;">!</div>' +
@@ -785,10 +991,10 @@ async function loadStripeSdk() {
 }
 
 const PACKAGE_INFO = {
-  pack_10:  { gc: '15,000', sc: '15.00', price: '$10.00' },
-  pack_20:  { gc: '25,000', sc: '25.00', price: '$20.00' },
-  pack_50:  { gc: '55,000', sc: '55.00', price: '$50.00' },
-  pack_100: { gc: '100,000', sc: '105.00', price: '$100.00' }
+  pack_10:  { gc: '15,000', sc: '15.00', price: '$9.99' },
+  pack_20:  { gc: '25,000', sc: '25.00', price: '$19.99' },
+  pack_50:  { gc: '55,000', sc: '55.00', price: '$49.99' },
+  pack_100: { gc: '100,000', sc: '105.00', price: '$99.99' }
 };
 
 function updatePackageSummary(packageId) {
@@ -810,63 +1016,18 @@ function showCheckoutBackButton() {
   btn.style.cssText = 'position:absolute; top:16px; left:16px; z-index:10;';
   btn.innerHTML = '← Back to Packages';
   btn.onclick = showPackageList;
-  document.getElementById('checkout-container').appendChild(btn);
+  const container = document.getElementById('stripe-checkout-container');
+  if (container) container.appendChild(btn);
 }
 
 async function buyCoinPackage(packageId) {
   if (state.isEmbedded) return;
-  state.lastPackageId = packageId;
-  try {
-    playSound('click');
-    openStoreModal();
-
-    const container = document.getElementById('checkout-container');
-    if (!container) return;
-
-    updatePackageSummary(packageId);
-    showCheckoutBackButton();
-    showCheckoutSection();
-    showCheckoutLoading();
-
-    if (state.activeCheckoutInstance) {
-      try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
-      state.activeCheckoutInstance = null;
-    }
-
-    const data = await apiRequest('/api/user/buy-coins', 'POST', { packageId });
-
-    if (!data.publishableKey || !data.clientSecret) {
-      throw new Error(data.error || 'Invalid session configuration returned from server.');
-    }
-
-    const StripeSDK = await loadStripeSdk();
-    const stripe = StripeSDK(data.publishableKey);
-
-    const checkoutEl = document.createElement('div');
-    checkoutEl.id = 'stripe-checkout-root';
-    checkoutEl.style.marginTop = '20px';
-    container.innerHTML = '';
-    container.appendChild(checkoutEl);
-
-    state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
-      clientSecret: data.clientSecret,
-      onComplete: (result) => {
-        playSound('win');
-        const pkg = PACKAGE_INFO[packageId] || { gc: '0', sc: '0' };
-        showCheckoutSuccess(pkg.gc, pkg.sc);
-      }
-    });
-
-    state.activeCheckoutInstance.mount(checkoutEl);
-
-    const checkoutSection = document.getElementById('checkout-section');
-    if (checkoutSection) checkoutSection.classList.remove('checkout-loading');
-
-  } catch (err) {
-    console.error('[Embedded Payment Error]:', err);
-    showCheckoutError(err.message || 'Failed to initialize in-page payment.');
-    document.querySelectorAll('.package-card').forEach(c => c.style.opacity = '');
+  if (state.profile && (state.profile.isGuest || (state.profile.email && state.profile.email.endsWith('@guest.casino')))) {
+    alert('Guest accounts cannot purchase coins. Please register a real account first.');
+    return;
   }
+  openStoreModal();
+  selectPackage(packageId);
 }
 
 async function retryCheckout() {
@@ -879,17 +1040,40 @@ async function retryCheckout() {
 
 function openRedeemModal() {
   if (state.isEmbedded) return;
+  if (state.profile?.isGuest || (state.profile?.email && state.profile.email.endsWith('@guest.casino'))) {
+    alert('Guest accounts cannot redeem Sweeps Coins. Please register a real account first.');
+    return;
+  }
   if (state.profile?.kyc?.status !== 'VERIFIED') {
     alert('Identity verification (KYC) is required to redeem Sweeps Coins for cash. Please complete verification in your Profile first.');
     return;
   }
+  if ((state.balances.sc_unplayed || 0) < 50) {
+    alert('You need at least 50.00 SC (redeemable) to request a withdrawal. Keep playing!');
+    return;
+  }
   playSound('click');
+
+  const availBal = document.getElementById('redeem-available-bal');
+  const wageredBal = document.getElementById('redeem-wagered-bal');
+  if (availBal) availBal.textContent = formatCoins(state.balances.sc_unplayed || 0) + ' SC';
+  if (wageredBal) wageredBal.textContent = formatCoins(state.balances.sc_played || 0) + ' SC';
+
+  updateRedeemPreview();
   document.getElementById('modal-redeem')?.classList.remove('hidden');
 }
 
-function closeRedeemModal() { 
-  playSound('click'); 
-  document.getElementById('modal-redeem')?.classList.add('hidden'); 
+function closeRedeemModal() {
+  playSound('click');
+  document.getElementById('modal-redeem')?.classList.add('hidden');
+}
+
+function updateRedeemPreview() {
+  const input = document.getElementById('redeem-input');
+  const usdValue = document.getElementById('redeem-usd-value');
+  if (!input || !usdValue) return;
+  const amount = parseFloat(input.value) || 0;
+  usdValue.textContent = '$' + amount.toFixed(2) + ' USD';
 }
 
 async function submitRedeem() {
@@ -899,6 +1083,10 @@ async function submitRedeem() {
 
   if (isNaN(amount) || amount < 50) {
     return alert('Minimum redemption limit is 50.00 Sweeps Coins (SC).');
+  }
+
+  if (amount > (state.balances.sc_unplayed || 0)) {
+    return alert(`Insufficient unplayed SC balance. You have ${formatCoins(state.balances.sc_unplayed || 0)} SC available for redemption.`);
   }
 
   playSound('click');
@@ -932,6 +1120,7 @@ async function submitRedeem() {
 
 function showLobby() {
   playSound('click');
+  history.pushState(null, '', '/');
   document.getElementById('view-lobby')?.classList.remove('hidden');
   document.getElementById('view-game')?.classList.add('hidden');
   document.getElementById('view-account')?.classList.add('hidden');
@@ -941,6 +1130,9 @@ function showLobby() {
   state.currentGame = null;
   state.activeGameState = null;
   state.isProcessing = false;
+  state.crashIntervalHandle = 0;
+  state.crashCashOutEarly = false;
+  state.crashAutoTarget = null;
   clearGameControls();
 }
 
@@ -951,14 +1143,14 @@ function clearGameControls() {
 
 function filterLobbyGames(category) {
   playSound('click');
-  document.querySelectorAll('.cat-tab-btn').forEach(btn => {
+  document.querySelectorAll('.pill-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.category === category);
   });
 
   const cards = document.querySelectorAll('.game-card');
   cards.forEach(card => {
     if (category === 'ALL' || card.dataset.category === category) {
-      card.style.display = 'flex';
+      card.style.display = '';
     } else {
       card.style.display = 'none';
     }
@@ -1304,7 +1496,7 @@ async function revealMineTile(tileIndex) {
         if (tile) { tile.style.background = '#00e701'; tile.style.color = '#000'; tile.textContent = '💎'; }
       }
 
-      if (data.cashedOut || data.autoCashout) {
+      if (data.cashedOut || data.autoCashout || state.crashCashOutEarly) {
         if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
         if (window.GameRenderers && window.GameRenderers.renderMinesWin) {
           window.GameRenderers.renderMinesWin(data);
@@ -1765,8 +1957,7 @@ async function buySlotsBonus() {
   try {
     const data = await apiRequest('/api/play/slots/buy-bonus', 'POST', {
       currency: state.currency,
-      betAmount,
-      bonusCost
+      betAmount
     });
     state.balances = mergeBalances(data.balances);
     updateWalletUI();
@@ -2480,7 +2671,7 @@ function closeAccountPage() {
   handleRouteChange();
 }
 
-async function refreshAccountPage() {
+async function refreshAccountPage(page = 'overview') {
   const container = document.getElementById('view-account');
   if (!container) return;
   try {
@@ -2491,10 +2682,20 @@ async function refreshAccountPage() {
   } catch (err) {
     console.warn('[Account] Could not refresh profile:', err.message);
   }
-  renderAccountPage(container);
+  renderAccountPage(page);
 }
 
-function renderAccountPage(container) {
+function navigateToAccount(page) {
+  playSound('click');
+  document.querySelectorAll('.account-nav-link').forEach(link => {
+    link.classList.toggle('active', link.dataset.accountPage === page);
+  });
+  renderAccountPage(page);
+}
+
+function renderAccountPage(page = 'overview') {
+  const content = document.getElementById('account-content');
+  if (!content) return;
   const p = state.profile || {};
   const kyc = p.kyc || { status: 'UNVERIFIED', tier: 0 };
   const kycStatusText = {
@@ -2509,7 +2710,6 @@ function renderAccountPage(container) {
     VERIFIED: 'kyc-badge-verified',
     REJECTED: 'kyc-badge-rejected'
   }[kyc.status] || 'kyc-badge-unverified';
-
   const gc = formatCoins(state.balances.gc || 0);
   const sc = formatCoins(state.balances.sc || 0);
   const vip = p.vip || {};
@@ -2518,19 +2718,22 @@ function renderAccountPage(container) {
   const totalWageredSC = formatCoins(vip.totalWageredSC || 0);
   const memberSince = p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'N/A';
 
-  container.innerHTML = `
-    <div class="page-container account-page">
+  const sidebarName = document.getElementById('account-sidebar-name');
+  const sidebarTier = document.getElementById('account-sidebar-tier');
+  if (sidebarName) sidebarName.textContent = p.username || 'Guest';
+  if (sidebarTier) sidebarTier.textContent = (vipText || 'Bronze') + ' VIP';
+
+  let html = '';
+
+  if (page === 'overview') {
+    html = `
       <div class="account-hero">
         <div class="account-avatar">👤</div>
         <div class="account-hero-info">
           <h1 class="account-username">${escapeHTML(p.username || 'Guest')}</h1>
           <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
         </div>
-        <button class="btn-back" onclick="showLobby()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-        </button>
       </div>
-
       <div class="account-stats-row">
         <div class="stat-card">
           <div class="stat-icon">🪙</div>
@@ -2561,7 +2764,6 @@ function renderAccountPage(container) {
           </div>
         </div>
       </div>
-
       <div class="account-details-grid">
         <div class="account-card profile-card">
           <h3 class="account-card-title">Profile Information</h3>
@@ -2584,7 +2786,6 @@ function renderAccountPage(container) {
             </div>
           </div>
         </div>
-
         <div class="account-card balances-card">
           <h3 class="account-card-title">Balances</h3>
           <div class="balance-cards">
@@ -2608,15 +2809,14 @@ function renderAccountPage(container) {
           <div class="balance-breakdown">
             <div class="breakdown-item">
               <span class="breakdown-label">Unplayed SC</span>
-               <span class="breakdown-value">${formatCoins(state.balances.sc_unplayed || 0)}</span>
+              <span class="breakdown-value">${formatCoins(state.balances.sc_unplayed || 0)}</span>
             </div>
             <div class="breakdown-item">
               <span class="breakdown-label">Redeemable SC</span>
-               <span class="breakdown-value">${formatCoins(state.balances.sc_played || 0)}</span>
+              <span class="breakdown-value">${formatCoins(state.balances.sc_played || 0)}</span>
             </div>
           </div>
         </div>
-
         <div class="account-card kyc-card">
           <h3 class="account-card-title">Identity Verification</h3>
           <div class="kyc-status-badge ${kycClass}">${escapeHTML(kycStatusText)}</div>
@@ -2632,7 +2832,6 @@ function renderAccountPage(container) {
             ${kyc.status === 'UNVERIFIED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Verify Identity</button>' : ''}
           </div>
         </div>
-
         <div class="account-card rewards-card">
           <h3 class="account-card-title">Rewards & Bonuses</h3>
           <div class="rewards-grid">
@@ -2655,7 +2854,6 @@ function renderAccountPage(container) {
             <button class="btn-reward" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Rakeback</button>
           </div>
         </div>
-
         <div class="account-card security-card">
           <h3 class="account-card-title">Account Security</h3>
           <div class="security-actions">
@@ -2663,8 +2861,164 @@ function renderAccountPage(container) {
             <button class="btn-security logout" onclick="logout()">🚪 Logout</button>
           </div>
         </div>
+      </div>`;
+  } else if (page === 'profile') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">👤</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Profile</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+        </div>
       </div>
-    </div>`;
+      <div class="account-details-grid">
+        <div class="account-card profile-card">
+          <h3 class="account-card-title">Profile Information</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item">
+              <span class="detail-label">Username</span>
+              <span class="detail-value">${escapeHTML(p.username || 'Guest')}</span>
+            </div>
+            <div class="account-detail-item">
+              <span class="detail-label">Email</span>
+              <span class="detail-value">${escapeHTML(p.email || 'guest@casino')}</span>
+            </div>
+            <div class="account-detail-item">
+              <span class="detail-label">Location</span>
+              <span class="detail-value">${escapeHTML(p.state || 'CA')}</span>
+            </div>
+            <div class="account-detail-item">
+              <span class="detail-label">Member Since</span>
+              <span class="detail-value">${memberSince}</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  } else if (page === 'wallet') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">💰</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Wallet</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card balances-card">
+          <h3 class="account-card-title">Balances</h3>
+          <div class="balance-cards">
+            <div class="balance-card gc">
+              <div class="balance-card-header">
+                <span class="balance-icon">🪙</span>
+                <span class="balance-type">Gold Coins</span>
+              </div>
+              <div class="balance-amount">${gc}</div>
+              <div class="balance-sub">GC</div>
+            </div>
+            <div class="balance-card sc">
+              <div class="balance-card-header">
+                <span class="balance-icon">💎</span>
+                <span class="balance-type">Sweeps Coins</span>
+              </div>
+              <div class="balance-amount">${sc}</div>
+              <div class="balance-sub">Total SC</div>
+            </div>
+          </div>
+          <div class="balance-breakdown">
+            <div class="breakdown-item">
+              <span class="breakdown-label">Unplayed SC</span>
+              <span class="breakdown-value">${formatCoins(state.balances.sc_unplayed || 0)}</span>
+            </div>
+            <div class="breakdown-item">
+              <span class="breakdown-label">Redeemable SC</span>
+              <span class="breakdown-value">${formatCoins(state.balances.sc_played || 0)}</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  } else if (page === 'kyc') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">🛡️</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Identity Verification</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card kyc-card">
+          <h3 class="account-card-title">Verification Status</h3>
+          <div class="kyc-status-badge ${kycClass}">${escapeHTML(kycStatusText)}</div>
+          ${kyc.rejectionReason ? `<div class="kyc-rejection">${escapeHTML(kyc.rejectionReason)}</div>` : ''}
+          <div class="kyc-tier-info">
+            <span>Verification Tier</span>
+            <span class="tier-value">Tier ${kyc.tier} of 2</span>
+          </div>
+          <div class="kyc-actions">
+            ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
+            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification in Progress</button>' : ''}
+            ${kyc.status === 'REJECTED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Retry Verification</button>' : ''}
+            ${kyc.status === 'UNVERIFIED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Verify Identity</button>' : ''}
+          </div>
+        </div>
+      </div>`;
+  } else if (page === 'transactions') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">📋</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Transaction History</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card">
+          <h3 class="account-card-title">Recent Transactions</h3>
+          <div id="account-transactions-list">
+            <div class="account-placeholder">Loading transactions...</div>
+          </div>
+        </div>
+      </div>`;
+  } else if (page === 'security') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">🔒</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Account Security</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card security-card">
+          <h3 class="account-card-title">Security Actions</h3>
+          <div class="security-actions">
+            <button class="btn-security" onclick="openForgotPasswordModal()">🔑 Reset Password</button>
+            <button class="btn-security logout" onclick="logout()">🚪 Logout</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  content.innerHTML = html;
+  if (page === 'transactions') {
+    loadAccountTransactions();
+  }
+}
+
+async function loadAccountTransactions() {
+  const list = document.getElementById('account-transactions-list');
+  if (!list) return;
+  try {
+    const data = await apiRequest('/api/user/transactions?limit=20');
+    const txs = data.transactions || [];
+    if (txs.length === 0) {
+      list.innerHTML = '<div class="account-placeholder">No transactions found.</div>';
+      return;
+    }
+    list.innerHTML = '<div class="tx-list">' + txs.map(tx => '<div class="tx-item"><span class="tx-type">' + escapeHTML(tx.type) + '</span><span class="tx-amount">' + formatCoins(tx.amount) + ' ' + escapeHTML(tx.currency) + '</span><span class="tx-date">' + new Date(tx.timestamp).toLocaleString() + '</span></div>').join('') + '</div>';
+  } catch (err) {
+    list.innerHTML = '<div class="account-placeholder">Failed to load transactions.</div>';
+  }
 }
 
 function openProvablyFairModal() {
@@ -2712,22 +3066,47 @@ function injectMobileAndNavigationDOM() {
             <button type="button" onclick="continueAsGuest()" class="btn-secondary-action btn-full" style="font-size:0.8rem;">Continue as Guest</button>
           </div>
         </div>
-        <div id="auth-form-register" class="auth-form-section hidden">
-          <div class="form-group">
-            <label class="form-label">Username</label>
-            <input type="text" id="reg-username" class="form-input" placeholder="Choose a username">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Email</label>
-            <input type="email" id="reg-email" class="form-input" placeholder="you@example.com">
-          </div>
-          <div class="form-group">
+         <div id="auth-form-register" class="auth-form-section hidden">
+           <div class="form-group">
+             <label class="form-label">Username</label>
+             <input type="text" id="reg-username" class="form-input" placeholder="Choose a username">
+           </div>
+           <div class="form-group">
+             <label class="form-label">Email</label>
+             <input type="email" id="reg-email" class="form-input" placeholder="you@example.com">
+           </div>
+         <div class="form-group">
             <label class="form-label">Password</label>
             <input type="password" id="reg-password" class="form-input" placeholder="Min 8 characters">
           </div>
           <div class="form-group">
             <label class="form-label">Birth Date</label>
             <input type="date" id="reg-birthdate" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label">State</label>
+            <select id="reg-state" class="form-input">
+              <option value="CA">California</option>
+              <option value="TX">Texas</option>
+              <option value="FL">Florida</option>
+              <option value="NY">New York</option>
+              <option value="CO">Colorado</option>
+              <option value="NC">North Carolina</option>
+              <option value="OH">Ohio</option>
+              <option value="PA">Pennsylvania</option>
+              <option value="IL">Illinois</option>
+              <option value="AZ">Arizona</option>
+              <option value="MN">Minnesota</option>
+              <option value="IA">Iowa</option>
+              <option value="VA">Virginia</option>
+              <option value="LA">Louisiana</option>
+              <option value="MI" disabled>Michigan (Restricted)</option>
+              <option value="NV" disabled>Nevada (Restricted)</option>
+              <option value="WA" disabled>Washington (Restricted)</option>
+              <option value="ID" disabled>Idaho (Restricted)</option>
+              <option value="KY" disabled>Kentucky (Restricted)</option>
+              <option value="GA" disabled>Georgia (Restricted)</option>
+            </select>
           </div>
           <div id="auth-register-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
           <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
@@ -3110,20 +3489,6 @@ function confirmAge() {
   openAuthModal();
 }
 
-function closeWalletDropdown() {
-  document.getElementById('wallet-dropdown-menu')?.classList.add('hidden');
-}
-
-function openStoreModalFromDropdown() {
-  closeWalletDropdown();
-  openStoreModal();
-}
-
-function openRedeemModalFromDropdown() {
-  closeWalletDropdown();
-  openRedeemModal();
-}
-
 function openAuthModal() {
   const loginErr = document.getElementById('auth-login-error');
   if (loginErr) loginErr.textContent = '';
@@ -3177,9 +3542,9 @@ async function submitLogin() {
   }
 
   try {
-    const data = await apiRequest('/api/auth/login', 'POST', { email, password });
+     const data = await apiRequest('/api/auth/login', 'POST', { email, password });
     localStorage.setItem('casino_token', data.token);
-    state.profile = data.user;
+    state.profile = data.user || { id: null, username: '', email, isGuest: false };
     state.balances = mergeBalances(data.balances);
     localStorage.setItem('casino_username', data.user?.username || '');
     updateUserProfileBadge();
@@ -3195,6 +3560,7 @@ async function submitRegister() {
   const email = document.getElementById('reg-email')?.value.trim();
   const password = document.getElementById('reg-password')?.value;
   const birthDate = document.getElementById('reg-birthdate')?.value;
+  const userState = document.getElementById('reg-state')?.value || state.detectedState || 'CA';
   const errorEl = document.getElementById('auth-register-error');
 
   if (!username || !email || !password) {
@@ -3212,15 +3578,20 @@ async function submitRegister() {
 
   const birth = new Date(birthDate);
   const ageMs = Date.now() - birth.getTime();
-  if (ageMs < 18 * 365 * 24 * 60 * 60 * 1000 || birth > new Date()) {
+  if (ageMs < 18 * 365.25 * 24 * 60 * 60 * 1000 || birth > new Date()) {
     if (errorEl) errorEl.textContent = 'You must be at least 18 years old to register.';
     return;
   }
 
+  if (RESTRICTED_STATES.includes(userState)) {
+    if (errorEl) errorEl.textContent = `Online gaming is not available in ${userState}.`;
+    return;
+  }
+
   try {
-    const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate });
+    const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate, state: userState });
     localStorage.setItem('casino_token', data.token);
-    state.profile = data.user;
+    state.profile = data.user || { id: null, username, email, isGuest: false };
     state.balances = mergeBalances(data.balances);
     localStorage.setItem('casino_username', data.user?.username || '');
     updateUserProfileBadge();
@@ -3232,6 +3603,9 @@ async function submitRegister() {
 }
 
 async function continueAsGuest() {
+  if (state.profile && state.profile.isGuest) {
+    return;
+  }
   try {
     const data = await apiRequest('/api/auth/guest', 'POST');
     if (data.token) {
@@ -3251,6 +3625,9 @@ async function continueAsGuest() {
 
 async function initSessionFromToken() {
   try {
+    if (!state.geoDetected) {
+      await detectGeoLocation();
+    }
     await fetchFairSeed();
     const data = await apiRequest('/api/user/me');
     if (data.balances) state.balances = mergeBalances(data.balances);
@@ -3349,6 +3726,53 @@ window.addEventListener('DOMContentLoaded', initSession);
 ['click', 'touchstart', 'keydown'].forEach(evt => {
   window.addEventListener(evt, initAudioContext, { once: true });
 });
+
+// ==========================================================================
+// 13. SCROLL REVEAL & HERO PARTICLES
+// ==========================================================================
+
+function initScrollReveal() {
+  const observerOptions = {
+    root: null,
+    rootMargin: '0px 0px -80px 0px',
+    threshold: 0.1
+  };
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('active');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, observerOptions);
+
+  document.querySelectorAll('.game-card, .featured-card, .section-header, .live-stats-bar').forEach(el => {
+    el.classList.add('reveal');
+    observer.observe(el);
+  });
+}
+
+function initHeroParticles() {
+  const container = document.getElementById('hero-particles');
+  if (!container) return;
+
+  const particleCount = 20;
+  const colors = ['#00ff41', '#ffd700', '#00b4ff', '#a855f7', '#ff8c00'];
+
+  for (let i = 0; i < particleCount; i++) {
+    const particle = document.createElement('div');
+    particle.className = 'hero-particle';
+    particle.style.left = Math.random() * 100 + '%';
+    particle.style.top = Math.random() * 100 + '%';
+    particle.style.background = colors[Math.floor(Math.random() * colors.length)];
+    particle.style.animationDelay = Math.random() * 6 + 's';
+    particle.style.animationDuration = (4 + Math.random() * 4) + 's';
+    particle.style.width = (2 + Math.random() * 4) + 'px';
+    particle.style.height = particle.style.width;
+    container.appendChild(particle);
+  }
+}
 
 function handleRouteChange() {
   const path = window.location.pathname;

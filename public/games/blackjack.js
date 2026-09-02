@@ -9,7 +9,7 @@ GameRenderers.cardHTML = function(card, hidden, small) {
     return '<div style="width:' + (small ? '32px' : '44px') + ';height:' + (small ? '44px' : '60px') + ';background:linear-gradient(135deg,#1a2c38,#243542);border:2px solid #3d5a80;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;">🂠</div>';
   }
   
-  const rank = card.rank || 'A';
+  const rank = card.value || 'A';
   const suit = card.suit || '♠';
   const color = suitColors[suit] || '#fff';
   const size = small ? '1rem' : '1.4rem';
@@ -46,10 +46,11 @@ GameRenderers.blackjackHandScore = function(hand) {
   let score = 0;
   let aces = 0;
   for (const c of hand) {
-    const r = c.rank;
+    const r = c.value;
     if (r === 'A') { aces++; score += 11; }
     else if (['K','Q','J'].includes(r)) score += 10;
-    else score += parseInt(r) || 10;
+    else if (r === '10') score += 10;
+    else score += parseInt(r) || 0;
   }
   while (score > 21 && aces > 0) { score -= 10; aces--; }
   return score;

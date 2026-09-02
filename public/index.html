@@ -25,64 +25,50 @@
 
     <div class="navbar-center">
       <div class="wallet-toolbar">
-        <div class="wallet-selector-container" id="wallet-selector">
-          <div class="wallet-selector" onclick="toggleWalletDropdown(event)">
-            <div class="currency-badge-icon" id="curr-tag">GC</div>
-            <div class="wallet-balance-wrapper">
-              <span class="balance-label">BALANCE</span>
-              <span id="balance-val" class="balance-amount">10,000.00</span>
-            </div>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--text-secondary)"><path d="M7 10l5 5 5-5z"/></svg>
+        <!-- Wallet Selector with integrated balance -->
+        <div class="wallet-selector" id="wallet-selector">
+          <div class="wallet-tabs">
+            <button class="wallet-tab active" data-currency="GC" onclick="switchCurrency('GC')">
+              <span class="wallet-tab-icon">🪙</span>
+              <span class="wallet-tab-label">GC</span>
+            </button>
+            <button class="wallet-tab" data-currency="SC" onclick="switchCurrency('SC')">
+              <span class="wallet-tab-icon">💎</span>
+              <span class="wallet-tab-label">SC</span>
+            </button>
           </div>
+          <div class="wallet-balance">
+            <span class="wallet-balance-value" id="balance-val">10,000.00</span>
+          </div>
+          <button class="wallet-dropdown-toggle" onclick="toggleWalletDropdown(event)" aria-label="Wallet menu">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
 
-          <div class="wallet-dropdown-menu hidden" id="wallet-dropdown-menu">
-            <div class="wallet-option" id="wallet-opt-gc" onclick="switchCurrency('GC')">
-              <span class="currency-badge-icon badge-gc">GC</span>
-              <div class="wallet-option-info">
-                <span class="opt-name">Gold Coins</span>
-                <span class="opt-val" id="menu-bal-gc">10,000.00</span>
+          <!-- Wallet Dropdown Menu -->
+          <div class="wallet-dropdown hidden" id="wallet-dropdown">
+            <button class="wallet-dropdown-item" onclick="openStoreModalFromDropdown()">
+              <span class="wallet-dropdown-icon">🪙</span>
+              <div class="wallet-dropdown-info">
+                <span class="wallet-dropdown-name">Deposit</span>
+                <span class="wallet-dropdown-desc">Buy Gold Coins</span>
               </div>
-            </div>
-            <div class="wallet-option" id="wallet-opt-sc" onclick="switchCurrency('SC')">
-              <span class="currency-badge-icon badge-sc">SC</span>
-              <div class="wallet-option-info">
-                <span class="opt-name">Sweeps Coins</span>
-                <span class="opt-val" id="menu-bal-sc">10.00</span>
+            </button>
+            <button class="wallet-dropdown-item" onclick="openRedeemModalFromDropdown()">
+              <span class="wallet-dropdown-icon">💸</span>
+              <div class="wallet-dropdown-info">
+                <span class="wallet-dropdown-name">Withdraw</span>
+                <span class="wallet-dropdown-desc">Redeem Sweeps Coins</span>
               </div>
-            </div>
-            <div class="wallet-dropdown-divider"></div>
-            <div class="wallet-option wallet-opt-deposit" onclick="openStoreModalFromDropdown()">
-              <span class="wallet-opt-icon">🪙</span>
-              <div class="wallet-option-info">
-                <span class="opt-name">Buy Coins</span>
-                <span class="opt-val" style="color:var(--accent-gold);">Deposit</span>
+            </button>
+            <button class="wallet-dropdown-item" onclick="openBonusModalFromDropdown()">
+              <span class="wallet-dropdown-icon">🎁</span>
+              <div class="wallet-dropdown-info">
+                <span class="wallet-dropdown-name">Daily Bonus</span>
+                <span class="wallet-dropdown-desc">Claim free coins</span>
               </div>
-            </div>
-             <div class="wallet-option wallet-opt-redeem" onclick="openRedeemModalFromDropdown()">
-               <span class="wallet-opt-icon">💸</span>
-               <div class="wallet-option-info">
-                 <span class="opt-name">Redeem SC</span>
-                 <span class="opt-val" style="color:var(--accent-green);">Withdraw</span>
-               </div>
-             </div>
-              <div class="wallet-option wallet-opt-bonuses" onclick="openBonusModal()">
-                <span class="wallet-opt-icon">🎁</span>
-                <div class="wallet-option-info">
-                  <span class="opt-name">Bonuses</span>
-                  <span class="opt-val" style="color:var(--accent-purple);">Daily + Challenges</span>
-                </div>
-              </div>
+            </button>
           </div>
         </div>
-
-        <button class="toolbar-deposit" onclick="openStoreModal()">
-          <span class="btn-icon">🪙</span>
-          <span class="btn-text">DEPOSIT</span>
-        </button>
-        <button class="toolbar-redeem" onclick="openRedeemModal()">
-          <span class="btn-icon">💸</span>
-          <span class="btn-text">REDEEM</span>
-        </button>
       </div>
     </div>
 
@@ -99,48 +85,119 @@
     
     <!-- LEFT SIDEBAR -->
     <aside class="sidebar" id="main-sidebar">
-      <div class="nav-item active" id="nav-lobby" onclick="showLobby()">
-        <span class="nav-icon">🏠</span> <span class="nav-label">Lobby</span>
-      </div>
-      
-      <div class="nav-section-header">⭐ FEATURED SLOT</div>
-      <div class="nav-item slot-highlight-nav" onclick="launchGame('slots')">
-        <span class="nav-icon">🎰</span> <span class="nav-label">Stake Gates</span>
-        <span class="badge-hot">HOT</span>
+      <!-- User Profile Card -->
+      <div class="sidebar-user-card" onclick="openAccountPage()">
+        <div class="user-avatar">
+          <span class="avatar-emoji">👤</span>
+          <span class="online-status-dot"></span>
+        </div>
+        <div class="user-info">
+          <div class="user-name" id="sidebar-username">Guest</div>
+          <div class="user-tier">Bronze VIP</div>
+        </div>
+        <svg class="user-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       </div>
 
-      <div class="nav-section-header">STAKE ORIGINALS</div>
+      <!-- Main Navigation -->
+      <nav class="sidebar-nav">
+        <div class="nav-item active" id="nav-lobby" onclick="showLobby()">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Lobby</span>
+        </div>
+      </nav>
+
+      <div class="nav-divider"></div>
+      <div class="nav-section-header">
+        <span class="section-icon">⚡</span>
+        <span>STAKE ORIGINALS</span>
+      </div>
+
+      <!-- Originals Games -->
       <nav class="sidebar-game-list">
-        <div class="nav-item" onclick="launchGame('blackjack')"><span class="nav-icon">♠️</span><span class="nav-label">Blackjack</span></div>
-        <div class="nav-item" onclick="launchGame('baccarat')"><span class="nav-icon">🎴</span><span class="nav-label">Baccarat</span></div>
-        <div class="nav-item" onclick="launchGame('dice')"><span class="nav-icon">🎲</span><span class="nav-label">Dice</span></div>
-        <div class="nav-item" onclick="launchGame('limbo')"><span class="nav-icon">🚀</span><span class="nav-label">Limbo</span></div>
-        <div class="nav-item" onclick="launchGame('plinko')"><span class="nav-icon">⚪</span><span class="nav-label">Plinko</span></div>
-        <div class="nav-item" onclick="launchGame('mines')"><span class="nav-icon">💣</span><span class="nav-label">Mines</span></div>
-        <div class="nav-item" onclick="launchGame('keno')"><span class="nav-icon">🔢</span><span class="nav-label">Keno</span></div>
-        <div class="nav-item" onclick="launchGame('wheel')"><span class="nav-icon">🎡</span><span class="nav-label">Wheel</span></div>
-        <div class="nav-item" onclick="launchGame('hilo')"><span class="nav-icon">🃏</span><span class="nav-label">Hilo</span></div>
-        <div class="nav-item" onclick="launchGame('tower')"><span class="nav-icon">🏰</span><span class="nav-label">Tower</span></div>
-        <div class="nav-item" onclick="launchGame('crash')"><span class="nav-icon">💥</span><span class="nav-label">Crash</span></div>
+        <div class="nav-item" onclick="launchGame('dice')">
+          <span class="nav-icon">🎲</span>
+          <span class="nav-label">Dice</span>
+          <span class="nav-badge nav-badge-green">99% RTP</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('limbo')">
+          <span class="nav-icon">🚀</span>
+          <span class="nav-label">Limbo</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('crash')">
+          <span class="nav-icon">💥</span>
+          <span class="nav-label">Crash</span>
+          <span class="nav-badge nav-badge-red">HOT</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('plinko')">
+          <span class="nav-icon">⚪</span>
+          <span class="nav-label">Plinko</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('mines')">
+          <span class="nav-icon">💣</span>
+          <span class="nav-label">Mines</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('tower')">
+          <span class="nav-icon">🏰</span>
+          <span class="nav-label">Tower</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('wheel')">
+          <span class="nav-icon">🎡</span>
+          <span class="nav-label">Wheel</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('keno')">
+          <span class="nav-icon">🔢</span>
+          <span class="nav-label">Keno</span>
+        </div>
+        <div class="nav-item" onclick="launchGame('hilo')">
+          <span class="nav-icon">🃏</span>
+          <span class="nav-label">Hilo</span>
+        </div>
       </nav>
 
-      <div class="nav-section-header">BONUS CENTRE</div>
-      <nav>
-        <div class="nav-item" id="nav-bonuses" onclick="openBonusModal()">
-          <span class="nav-icon">🎁</span> <span class="nav-label">Daily Bonus</span>
+      <div class="nav-divider"></div>
+      <div class="nav-section-header">
+        <span class="section-icon">🎰</span>
+        <span>TABLE GAMES</span>
+      </div>
+
+      <!-- Table Games -->
+      <nav class="sidebar-game-list">
+        <div class="nav-item" onclick="launchGame('blackjack')">
+          <span class="nav-icon">♠️</span>
+          <span class="nav-label">Blackjack</span>
+          <span class="nav-badge nav-badge-blue">0.5%</span>
         </div>
-        <div class="nav-item" id="nav-challenges" onclick="history.pushState(null,'','/challenges');handleRouteChange()">
-          <span class="nav-icon">🎯</span> <span class="nav-label">Challenges</span>
-        </div>
-        <div class="nav-item" id="nav-rakeback" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">
-          <span class="nav-icon">💎</span> <span class="nav-label">Rakeback</span>
+        <div class="nav-item" onclick="launchGame('baccarat')">
+          <span class="nav-icon">🎴</span>
+          <span class="nav-label">Baccarat</span>
         </div>
       </nav>
 
+      <div class="nav-divider"></div>
+
+      <!-- Bonuses Section -->
+      <nav class="sidebar-game-list">
+        <div class="nav-item" onclick="openBonusModal()">
+          <span class="nav-icon">🎁</span>
+          <span class="nav-label">Daily Bonus</span>
+        </div>
+        <div class="nav-item" onclick="history.pushState(null,'','/challenges');handleRouteChange()">
+          <span class="nav-icon">🎯</span>
+          <span class="nav-label">Challenges</span>
+        </div>
+        <div class="nav-item" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">
+          <span class="nav-icon">💎</span>
+          <span class="nav-label">Rakeback</span>
+        </div>
+      </nav>
+
+      <!-- Sidebar Footer -->
       <div class="sidebar-footer">
-        <div class="online-indicator">
-          <span class="pulse-dot"></span>
-          <span>1,429 Players Online</span>
+        <div class="sidebar-stats">
+          <div class="stat-item">
+            <span class="stat-dot"></span>
+            <span class="stat-text">1,429 Online</span>
+          </div>
         </div>
       </div>
     </aside>
@@ -151,92 +208,200 @@
       
       <!-- LOBBY VIEW -->
       <div id="view-lobby" class="game-view">
-        <div class="hero-slot-banner" onclick="launchGame('slots')">
+        <!-- Hero Section -->
+        <section class="hero-section">
+          <div class="hero-particles" id="hero-particles"></div>
           <div class="hero-content">
-            <div class="hero-badge">FEATURED SLOT</div>
-            <h1>STAKE GATES OF OLYMPUS</h1>
-            <p>Unleash massive multiplier cascades up to 5,000x! Play with Gold Coins or Sweeps Coins.</p>
-            <button class="btn-hero-spin">SPIN REELS NOW 🎰</button>
+            <div class="hero-badge">🎰 FEATURED SLOT</div>
+            <h1 class="hero-title">STAKE GATES <span class="hero-highlight">OF OLYMPUS</span></h1>
+            <p class="hero-subtitle">Unleash massive multiplier cascades up to 5,000x! Play with Gold Coins or Sweeps Coins.</p>
+            <button class="btn-hero-spin" onclick="launchGame('slots')">
+              <span class="btn-hero-text">SPIN REELS NOW</span>
+              <span class="btn-hero-icon">🎰</span>
+            </button>
           </div>
-          <div class="hero-graphic">
-            <div class="glow-orb"></div>
-            <span class="hero-big-icon">🎰</span>
+          <div class="hero-visual">
+            <div class="hero-glow"></div>
+            <div class="hero-slot-machine">
+              <div class="slot-reel">🎰</div>
+              <div class="slot-reel">⚡</div>
+              <div class="slot-reel">🏆</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Category Filter -->
+        <div class="lobby-toolbar">
+          <div class="category-pills">
+            <button class="pill-btn active" data-category="ALL" onclick="filterLobbyGames('ALL')">
+              <span class="pill-icon">🎮</span> All Games
+            </button>
+            <button class="pill-btn" data-category="ORIGINALS" onclick="filterLobbyGames('ORIGINALS')">
+              <span class="pill-icon">⚡</span> Originals
+            </button>
+            <button class="pill-btn" data-category="TABLE" onclick="filterLobbyGames('TABLE')">
+              <span class="pill-icon">♠️</span> Table Games
+            </button>
+            <button class="pill-btn" data-category="SLOTS" onclick="filterLobbyGames('SLOTS')">
+              <span class="pill-icon">🎰</span> Slots
+            </button>
+          </div>
+          <div class="search-wrapper">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+            <input type="text" placeholder="Search games..." oninput="searchLobbyGames(this.value)" class="form-input search-input">
           </div>
         </div>
 
-        <div class="lobby-toolbar">
-          <div class="category-tabs">
-            <button class="btn-secondary-action cat-tab-btn active" data-category="ALL" onclick="filterLobbyGames('ALL')">All Games</button>
-            <button class="btn-secondary-action cat-tab-btn" data-category="ORIGINALS" onclick="filterLobbyGames('ORIGINALS')">Originals</button>
-            <button class="btn-secondary-action cat-tab-btn" data-category="TABLE" onclick="filterLobbyGames('TABLE')">Table Games</button>
-            <button class="btn-secondary-action cat-tab-btn" data-category="SLOTS" onclick="filterLobbyGames('SLOTS')">Slots</button>
+        <!-- Featured Games Row -->
+        <section class="featured-section">
+          <div class="section-header">
+            <h2 class="section-title">🔥 Trending Now</h2>
+            <div class="section-line"></div>
           </div>
-          <input type="text" placeholder="Search games..." oninput="searchLobbyGames(this.value)" class="form-input search-input" style="width:180px;">
-        </div>
-        
-        <div class="games-grid">
-          <div class="game-card slot-featured-card" data-category="SLOTS" onclick="launchGame('slots')">
-            <div class="card-badge">POPULAR</div>
-            <div class="game-card-icon-wrapper">🎰</div>
-            <h4 class="game-card-title">Stake Gates</h4>
-            <span class="game-subtext">Multipliers up to 5,000x</span>
+          <div class="featured-scroll">
+            <div class="featured-card" onclick="launchGame('crash')">
+              <div class="featured-badge">HOT</div>
+              <div class="featured-icon">💥</div>
+              <h3>Crash</h3>
+              <p>Auto Cashout Target</p>
+            </div>
+            <div class="featured-card" onclick="launchGame('slots')">
+              <div class="featured-badge featured-badge-gold">JACKPOT</div>
+              <div class="featured-icon">🎰</div>
+              <h3>Stake Gates</h3>
+              <p>5,000x Max Win</p>
+            </div>
+            <div class="featured-card" onclick="launchGame('plinko')">
+              <div class="featured-badge featured-badge-purple">NEW</div>
+              <div class="featured-icon">⚪</div>
+              <h3>Plinko</h3>
+              <p>Dynamic Physics</p>
+            </div>
+            <div class="featured-card" onclick="launchGame('mines')">
+              <div class="featured-badge">POPULAR</div>
+              <div class="featured-icon">💣</div>
+              <h3>Mines</h3>
+              <p>Grid Cashout</p>
+            </div>
           </div>
-          <div class="game-card" data-category="TABLE" onclick="launchGame('blackjack')">
-            <div class="game-card-icon-wrapper">♠️</div>
-            <h4 class="game-card-title">Blackjack</h4>
-            <span class="game-subtext">House Edge 0.5%</span>
+        </section>
+
+        <!-- Games Grid -->
+        <section class="games-section">
+          <div class="section-header">
+            <h2 class="section-title">All Games</h2>
+            <div class="section-line"></div>
           </div>
-          <div class="game-card" data-category="TABLE" onclick="launchGame('baccarat')">
-            <div class="game-card-icon-wrapper">🎴</div>
-            <h4 class="game-card-title">Baccarat</h4>
-            <span class="game-subtext">Player / Banker / Tie</span>
+          <div class="games-grid" id="games-grid">
+            <div class="game-card" data-category="TABLE" onclick="launchGame('blackjack')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">♠️</div>
+                <h4 class="game-card-title">Blackjack</h4>
+                <span class="game-subtext">House Edge 0.5%</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="TABLE" onclick="launchGame('baccarat')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🎴</div>
+                <h4 class="game-card-title">Baccarat</h4>
+                <span class="game-subtext">Player / Banker / Tie</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="ORIGINALS" onclick="launchGame('dice')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🎲</div>
+                <h4 class="game-card-title">Dice</h4>
+                <span class="game-subtext">99% RTP</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="ORIGINALS" onclick="launchGame('limbo')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🚀</div>
+                <h4 class="game-card-title">Limbo</h4>
+                <span class="game-subtext">Target up to 1,000,000x</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="ORIGINALS" onclick="launchGame('plinko')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">⚪</div>
+                <h4 class="game-card-title">Plinko</h4>
+                <span class="game-subtext">Dynamic Row Physics</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="ORIGINALS" onclick="launchGame('mines')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">💣</div>
+                <h4 class="game-card-title">Mines</h4>
+                <span class="game-subtext">Grid Cashout Game</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="ORIGINALS" onclick="launchGame('keno')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🔢</div>
+                <h4 class="game-card-title">Keno</h4>
+                <span class="game-subtext">Select up to 10 Numbers</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="ORIGINALS" onclick="launchGame('wheel')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🎡</div>
+                <h4 class="game-card-title">Wheel</h4>
+                <span class="game-subtext">Risk Segment Multipliers</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="TABLE" onclick="launchGame('hilo')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🃏</div>
+                <h4 class="game-card-title">Hilo</h4>
+                <span class="game-subtext">Higher or Lower</span>
+              </div>
+            </div>
+            <div class="game-card" data-category="ORIGINALS" onclick="launchGame('tower')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🏰</div>
+                <h4 class="game-card-title">Tower</h4>
+                <span class="game-subtext">Climb to Max Multiplier</span>
+              </div>
+            </div>
+            <div class="game-card slot-featured-card" data-category="SLOTS" onclick="launchGame('slots')">
+              <div class="game-card-glow"></div>
+              <div class="game-card-content">
+                <div class="game-card-icon-wrapper">🎰</div>
+                <h4 class="game-card-title">Stake Gates</h4>
+                <span class="game-subtext">Multipliers up to 5,000x</span>
+              </div>
+              <div class="card-badge">POPULAR</div>
+            </div>
           </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('dice')">
-            <div class="game-card-icon-wrapper">🎲</div>
-            <h4 class="game-card-title">Dice</h4>
-            <span class="game-subtext">99% RTP</span>
+        </section>
+
+        <!-- Live Stats Bar -->
+        <section class="live-stats-bar">
+          <div class="stat-item">
+            <span class="lobby-stat-value" id="online-count">1,429</span>
+            <span class="lobby-stat-label">Players Online</span>
           </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('limbo')">
-            <div class="game-card-icon-wrapper">🚀</div>
-            <h4 class="game-card-title">Limbo</h4>
-            <span class="game-subtext">Target up to 1,000,000x</span>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="lobby-stat-value">$2.4M+</span>
+            <span class="lobby-stat-label">Paid Out Today</span>
           </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('plinko')">
-            <div class="game-card-icon-wrapper">⚪</div>
-            <h4 class="game-card-title">Plinko</h4>
-            <span class="game-subtext">Dynamic Row Physics</span>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="lobby-stat-value">99%</span>
+            <span class="lobby-stat-label">RTP Average</span>
           </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('mines')">
-            <div class="game-card-icon-wrapper">💣</div>
-            <h4 class="game-card-title">Mines</h4>
-            <span class="game-subtext">Grid Cashout Game</span>
-          </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('keno')">
-            <div class="game-card-icon-wrapper">🔢</div>
-            <h4 class="game-card-title">Keno</h4>
-            <span class="game-subtext">Select up to 10 Numbers</span>
-          </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('wheel')">
-            <div class="game-card-icon-wrapper">🎡</div>
-            <h4 class="game-card-title">Wheel</h4>
-            <span class="game-subtext">Risk Segment Multipliers</span>
-          </div>
-          <div class="game-card" data-category="TABLE" onclick="launchGame('hilo')">
-            <div class="game-card-icon-wrapper">🃏</div>
-            <h4 class="game-card-title">Hilo</h4>
-            <span class="game-subtext">Higher or Lower</span>
-          </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('tower')">
-            <div class="game-card-icon-wrapper">🏰</div>
-            <h4 class="game-card-title">Tower</h4>
-            <span class="game-subtext">Climb to Max Multiplier</span>
-          </div>
-          <div class="game-card" data-category="ORIGINALS" onclick="launchGame('crash')">
-            <div class="game-card-icon-wrapper">💥</div>
-            <h4 class="game-card-title">Crash</h4>
-            <span class="game-subtext">Auto Cashout Target</span>
-          </div>
-        </div>
+        </section>
       </div>
 
       <!-- ACTIVE GAME VIEW STAGE -->
@@ -282,11 +447,11 @@
               </div>
 
               <div class="bet-auto-section">
-                <label class="bet-auto-toggle" style="display:flex;align-items:center;gap:6px;font-size:0.75rem;color:#b1bad2;cursor:pointer;">
-                  <input type="checkbox" id="auto-bet-toggle" style="margin:0;" onchange="toggleAutoBet()">
+                <label class="bet-auto-toggle" for="auto-bet-toggle">
+                  <input type="checkbox" id="auto-bet-toggle" onchange="toggleAutoBet()">
                   Auto-Bet
                 </label>
-                <input type="number" id="auto-bet-count" value="0" min="0" placeholder="∞" class="bet-input-small" style="display:none;">
+                <input type="number" id="auto-bet-count" value="0" min="0" placeholder="Infinity" class="bet-input-small">
               </div>
 
               <button class="btn-play" id="btn-primary-action">PLACE BET</button>
@@ -304,8 +469,54 @@
 
       <!-- ACCOUNT PAGE -->
       <div id="view-account" class="game-view hidden">
-        <div class="game-display" id="account-display-area">
-          <div class="game-placeholder-text">Loading account...</div>
+        <div class="account-layout">
+          <!-- Account Sidebar -->
+          <aside class="account-sidebar">
+            <div class="account-sidebar-header">
+              <div class="account-sidebar-avatar">👤</div>
+              <div class="account-sidebar-info">
+                <div class="account-sidebar-name" id="account-sidebar-name">Guest</div>
+                <div class="account-sidebar-tier" id="account-sidebar-tier">Bronze VIP</div>
+              </div>
+            </div>
+            <nav class="account-nav">
+              <a class="account-nav-link active" data-account-page="overview" onclick="navigateToAccount('overview')">
+                <span class="account-nav-icon">📊</span>
+                <span>Overview</span>
+              </a>
+              <a class="account-nav-link" data-account-page="profile" onclick="navigateToAccount('profile')">
+                <span class="account-nav-icon">👤</span>
+                <span>Profile</span>
+              </a>
+              <a class="account-nav-link" data-account-page="wallet" onclick="navigateToAccount('wallet')">
+                <span class="account-nav-icon">💰</span>
+                <span>Wallet</span>
+              </a>
+              <a class="account-nav-link" data-account-page="kyc" onclick="navigateToAccount('kyc')">
+                <span class="account-nav-icon">🛡️</span>
+                <span>Verification</span>
+              </a>
+              <a class="account-nav-link" data-account-page="transactions" onclick="navigateToAccount('transactions')">
+                <span class="account-nav-icon">📋</span>
+                <span>Transactions</span>
+              </a>
+              <a class="account-nav-link" data-account-page="security" onclick="navigateToAccount('security')">
+                <span class="account-nav-icon">🔒</span>
+                <span>Security</span>
+              </a>
+            </nav>
+            <div class="account-sidebar-footer">
+              <button class="account-sidebar-back" onclick="showLobby()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                <span>Back to Lobby</span>
+              </button>
+            </div>
+          </aside>
+
+          <!-- Account Content -->
+          <main class="account-content" id="account-content">
+            <div class="account-placeholder">Loading account...</div>
+          </main>
         </div>
       </div>
 
@@ -338,9 +549,9 @@
         <span class="live-tag">LIVE</span>
       </div>
       <div style="display:flex; gap:4px; padding:8px 12px; background:#0f171e; border-bottom:1px solid #243542;">
-        <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter('ALL')" style="font-size:0.75rem; padding:4px 8px;">All</button>
-        <button class="btn-secondary-action feed-tab-btn" data-filter="MY_BETS" onclick="setFeedFilter('MY_BETS')" style="font-size:0.75rem; padding:4px 8px;">My Bets</button>
-        <button class="btn-secondary-action feed-tab-btn" data-filter="HIGH_ROLLERS" onclick="setFeedFilter('HIGH_ROLLERS')" style="font-size:0.75rem; padding:4px 8px;">High Rollers</button>
+        <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter('ALL')">All</button>
+        <button class="btn-secondary-action feed-tab-btn" data-filter="MY_BETS" onclick="setFeedFilter('MY_BETS')">My Bets</button>
+        <button class="btn-secondary-action feed-tab-btn" data-filter="HIGH_ROLLERS" onclick="setFeedFilter('HIGH_ROLLERS')">High Rollers</button>
       </div>
       <div class="bets-feed-container">
         <div class="bets-feed-header">
@@ -369,74 +580,254 @@
       <p class="modal-subtitle">Purchase Gold Coins (GC) and get <strong>FREE bonus Sweeps Coins (SC)</strong>!</p>
 
       <!-- Package Selection Section -->
-      <div class="store-section package-selection">
-        <div class="package-list">
-          <div class="package-card" onclick="buyCoinPackage('pack_10')">
-            <div class="package-badge">POPULAR</div>
-            <div class="package-details">
-              <span class="pkg-gc">15,000 Gold Coins</span>
-              <span class="pkg-sc">+ FREE 15.00 Sweeps Coins</span>
+      <div class="store-section package-selection" id="package-selection">
+        <div class="package-grid">
+          <div class="package-card" onclick="selectPackage('pack_10')" data-package="pack_10">
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">STARTER</span>
+                <div class="package-price">$9.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">15,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+15.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package">Select Package</button>
             </div>
-            <button type="button" class="btn-price">$10.00</button>
           </div>
-          <div class="package-card" onclick="buyCoinPackage('pack_20')">
-            <div class="package-badge best-value">BEST VALUE</div>
-            <div class="package-details">
-              <span class="pkg-gc">25,000 Gold Coins</span>
-              <span class="pkg-sc">+ FREE 25.00 Sweeps Coins</span>
+
+          <div class="package-card featured" onclick="selectPackage('pack_20')" data-package="pack_20">
+            <div class="package-badge">BEST VALUE</div>
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">POPULAR</span>
+                <div class="package-price">$19.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">25,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+25.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package btn-select-featured">Select Package</button>
             </div>
-            <button type="button" class="btn-price">$20.00</button>
           </div>
-          <div class="package-card" onclick="buyCoinPackage('pack_50')">
-            <div class="package-details">
-              <span class="pkg-gc">55,000 Gold Coins</span>
-              <span class="pkg-sc">+ FREE 55.00 Sweeps Coins</span>
+
+          <div class="package-card" onclick="selectPackage('pack_50')" data-package="pack_50">
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">PREMIUM</span>
+                <div class="package-price">$49.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">55,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+55.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package">Select Package</button>
             </div>
-            <button type="button" class="btn-price">$50.00</button>
           </div>
-          <div class="package-card" onclick="buyCoinPackage('pack_100')">
-            <div class="package-badge best-value">BEST VALUE</div>
-            <div class="package-details">
-              <span class="pkg-gc">100,000 Gold Coins</span>
-              <span class="pkg-sc">+ FREE 105.00 Sweeps Coins</span>
+
+          <div class="package-card" onclick="selectPackage('pack_100')" data-package="pack_100">
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">ELITE</span>
+                <div class="package-price">$99.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">100,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+105.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package">Select Package</button>
             </div>
-            <button type="button" class="btn-price">$100.00</button>
           </div>
         </div>
 
-        <!-- Package Summary (hidden until package selected) -->
-        <div id="package-summary" class="package-summary hidden">
+        <!-- Order Summary -->
+        <div id="package-summary" class="order-summary hidden">
           <div class="summary-header">
-            <span class="summary-title">Order Summary</span>
-            <button class="btn-change" onclick="showPackageList()">Change Package</button>
+            <h4>Order Summary</h4>
+            <button class="btn-change" onclick="resetPackageSelection()">Change</button>
           </div>
-          <div class="summary-content">
-            <div class="summary-row">
+          <div class="summary-items">
+            <div class="summary-item">
               <span class="summary-label">Gold Coins</span>
               <span class="summary-value gc-val" id="summary-gc">15,000</span>
             </div>
-            <div class="summary-row">
-              <span class="summary-label">Bonus Sweeps</span>
+            <div class="summary-item">
+              <span class="summary-label">Bonus Sweeps Coins</span>
               <span class="summary-value sc-val" id="summary-sc">+15.00</span>
             </div>
-            <div class="summary-row summary-total">
+            <div class="summary-item summary-total">
               <span class="summary-label">Total</span>
               <span class="summary-value" id="summary-total">$10.00</span>
             </div>
           </div>
-          <div class="security-row">
-            <span class="security-badge">🔒 256-bit SSL Encrypted</span>
-            <span class="security-badge">⚡ Instant Delivery</span>
+          <div class="summary-security">
+            <span class="security-item">🔒 SSL Encrypted</span>
+            <span class="security-item">⚡ Instant Delivery</span>
           </div>
+          <button class="btn-checkout" onclick="proceedToCheckout()">
+            Proceed to Checkout →
+          </button>
         </div>
       </div>
 
       <!-- Checkout Section -->
       <div id="checkout-section" class="checkout-section hidden">
-        <div class="checkout-header">
-          <h4 style="margin:0;">Secure Checkout</h4>
+        <div class="checkout-layout">
+          <!-- Left: Order Summary -->
+          <div class="checkout-summary-panel">
+            <div class="checkout-summary-header">
+              <h3>Order Summary</h3>
+              <button class="btn-back" onclick="backToPackages()">← Back</button>
+            </div>
+            <div class="checkout-package-card" id="checkout-package-card">
+              <div class="checkout-package-icon">🪙</div>
+              <div class="checkout-package-info">
+                <div class="checkout-package-name" id="checkout-package-name">15,000 GC + 15 Free SC</div>
+                <div class="checkout-package-desc">Gold Coins + Bonus Sweeps Coins</div>
+              </div>
+              <div class="checkout-package-price" id="checkout-package-price">$9.99</div>
+            </div>
+            <div class="checkout-summary-details">
+              <div class="checkout-summary-row">
+                <span>Gold Coins</span>
+                <span class="gc-val" id="checkout-gc">15,000</span>
+              </div>
+              <div class="checkout-summary-row">
+                <span>Bonus Sweeps Coins</span>
+                <span class="sc-val" id="checkout-sc">+15.00</span>
+              </div>
+              <div class="checkout-summary-row checkout-summary-total">
+                <span>Total</span>
+                <span id="checkout-total">$9.99</span>
+              </div>
+            </div>
+            <div class="checkout-trust-badges">
+              <div class="trust-badge">
+                <span class="trust-icon">🔒</span>
+                <span>SSL Encrypted</span>
+              </div>
+              <div class="trust-badge">
+                <span class="trust-icon">⚡</span>
+                <span>Instant Delivery</span>
+              </div>
+              <div class="trust-badge">
+                <span class="trust-icon">🛡️</span>
+                <span>Secure Payment</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Payment Methods -->
+          <div class="checkout-payment-panel">
+            <div class="checkout-payment-header">
+              <h3>Payment Method</h3>
+            </div>
+            <div class="checkout-methods">
+              <button class="payment-method-btn active" data-method="card" onclick="selectPaymentMethod('card')">
+                <span class="payment-method-icon">💳</span>
+                <span class="payment-method-name">Credit / Debit Card</span>
+                <span class="payment-method-badge">Popular</span>
+              </button>
+              <button class="payment-method-btn" data-method="crypto" onclick="selectPaymentMethod('crypto')">
+                <span class="payment-method-icon">₿</span>
+                <span class="payment-method-name">Cryptocurrency</span>
+                <span class="payment-method-badge crypto-badge">Fast</span>
+              </button>
+            </div>
+
+            <!-- Card Payment -->
+            <div id="payment-card" class="payment-panel">
+              <div id="stripe-checkout-container">
+                <div class="checkout-loading">
+                  <div class="checkout-spinner"></div>
+                  <p class="checkout-loading-text">Initializing secure checkout...</p>
+                  <p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Crypto Payment -->
+            <div id="payment-crypto" class="payment-panel hidden">
+              <div class="crypto-options">
+                <button class="crypto-btn" onclick="selectCrypto('BTC')">
+                  <span class="crypto-icon">₿</span>
+                  <span class="crypto-name">Bitcoin</span>
+                  <span class="crypto-symbol">BTC</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('ETH')">
+                  <span class="crypto-icon">Ξ</span>
+                  <span class="crypto-name">Ethereum</span>
+                  <span class="crypto-symbol">ETH</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('USDT')">
+                  <span class="crypto-icon">₮</span>
+                  <span class="crypto-name">Tether</span>
+                  <span class="crypto-symbol">USDT</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('LTC')">
+                  <span class="crypto-icon">Ł</span>
+                  <span class="crypto-name">Litecoin</span>
+                  <span class="crypto-symbol">LTC</span>
+                </button>
+              </div>
+              <div id="crypto-payment-details" class="crypto-details hidden">
+                <div class="crypto-qr-placeholder">
+                  <div class="crypto-qr-icon">📱</div>
+                  <p>Scan QR code or send payment to address below</p>
+                </div>
+                <div class="crypto-address-box">
+                  <label>Payment Address</label>
+                  <div class="crypto-address-row">
+                    <code id="crypto-address">bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh</code>
+                    <button class="btn-copy" onclick="copyCryptoAddress()">Copy</button>
+                  </div>
+                </div>
+                <div class="crypto-amount-box">
+                  <label>Amount to Send</label>
+                  <div class="crypto-amount-row">
+                    <span id="crypto-amount">0.00001 BTC</span>
+                    <button class="btn-copy" onclick="copyCryptoAmount()">Copy</button>
+                  </div>
+                </div>
+                <div class="crypto-notice">
+                  <span class="notice-icon">⏳</span>
+                  <span>Payment will be confirmed after 1 network confirmation. This usually takes 10-30 minutes.</span>
+                </div>
+                <button class="btn-crypto-pay" onclick="initiateCryptoPayment()">
+                  I Have Sent Payment
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div id="checkout-container"></div>
       </div>
 
       <!-- Success Section -->
@@ -445,7 +836,7 @@
           <div class="success-checkmark">✓</div>
           <div class="confetti-container" id="confetti-container"></div>
         </div>
-        <h4 style="color:var(--accent-green); font-weight:800; margin-bottom:6px;">Payment Successful!</h4>
+        <h4 class="success-title">Payment Successful!</h4>
         <p class="success-subtext">Your coins have been added to your account.</p>
         <div class="success-details" id="success-details"></div>
       </div>
@@ -459,19 +850,39 @@
         <h3>💸 Redeem Sweeps Coins</h3>
         <button class="x-close" onclick="closeRedeemModal()" aria-label="Close Modal">×</button>
       </div>
-      <p class="modal-subtitle">Minimum redemption: <strong>50.00 SC</strong> (1 SC = $1.00 USD cash redemption rate).</p>
+      <p class="modal-subtitle">Convert your Sweeps Coins to real cash. Minimum redemption: <strong>50.00 SC</strong> (1 SC = $1.00 USD).</p>
+
+      <div class="redeem-info-card">
+        <div class="redeem-info-row">
+          <span class="redeem-info-label">Available Balance</span>
+          <span class="redeem-info-value" id="redeem-available-bal">10.00 SC</span>
+        </div>
+        <div class="redeem-info-row">
+          <span class="redeem-info-label">Redeemable (1x wagered)</span>
+          <span class="redeem-info-value sc-val" id="redeem-wagered-bal">10.00 SC</span>
+        </div>
+      </div>
 
       <div class="form-group">
         <label for="redeem-input" class="form-label">Amount to Redeem (SC)</label>
         <div class="input-with-symbol">
-          <input type="number" id="redeem-input" value="50" min="50" class="form-input">
+          <input type="number" id="redeem-input" value="50" min="50" class="form-input" oninput="updateRedeemPreview()">
+        </div>
+        <div class="redeem-preview" id="redeem-preview">
+          <span class="redeem-preview-label">You will receive:</span>
+          <span class="redeem-preview-value" id="redeem-usd-value">$50.00 USD</span>
         </div>
       </div>
 
-       <div class="modal-actions-flex" style="margin-top:15px;">
-         <button type="button" onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
-         <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action btn-full">Cancel</button>
-       </div>
+      <div class="redeem-notice">
+        <span class="notice-icon">ℹ️</span>
+        <span>Redemptions are processed via bank transfer. KYC verification required.</span>
+      </div>
+
+        <div class="modal-actions-flex" style="margin-top:15px;">
+          <button type="button" onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
+          <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action btn-full">Cancel</button>
+        </div>
     </div>
   </div>
 
@@ -484,17 +895,19 @@
       </div>
       <p class="modal-subtitle">Verify game outcomes and customize your random seeds securely.</p>
       
-      <div class="form-group">
-        <label for="pf-modal-server-hash" class="form-label">Active Server Seed (Hashed)</label>
-        <input type="text" id="pf-modal-server-hash" class="form-input" readonly value="Unverified">
-      </div>
+      <div class="pf-modal-fields">
+        <div class="form-group">
+          <label for="pf-modal-server-hash" class="form-label">Active Server Seed (Hashed)</label>
+          <input type="text" id="pf-modal-server-hash" class="form-input" readonly value="Unverified">
+        </div>
 
-      <div class="form-group">
-        <label for="pf-client-seed" class="form-label">Client Seed (Customizable)</label>
-        <div style="display:flex; gap:8px;">
-          <input type="text" id="pf-client-seed" class="form-input" value="">
-          <button type="button" onclick="updateClientSeed()" class="btn-secondary-action" style="width:auto; padding:0 12px;">Save</button>
-          <button type="button" onclick="randomizeClientSeed()" class="btn-secondary-action" style="width:auto; padding:0 12px;" title="Randomize">🎲</button>
+        <div class="form-group">
+          <label for="pf-client-seed" class="form-label">Client Seed (Customizable)</label>
+          <div class="pf-seed-row">
+            <input type="text" id="pf-client-seed" class="form-input" value="">
+            <button type="button" onclick="updateClientSeed()" class="btn-secondary-action pf-seed-btn">Save</button>
+            <button type="button" onclick="randomizeClientSeed()" class="btn-secondary-action pf-seed-btn" title="Randomize">🎲</button>
+          </div>
         </div>
       </div>
 
@@ -526,12 +939,12 @@
           <label class="form-label">Password</label>
           <input type="password" id="auth-password" class="form-input" placeholder="••••••••">
         </div>
-        <div id="auth-login-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
-        <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
-          <button type="button" onclick="submitLogin()" class="btn-play btn-full">LOGIN</button>
-          <button type="button" onclick="switchAuthMode('register')" class="btn-secondary-action btn-full">Create New Account</button>
-          <button type="button" onclick="continueAsGuest()" class="btn-secondary-action btn-full" style="font-size:0.8rem;">Continue as Guest</button>
-        </div>
+         <div id="auth-login-error" class="auth-error"></div>
+         <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+           <button type="button" onclick="submitLogin()" class="btn-play btn-full">LOGIN</button>
+           <button type="button" onclick="switchAuthMode('register')" class="btn-secondary-action btn-full">Create New Account</button>
+           <button type="button" onclick="continueAsGuest()" class="btn-secondary-action btn-full guest-btn">Continue as Guest</button>
+         </div>
       </div>
 
       <div id="auth-form-register" class="auth-form-section hidden">
@@ -551,11 +964,36 @@
           <label class="form-label">Birth Date</label>
           <input type="date" id="reg-birthdate" class="form-input">
         </div>
-        <div id="auth-register-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
-        <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
-          <button type="button" onclick="submitRegister()" class="btn-play btn-full">REGISTER & PLAY</button>
-          <button type="button" onclick="switchAuthMode('login')" class="btn-secondary-action btn-full">Back to Login</button>
+        <div class="form-group">
+          <label class="form-label">State</label>
+          <select id="reg-state" class="form-input">
+            <option value="CA">California</option>
+            <option value="TX">Texas</option>
+            <option value="FL">Florida</option>
+            <option value="NY">New York</option>
+            <option value="CO">Colorado</option>
+            <option value="NC">North Carolina</option>
+            <option value="OH">Ohio</option>
+            <option value="PA">Pennsylvania</option>
+            <option value="IL">Illinois</option>
+            <option value="AZ">Arizona</option>
+            <option value="MN">Minnesota</option>
+            <option value="IA">Iowa</option>
+            <option value="VA">Virginia</option>
+            <option value="LA">Louisiana</option>
+            <option value="MI" disabled>Michigan (Restricted)</option>
+            <option value="NV" disabled>Nevada (Restricted)</option>
+            <option value="WA" disabled>Washington (Restricted)</option>
+            <option value="ID" disabled>Idaho (Restricted)</option>
+            <option value="KY" disabled>Kentucky (Restricted)</option>
+            <option value="GA" disabled>Georgia (Restricted)</option>
+          </select>
         </div>
+          <div id="auth-register-error" class="auth-error"></div>
+          <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+            <button type="button" onclick="submitRegister()" class="btn-play btn-full">REGISTER & PLAY</button>
+            <button type="button" onclick="switchAuthMode('login')" class="btn-secondary-action btn-full">Back to Login</button>
+          </div>
       </div>
     </div>
   </div>
@@ -567,9 +1005,9 @@
         <h3>🔞 Age Verification</h3>
       </div>
       <p class="modal-subtitle">This casino contains gambling content and is restricted to adults 18 and older.</p>
-      <div style="margin: 20px 0; padding: 16px; background:#14222d; border-radius:8px; border:1px solid #243542;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem; color:#b1bad2;">
-          <input type="checkbox" id="age-confirm" style="transform:scale(1.3); margin:0;">
+      <div class="age-confirm-box">
+        <label class="age-confirm-label">
+          <input type="checkbox" id="age-confirm">
           <span>I confirm I am 18 years of age or older</span>
         </label>
       </div>

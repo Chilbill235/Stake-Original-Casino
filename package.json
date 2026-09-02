@@ -14,7 +14,7 @@
     "express": "^4.22.2",
     "jsonwebtoken": "^9.0.3",
     "sql.js": "^1.14.2",
-    "stripe": "^22.5.0",
+    "stripe": "^22.6.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {

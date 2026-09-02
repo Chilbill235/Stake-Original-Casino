@@ -9,32 +9,39 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'casino-data.json');
+const db = require('./database');
 
 // -----------------------------------------------------------------------------
 // 1. CONFIGURATION & CONSTANTS
 // -----------------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const PERSONA_WEBHOOK_SECRET = process.env.PERSONA_WEBHOOK_SECRET;
 const HOUSE_EDGE = 0.13; // 13% House Edge (86% RTP)
 const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user (0.13 * 0.05 = 0.0065 = 0.65%)
 
-const stripe = require('stripe')(STRIPE_SECRET_KEY);
+let stripe = null;
+if (STRIPE_SECRET_KEY) {
+  try {
+    stripe = require('stripe')(STRIPE_SECRET_KEY);
+  } catch (e) {
+    console.warn('[Stripe]: Failed to initialize Stripe SDK:', e.message);
+  }
+}
+
 const bcrypt = require('bcryptjs');
 const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
-// Coin Package Configurations ($1 USD = 1,000 GC + 1 FREE SC)
+// Coin Package Configurations
 const COIN_PACKAGES = {
-  'pack_10': { name: '15,000 GC + 15 Free SC', priceInCents: 50, gcAmount: 15000, scAmount: 15 },
-  'pack_20': { name: '25,000 GC + 25 Free SC', priceInCents: 2000, gcAmount: 25000, scAmount: 25 },
-  'pack_50': { name: '55,000 GC + 55 Free SC', priceInCents: 5000, gcAmount: 55000, scAmount: 55 },
-  'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 10000, gcAmount: 100000, scAmount: 105 }
+  'pack_10': { name: '15,000 GC + 15 Free SC', priceInCents: 999, gcAmount: 15000, scAmount: 15 },
+  'pack_20': { name: '25,000 GC + 25 Free SC', priceInCents: 1999, gcAmount: 25000, scAmount: 25 },
+  'pack_50': { name: '55,000 GC + 55 Free SC', priceInCents: 4999, gcAmount: 55000, scAmount: 55 },
+  'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 9999, gcAmount: 100000, scAmount: 105 }
 };
 
 // -----------------------------------------------------------------------------
@@ -46,6 +53,7 @@ const transactions = new Map();
 const activeSessions = new Map();
 const userSeeds = new Map();
 const amoeRegistry = new Map();
+const cryptoPayments = new Map();
 
 // Generate a unique user ID (avoids collisions from deletions/counters)
 let nextUserId = 1;
@@ -57,67 +65,117 @@ function generateUserId() {
 }
 
 // -----------------------------------------------------------------------------
-// 2b. PERSISTENCE — save/load users to file so balances survive restarts
+// 2b. PERSISTENCE — SQLite database for durable storage
 // -----------------------------------------------------------------------------
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-function loadData() {
+async function loadData() {
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, 'utf8');
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      if (data.users) {
-        for (const u of data.users) { users.set(u.id, u); }
-      }
-      for (const u of users.values()) {
-        if (!u.createdAt) u.createdAt = Date.now();
-      }
-      if (data.transactions) {
-        for (const [k, v] of Object.entries(data.transactions)) { transactions.set(Number(k), v); }
-      }
-      if (data.userSeeds) {
-        for (const [k, v] of Object.entries(data.userSeeds)) { userSeeds.set(Number(k), v); }
-      }
-      if (data.jackpotPool) {
-        Object.assign(SLOT_JACKPOT_POOL, data.jackpotPool);
-      }
-      if (data.amoeRegistry) {
-        for (const [k, v] of Object.entries(data.amoeRegistry)) { amoeRegistry.set(k, v); }
-      }
-      console.log('[Persistence]: Loaded ' + users.size + ' users from disk.');
+    await db.getDb();
+    const userCount = await db.getUserCount();
+    if (userCount === 0) {
+      console.log('[Persistence]: No users in database, will seed demo user.');
+      return;
     }
+
+    const allUsers = await db.getAllUsers();
+    for (const u of allUsers) {
+      const userData = {
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        password: u.password,
+        gc_balance: u.gc_balance,
+        sc_unplayed: u.sc_unplayed,
+        sc_played: u.sc_played,
+        stripeAccountId: u.stripe_account_id,
+        kyc: {
+          status: u.kyc_status,
+          tier: u.kyc_tier,
+          inquiryId: u.kyc_inquiry_id,
+          verifiedAt: u.kyc_verified_at,
+          rejectionReason: u.kyc_rejection_reason
+        },
+        lastDailyClaim: u.last_daily_claim,
+        dailyStreak: u.daily_streak,
+        adsWatchedToday: u.ads_watched_today,
+        lastAdReset: u.last_ad_reset,
+        state: u.state,
+        createdAt: u.created_at,
+        vipTier: u.vip_tier,
+        totalWageredGC: u.total_wagered_gc,
+        totalWageredSC: u.total_wagered_sc,
+        rakebackAccruedSC: u.rakeback_accrued_sc,
+        isGuest: u.email && u.email.endsWith('@guest.casino'),
+        bonus: {
+          lastClaimAt: 0,
+          claimStreak: u.daily_streak,
+          dailyClaimed: false,
+          challenges: [],
+          challengeDate: '',
+          telemetry: {
+            scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+            gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+            weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+            monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+            diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+            history: [],
+            lastDailyReset: Date.now(),
+            lastWeeklyReset: Date.now(),
+            lastMonthlyReset: Date.now()
+          },
+          rakeback: {
+            lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+            dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+          }
+        }
+      };
+      users.set(u.id, userData);
+      transactions.set(u.id, []);
+    }
+    console.log('[Persistence]: Loaded ' + users.size + ' users from database.');
   } catch (e) {
     console.error('[Persistence]: Failed to load data:', e.message);
   }
 }
 
-function saveData() {
+async function saveData() {
   try {
-    ensureDataDir();
-    const data = {
-      users: Array.from(users.values()),
-      transactions: Object.fromEntries(transactions),
-      userSeeds: Object.fromEntries(userSeeds),
-      jackpotPool: SLOT_JACKPOT_POOL,
-      amoeRegistry: Object.fromEntries(amoeRegistry)
-    };
-    const json = JSON.stringify(data, null, 2);
-    fs.writeFileSync(DATA_FILE, json, 'utf8');
+    for (const user of users.values()) {
+      await db.updateUser(user.id, {
+        username: user.username,
+        email: user.email,
+        gc_balance: user.gc_balance,
+        sc_unplayed: user.sc_unplayed,
+        sc_played: user.sc_played,
+        stripe_account_id: user.stripeAccountId,
+        kyc_status: user.kyc?.status || 'UNVERIFIED',
+        kyc_tier: user.kyc?.tier || 0,
+        kyc_inquiry_id: user.kyc?.inquiryId,
+        kyc_verified_at: user.kyc?.verifiedAt,
+        kyc_rejection_reason: user.kyc?.rejectionReason,
+        last_daily_claim: user.lastDailyClaim,
+        daily_streak: user.dailyStreak,
+        ads_watched_today: user.adsWatchedToday,
+        last_ad_reset: user.lastAdReset,
+        state: user.state,
+        vip_tier: user.vipTier,
+        total_wagered_gc: user.totalWageredGC,
+        total_wagered_sc: user.totalWageredSC,
+        rakeback_accrued_sc: user.rakebackAccruedSC
+      });
+    }
   } catch (e) {
     console.error('[Persistence]: Failed to save data:', e.message);
   }
 }
 
-// Save every 30 seconds and on key events
+// Save every 30 seconds
 setInterval(saveData, 30000);
 
 // Graceful shutdown handler (single handler for both signals)
-function gracefulShutdown(signal) {
+async function gracefulShutdown(signal) {
   console.log(`${signal} signal received: saving data and closing server`);
-  saveData();
+  await saveData();
+  db.persistSync();
   server.close(() => {
     console.log('HTTP server closed');
     process.exit(0);
@@ -128,19 +186,37 @@ function gracefulShutdown(signal) {
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-loadData();
+// Initialize database and load users
+(async () => {
+  await loadData();
 
-// Initialize nextUserId after loading data
-if (users.size > 0) {
-  nextUserId = Math.max(...users.keys()) + 1;
-}
+  // Initialize nextUserId after loading data
+  if (users.size > 0) {
+    nextUserId = Math.max(...users.keys()) + 1;
+  }
 
 // Seed Initial Demo User only if no users exist (don't clobber persisted data)
 if (users.size === 0) {
-  users.set(1, {
-    id: 1,
+  const demoId = await db.createUser({
     username: 'Player_1001',
     email: 'player1001@example.com',
+    password: await bcrypt.hash('Demo1234!', 12),
+    gcBalance: 10000,
+    scBalance: 50
+  });
+
+  await db.updateUser(demoId, {
+    kyc_status: 'VERIFIED',
+    kyc_tier: 2,
+    kyc_inquiry_id: 'inq_demo123',
+    kyc_verified_at: new Date().toISOString()
+  });
+
+  const demoUser = {
+    id: demoId,
+    username: 'Player_1001',
+    email: 'player1001@example.com',
+    password: await bcrypt.hash('Demo1234!', 12),
     gc_balance: 10000.0,
     sc_unplayed: 50.0,
     sc_played: 0.0,
@@ -157,10 +233,12 @@ if (users.size === 0) {
     adsWatchedToday: 0,
     lastAdReset: Date.now(),
     state: 'CA',
+    createdAt: Date.now(),
     vipTier: 'Bronze',
     totalWageredGC: 0,
     totalWageredSC: 0,
     rakebackAccruedSC: 0,
+    isGuest: false,
     bonus: {
       lastClaimAt: 0,
       claimStreak: 0,
@@ -183,9 +261,13 @@ if (users.size === 0) {
         dailyPool: 0, weeklyPool: 0, monthlyPool: 0
       }
     }
-  });
-  transactions.set(1, []);
+  };
+  users.set(demoId, demoUser);
+  transactions.set(demoId, []);
 }
+
+console.log('[Init]: Database initialized, ' + users.size + ' users loaded.');
+})();
 
 // -----------------------------------------------------------------------------
 // 3. PROVABLY FAIR ENGINE
@@ -338,20 +420,6 @@ function balancesOf(user) {
  * Loads an ACTIVE game session owned by this user.
  * Sends the appropriate error response and returns null when invalid.
  */
-function getOwnedSession(req, res, gameId) {
-  const session = activeSessions.get(gameId);
-  if (!session || !session.active) {
-    res.status(400).json({ error: 'No active game round found for this game ID.' });
-    return null;
-  }
-  if (session.userId !== req.user.id) {
-    res.status(403).json({ error: 'This game session belongs to another player.' });
-    return null;
-  }
-  return session;
-}
-
-
 // -----------------------------------------------------------------------------
 // 5. GAME ENGINES
 // -----------------------------------------------------------------------------
@@ -397,6 +465,10 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
   const sig = req.headers['stripe-signature'];
   let event;
 
+  if (!stripe) {
+    return res.status(500).json({ error: 'Stripe is not configured.' });
+  }
+
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
   } catch (err) {
@@ -414,6 +486,10 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
 
     if (session.payment_status === 'paid') {
       const userId = parseInt(session.metadata.userId, 10);
+      if (isNaN(userId)) {
+        console.error('[STRIPE WEBHOOK ERROR] Invalid userId in metadata');
+        return res.status(400).json({ error: 'Invalid user ID in metadata.' });
+      }
       const gcAmount = parseFloat(session.metadata.gcAmount);
       const scAmount = parseFloat(session.metadata.scAmount);
 
@@ -597,8 +673,11 @@ const wss = new WebSocket.Server({ noServer: true });
 const connectedClients = new Map();
 
 server.on('upgrade', (request, socket, head) => {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  const queryToken = url.searchParams.get('token');
   const authHeader = request.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const headerToken = authHeader && authHeader.split(' ')[1];
+  const token = headerToken || queryToken;
 
   if (!token) {
     socket.destroy();
@@ -667,176 +746,298 @@ function broadcastLiveBet(betData) {
 // 8. API ROUTES & USER PROFILE ENDPOINTS
 // -----------------------------------------------------------------------------
 
-app.post('/api/auth/guest', (req, res) => {
-  const guestId = generateUserId();
-  const username = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
-  const newUser = {
-    id: guestId,
-    username,
-    email: `${username.toLowerCase()}@guest.casino`,
-    gc_balance: 10000.0,
-    sc_unplayed: 10.0,
-    sc_played: 0.0,
-    stripeAccountId: null,
-    kyc: {
-      status: 'UNVERIFIED',
-      tier: 0,
-      inquiryId: null,
-      verifiedAt: null,
-      rejectionReason: null
-    },
-    lastDailyClaim: 0,
-    dailyStreak: 0,
-    adsWatchedToday: 0,
-    lastAdReset: Date.now(),
-    state: 'CA',
-    createdAt: Date.now(),
-    vipTier: 'Bronze',
-    totalWageredGC: 0,
-    totalWageredSC: 0,
-    rakebackAccruedSC: 0,
-    bonus: {
-      lastClaimAt: 0,
-      claimStreak: 0,
-      dailyClaimed: false,
-      challenges: [],
-      challengeDate: '',
-      telemetry: {
-        scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
-        gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
-        weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
-        monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
-        diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
-        history: [],
-        lastDailyReset: Date.now(),
-        lastWeeklyReset: Date.now(),
-        lastMonthlyReset: Date.now()
-      },
-      rakeback: {
-        lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
-        dailyPool: 0, weeklyPool: 0, monthlyPool: 0
-      }
-    }
-  };
-  users.set(guestId, newUser);
-  transactions.set(guestId, []);
-  saveData();
+app.post('/api/auth/guest', async (req, res) => {
+  try {
+    const username = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+    const email = `${username.toLowerCase()}@guest.casino`;
 
-  const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ 
-    token, 
-    user: { id: newUser.id, username: newUser.username, kyc: newUser.kyc }, 
-    balances: { gc: newUser.gc_balance, sc: newUser.sc_unplayed + newUser.sc_played } 
-  });
+    const userId = await db.createUser({
+      username,
+      email,
+      password: null,
+      gcBalance: 10000,
+      scBalance: 10
+    });
+
+    const newUser = {
+      id: userId,
+      username,
+      email,
+      password: null,
+      gc_balance: 10000.0,
+      sc_unplayed: 10.0,
+      sc_played: 0.0,
+      stripeAccountId: null,
+      kyc: {
+        status: 'UNVERIFIED',
+        tier: 0,
+        inquiryId: null,
+        verifiedAt: null,
+        rejectionReason: null
+      },
+      lastDailyClaim: 0,
+      dailyStreak: 0,
+      adsWatchedToday: 0,
+      lastAdReset: Date.now(),
+      state: 'CA',
+      createdAt: Date.now(),
+      vipTier: 'Bronze',
+      totalWageredGC: 0,
+      totalWageredSC: 0,
+      rakebackAccruedSC: 0,
+      isGuest: true,
+      bonus: {
+        lastClaimAt: 0,
+        claimStreak: 0,
+        dailyClaimed: false,
+        challenges: [],
+        challengeDate: '',
+        telemetry: {
+          scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+          gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+          weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+          monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+          diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+          history: [],
+          lastDailyReset: Date.now(),
+          lastWeeklyReset: Date.now(),
+          lastMonthlyReset: Date.now()
+        },
+        rakeback: {
+          lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+          dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+        }
+      }
+    };
+    users.set(userId, newUser);
+    transactions.set(userId, []);
+
+     const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({
+      token,
+      user: { id: userId, username, email, isGuest: true, kyc: newUser.kyc },
+      balances: { gc: 10000, sc: 10 }
+     });
+  } catch (e) {
+    console.error('[Guest Registration Error]:', e.message);
+    res.status(500).json({ error: 'Failed to create guest account.' });
+  }
+});
+
+app.get('/api/geo/lookup', (req, res) => {
+  const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '';
+  const clientIp = ip.replace('::ffff:', '');
+
+  fetch(`https://ipapi.co/${encodeURIComponent(clientIp)}/json/`)
+    .then(r => r.json())
+    .then(geo => {
+      res.json({
+        ip: clientIp,
+        state: geo.region_code || geo.state || null,
+        country: geo.country_code || null,
+        city: geo.city || null,
+        restricted: RESTRICTED_STATES.includes((geo.region_code || geo.state || '').toUpperCase())
+      });
+    })
+    .catch(() => {
+      res.json({ ip: clientIp, state: null, country: null, city: null, restricted: null });
+    });
 });
 
 app.post('/api/auth/register', async (req, res) => {
-  const { username, email, password, birthDate } = req.body || {};
+  try {
+    const { username, email, password, birthDate, state } = req.body || {};
 
-  if (!username || !email || !password) {
-    return res.status(400).json({ error: 'Username, email, and password are required.' });
-  }
-
-  if (!birthDate) {
-    return res.status(400).json({ error: 'Birth date is required for age verification.' });
-  }
-
-  const birth = new Date(birthDate);
-  const ageMs = Date.now() - birth.getTime();
-  const minAgeMs = 18 * 365 * 24 * 60 * 60 * 1000;
-  if (ageMs < minAgeMs || birth > new Date()) {
-    return res.status(403).json({ error: 'You must be at least 18 years old to register.' });
-  }
-
-  for (const u of users.values()) {
-    if (u.email === email) return res.status(409).json({ error: 'Email already registered.' });
-    if (u.username === username) return res.status(409).json({ error: 'Username already taken.' });
-  }
-
-  const userId = generateUserId();
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const newUser = {
-    id: userId,
-    username,
-    email,
-    password: hashedPassword,
-    gc_balance: 10000.0,
-    sc_unplayed: 10.0,
-    sc_played: 0.0,
-    stripeAccountId: null,
-    kyc: {
-      status: 'UNVERIFIED',
-      tier: 0,
-      inquiryId: null,
-      verifiedAt: null,
-      rejectionReason: null
-    },
-    lastDailyClaim: 0,
-    dailyStreak: 0,
-    adsWatchedToday: 0,
-    lastAdReset: Date.now(),
-    state: 'CA',
-    createdAt: Date.now(),
-    vipTier: 'Bronze',
-    totalWageredGC: 0,
-    totalWageredSC: 0,
-    rakebackAccruedSC: 0,
-    bonus: {
-      lastClaimAt: 0,
-      claimStreak: 0,
-      dailyClaimed: false,
-      challenges: [],
-      challengeDate: '',
-      telemetry: {
-        scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
-        gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
-        weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
-        monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
-        diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
-        history: [],
-        lastDailyReset: Date.now(),
-        lastWeeklyReset: Date.now(),
-        lastMonthlyReset: Date.now()
-      },
-      rakeback: {
-        lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
-        dailyPool: 0, weeklyPool: 0, monthlyPool: 0
-      }
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email, and password are required.' });
     }
-  };
-  users.set(userId, newUser);
-  transactions.set(userId, []);
-  saveData();
 
-  const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({
-    token,
-    user: { id: newUser.id, username: newUser.username, email: newUser.email, kyc: newUser.kyc },
-    balances: { gc: newUser.gc_balance, sc: newUser.sc_unplayed + newUser.sc_played }
-  });
+    if (!birthDate) {
+      return res.status(400).json({ error: 'Birth date is required for age verification.' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+
+    if (username.length < 3 || username.length > 20) {
+      return res.status(400).json({ error: 'Username must be between 3 and 20 characters.' });
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      return res.status(400).json({ error: 'Username can only contain letters, numbers, and underscores.' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+    }
+
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain at least one uppercase letter, one lowercase letter, and one number.' });
+    }
+
+    const birth = new Date(birthDate);
+    const ageMs = Date.now() - birth.getTime();
+    const minAgeMs = 18 * 365.25 * 24 * 60 * 60 * 1000;
+    if (ageMs < minAgeMs || birth > new Date()) {
+      return res.status(403).json({ error: 'You must be at least 18 years old to register.' });
+    }
+
+    const stateCode = (state || 'CA').toUpperCase();
+    if (RESTRICTED_STATES.includes(stateCode)) {
+      return res.status(403).json({ error: `Online gaming is not available in ${stateCode}.` });
+    }
+
+    const existingEmail = await db.findByEmail(email);
+    if (existingEmail) {
+      return res.status(409).json({ error: 'Email already registered.' });
+    }
+
+    const existingUsername = await db.findByUsername(username);
+    if (existingUsername) {
+      return res.status(409).json({ error: 'Username already taken.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const userId = await db.createUser({
+      username,
+      email,
+      password: hashedPassword,
+      gcBalance: 10000,
+      scBalance: 10
+    });
+
+    await db.updateUser(userId, {
+      state: stateCode,
+      kyc_status: 'UNVERIFIED',
+      kyc_tier: 0
+    });
+
+    const newUser = {
+      id: userId,
+      username,
+      email,
+      password: hashedPassword,
+      gc_balance: 10000.0,
+      sc_unplayed: 10.0,
+      sc_played: 0.0,
+      stripeAccountId: null,
+      kyc: {
+        status: 'UNVERIFIED',
+        tier: 0,
+        inquiryId: null,
+        verifiedAt: null,
+        rejectionReason: null
+      },
+      lastDailyClaim: 0,
+      dailyStreak: 0,
+      adsWatchedToday: 0,
+      lastAdReset: Date.now(),
+      state: stateCode,
+      createdAt: Date.now(),
+      vipTier: 'Bronze',
+      totalWageredGC: 0,
+      totalWageredSC: 0,
+      rakebackAccruedSC: 0,
+      bonus: {
+        lastClaimAt: 0,
+        claimStreak: 0,
+        dailyClaimed: false,
+        challenges: [],
+        challengeDate: '',
+        telemetry: {
+          scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+          gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+          weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+          monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+          diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+          history: [],
+          lastDailyReset: Date.now(),
+          lastWeeklyReset: Date.now(),
+          lastMonthlyReset: Date.now()
+        },
+        rakeback: {
+          lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+          dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+        }
+      }
+    };
+     users.set(userId, newUser);
+    transactions.set(userId, []);
+
+    const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({
+      token,
+      user: { id: userId, username, email, isGuest: false, kyc: newUser.kyc, state: stateCode },
+      balances: { gc: 10000, sc: 10 }
+    });
+  } catch (e) {
+    console.error('[Registration Error]:', e.message);
+    if (e.message.includes('UNIQUE constraint failed')) {
+      return res.status(409).json({ error: 'Email or username already exists.' });
+    }
+    res.status(500).json({ error: 'Failed to create account. Please try again.' });
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' });
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+
+    let foundUser = null;
+    const dbUser = await db.findByEmail(email);
+    if (dbUser) {
+      foundUser = users.get(dbUser.id);
+      if (!foundUser) {
+        foundUser = {
+          id: dbUser.id,
+          username: dbUser.username,
+          email: dbUser.email,
+          password: dbUser.password,
+          gc_balance: dbUser.gc_balance,
+          sc_unplayed: dbUser.sc_unplayed,
+          sc_played: dbUser.sc_played,
+          stripeAccountId: dbUser.stripe_account_id,
+          kyc: {
+            status: dbUser.kyc_status,
+            tier: dbUser.kyc_tier,
+            inquiryId: dbUser.kyc_inquiry_id,
+            verifiedAt: dbUser.kyc_verified_at,
+            rejectionReason: dbUser.kyc_rejection_reason
+          },
+          state: dbUser.state,
+          createdAt: dbUser.created_at,
+          vipTier: dbUser.vip_tier,
+          totalWageredGC: dbUser.total_wagered_gc,
+          totalWageredSC: dbUser.total_wagered_sc,
+          rakebackAccruedSC: dbUser.rakeback_accrued_sc,
+          isGuest: dbUser.email && dbUser.email.endsWith('@guest.casino')
+        };
+        users.set(dbUser.id, foundUser);
+        transactions.set(dbUser.id, []);
+      }
+    }
+
+    if (!foundUser) return res.status(401).json({ error: 'Invalid credentials.' });
+
+    const valid = await bcrypt.compare(password, foundUser.password || '');
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials.' });
+
+    const token = jwt.sign({ id: foundUser.id, username: foundUser.username }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({
+      token,
+      user: { id: foundUser.id, username: foundUser.username, email: foundUser.email, isGuest: foundUser.isGuest || (foundUser.email && foundUser.email.endsWith('@guest.casino')) || false, kyc: foundUser.kyc },
+      balances: { gc: foundUser.gc_balance, sc: foundUser.sc_unplayed + foundUser.sc_played }
+    });
+  } catch (e) {
+    console.error('[Login Error]:', e.message);
+    res.status(500).json({ error: 'Login failed. Please try again.' });
   }
-
-  let foundUser = null;
-  for (const u of users.values()) {
-    if (u.email === email) { foundUser = u; break; }
-  }
-  if (!foundUser) return res.status(401).json({ error: 'Invalid credentials.' });
-
-  const valid = await bcrypt.compare(password, foundUser.password || '');
-  if (!valid) return res.status(401).json({ error: 'Invalid credentials.' });
-
-  const token = jwt.sign({ id: foundUser.id, username: foundUser.username }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({
-    token,
-    user: { id: foundUser.id, username: foundUser.username, email: foundUser.email, kyc: foundUser.kyc },
-    balances: { gc: foundUser.gc_balance, sc: foundUser.sc_unplayed + foundUser.sc_played }
-  });
 });
 
 app.get('/api/user/me', verifyToken, async (req, res) => {
@@ -853,11 +1054,12 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     }
   }
 
-  res.json({
+   res.json({
     id: user.id,
     username: user.username,
     email: user.email,
     state: user.state,
+    isGuest: user.email && user.email.endsWith('@guest.casino'),
     createdAt: user.createdAt,
     balances: { 
       gc: user.gc_balance, 
@@ -888,6 +1090,33 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
       rakeback: user.bonus.rakeback
     } : null
   });
+});
+
+app.get('/api/session-status', (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.json({ authenticated: false });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = users.get(decoded.id);
+    if (!user) {
+      return res.json({ authenticated: false });
+    }
+    res.json({
+      authenticated: true,
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      state: user.state,
+      isGuest: user.email ? user.email.endsWith('@guest.casino') : false,
+      kyc: user.kyc || { status: 'UNVERIFIED', tier: 0 },
+      balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
+    });
+  } catch (err) {
+    res.json({ authenticated: false });
+  }
 });
 
 app.get('/api/user/transactions', verifyToken, (req, res) => {
@@ -1095,8 +1324,22 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
 
   if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
 
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  if (user.isGuest || (user.email && user.email.endsWith('@guest.casino'))) {
+    return res.status(403).json({
+      error: 'Guest accounts cannot purchase coins. Please register a real account first.',
+      requiresAccount: true
+    });
+  }
+
   const host = req.headers.origin || `https://${req.headers.host}`;
   const mode = uiMode === 'hosted' ? 'hosted' : 'embedded_page';
+
+  if (!stripe) {
+    return res.status(500).json({ error: 'Payment processor is not configured. Please contact support or try again later.' });
+  }
 
   try {
     const sessionConfig = {
@@ -1137,8 +1380,77 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
   }
 });
 
+// Crypto Payment Initiation (Mock / Integration Point)
+app.post('/api/user/crypto-payment/initiate', verifyToken, async (req, res) => {
+  const { packageId, currency } = req.body;
+  const pkg = COIN_PACKAGES[packageId || 'pack_10'];
+  if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
+
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  if (user.isGuest || (user.email && user.email.endsWith('@guest.casino'))) {
+    return res.status(403).json({ error: 'Guest accounts cannot purchase coins. Please register a real account first.', requiresAccount: true });
+  }
+
+  const usdAmount = pkg.priceInCents / 100;
+  const cryptoAddresses = {
+    BTC: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+    ETH: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+    USDT: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+    LTC: 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976'
+  };
+  const cryptoAmounts = {
+    BTC: (usdAmount / 50000).toFixed(8),
+    ETH: (usdAmount / 3000).toFixed(6),
+    USDT: usdAmount.toFixed(2),
+    LTC: (usdAmount / 100).toFixed(4)
+  };
+
+  const paymentId = crypto.randomUUID();
+  cryptoPayments.set(paymentId, {
+    userId: user.id,
+    packageId,
+    currency: currency || 'BTC',
+    amount: cryptoAmounts[currency] || '0',
+    usdAmount,
+    gcAmount: pkg.gcAmount,
+    scAmount: pkg.scAmount,
+    status: 'PENDING',
+    createdAt: Date.now()
+  });
+
+  res.json({
+    success: true,
+    paymentId,
+    currency: currency || 'BTC',
+    address: cryptoAddresses[currency] || cryptoAddresses.BTC,
+    amount: cryptoAmounts[currency] || cryptoAmounts.BTC,
+    usdAmount,
+    message: 'Send exact amount to the provided address. Coins will be credited after 1 confirmation.'
+  });
+});
+
+app.post('/api/user/crypto-payment/webhook', express.json(), (req, res) => {
+  const { paymentId, status } = req.body;
+  const payment = cryptoPayments.get(paymentId);
+  if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+
+  if (status === 'CONFIRMED' || status === 'COMPLETED') {
+    payment.status = 'COMPLETED';
+    const user = users.get(payment.userId);
+    if (user) {
+      user.gc_balance += payment.gcAmount;
+      user.sc_unplayed += payment.scAmount;
+      saveData();
+      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment`, payment.gcAmount, payment.scAmount, { paymentId, crypto: payment.currency });
+    }
+  }
+
+  res.json({ success: true });
+});
+
 app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
-  const { amount } = req.body;
   const user = users.get(req.user.id);
   const host = req.headers.origin || `https://${req.headers.host}`;
 
@@ -1151,17 +1463,22 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
     });
   }
 
+  const amount = parseFloat(req.body.amount);
   if (isNaN(amount) || amount < 50) {
     return res.status(400).json({ error: 'Minimum redemption limit is 50.00 Sweeps Coins (SC).' });
   }
 
   if (user.sc_played < amount) {
-    return res.status(400).json({ 
-      error: `Insufficient redeemable balance. You have ${user.sc_played.toFixed(2)} SC eligible for redemption. (Unplayed SC must be wagered 1x first).` 
+    return res.status(400).json({
+      error: `Insufficient redeemable balance. You have ${user.sc_played.toFixed(2)} SC eligible for redemption. (Unplayed SC must be wagered 1x first).`
     });
   }
 
   try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Payment processor is not configured. Please contact support.' });
+    }
+
     if (!user.stripeAccountId) {
       const account = await stripe.accounts.create({
         type: 'express',
@@ -1196,13 +1513,14 @@ app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
       description: `Sweeps Coins Redemption for User #${user.id}`,
     });
 
-    user.sc_played -= amount;
+    const redeemedAmount = Math.min(amount, user.sc_played);
+    user.sc_played = Math.max(0, user.sc_played - redeemedAmount);
     saveData();
-    logTransaction(user.id, 'WITHDRAWAL', `Redeemed ${amount} SC ($${amount.toFixed(2)} USD)`, 0, -amount);
+    logTransaction(user.id, 'WITHDRAWAL', `Redeemed ${redeemedAmount} SC ($${redeemedAmount.toFixed(2)} USD)`, 0, -redeemedAmount);
 
     res.json({
       success: true,
-      message: `Successfully transferred $${amount.toFixed(2)} USD!`,
+      message: `Successfully transferred $${redeemedAmount.toFixed(2)} USD!`,
       transferId: transfer.id,
       balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
     });
@@ -1257,6 +1575,62 @@ require('./engine/sessionGames').register(app, {
   updateTelemetry,
   saveData
 });
+
+// Slots Buy Bonus endpoint
+app.post('/api/play/slots/buy-bonus', verifyToken, enforceJurisdiction, (req, res) => {
+  const wager = validateWager(req, res);
+  if (!wager) return;
+  const { user, currency, amount } = wager;
+
+  const bonusCost = amount * 100;
+  const balance = currency === 'GC' ? user.gc_balance : user.sc_unplayed;
+  if (bonusCost > balance) {
+    return res.status(400).json({ error: `Insufficient ${currency} balance. Bonus costs ${bonusCost.toLocaleString()} ${currency}.` });
+  }
+
+  debitBet(user, currency, bonusCost);
+  logTransaction(user.id, 'BET', `Slots Bonus Buy (${amount} x 100)`,
+    currency === 'GC' ? -bonusCost : 0, currency === 'SC' ? -bonusCost : 0);
+
+  const seedPair = getUserSeedPair(user.id);
+  const floatCount = 30;
+  const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, floatCount);
+
+  const outcome = GAMES.slots(floats, { betAmount: amount });
+  const payout = Math.round(outcome.multiplier * amount * 100) / 100;
+  const isWin = outcome.multiplier > 1 || outcome.pushed;
+
+  if (payout > 0) {
+    creditWin(user, currency, payout);
+    logTransaction(user.id, 'WIN', `Slots Bonus @ ${outcome.multiplier}x`,
+      currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
+  }
+
+  ensureBonusFields(user);
+  updateTelemetry(user, 'slots', currency, bonusCost, isWin, payout, outcome);
+
+  broadcastLiveBet({
+    username: user.username,
+    game: 'SLOTS BONUS',
+    betAmount: bonusCost,
+    currency,
+    multiplier: outcome.multiplier,
+    win: isWin,
+    payout
+  });
+
+  res.json({
+    ...outcome,
+    betAmount: amount,
+    payout,
+    provablyFair: {
+      serverSeedHash: ProvablyFair.hashSeed(seedPair.serverSeed),
+      clientSeed: seedPair.clientSeed,
+      nonce: seedPair.nonce - 1
+    },
+    balances: balancesOf(user)
+  });
+});
 // -----------------------------------------------------------------------------
 // 12. GENERAL GAMES EXECUTION ENDPOINT
 // -----------------------------------------------------------------------------
@@ -1277,30 +1651,48 @@ app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
   const floatCount = GAME_FLOAT_COUNTS[gameId] || 20;
   const floats = ProvablyFair.getFloats(seedPair.serverSeed, seedPair.clientSeed, seedPair.nonce++, floatCount);
 
-   const outcome = GAMES[gameId](floats, req.body.params || {});
-   const payout = Math.round(outcome.multiplier * amount * 100) / 100;
-   const isWin = outcome.multiplier > 1 || outcome.pushed;
+  let outcome;
+  try {
+    outcome = GAMES[gameId](floats, req.body.params || {});
+  } catch (err) {
+    console.error(`[GAME ENGINE ERROR] ${gameId}:`, err);
+    // Refund the bet on engine error
+    if (currency === 'GC') {
+      user.gc_balance += amount;
+    } else {
+      user.sc_unplayed += amount;
+    }
+    seedPair.nonce--; // Roll back nonce to maintain sync
+    saveData();
+    logTransaction(user.id, 'BET', `Refund for ${gameId.toUpperCase()} (engine error)`,
+      currency === 'GC' ? amount : 0, currency === 'SC' ? amount : 0);
+    return res.status(500).json({ error: 'Game engine error. Bet refunded.' });
+  }
 
-   if (payout > 0) {
-     creditWin(user, currency, payout);
-     logTransaction(user.id, isWin ? 'WIN' : 'BET',
-       `${gameId.toUpperCase()} resolved @ ${outcome.multiplier}x`,
-       currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
-   }
+  const payout = Math.round(outcome.multiplier * amount * 100) / 100;
+  const isWin = outcome.multiplier > 1 || outcome.pushed;
 
-   // Track telemetry for challenges and rakeback
-   ensureBonusFields(user);
-   updateTelemetry(user, gameId, currency, amount, isWin, payout, outcome);
+  if (payout > 0) {
+    creditWin(user, currency, payout);
+    const txType = outcome.pushed ? 'BET' : 'WIN';
+    logTransaction(user.id, txType,
+      `${gameId.toUpperCase()} resolved @ ${outcome.multiplier}x${outcome.pushed ? ' (push)' : ''}`,
+      currency === 'GC' ? payout : 0, currency === 'SC' ? payout : 0);
+  }
 
-   broadcastLiveBet({
-     username: user.username,
-     game: gameId.toUpperCase(),
-     betAmount: amount,
-     currency,
-     multiplier: outcome.multiplier,
-     win: isWin,
-     payout
-   });
+  // Track telemetry for challenges and rakeback
+  ensureBonusFields(user);
+  updateTelemetry(user, gameId, currency, amount, isWin, payout, outcome);
+
+  broadcastLiveBet({
+    username: user.username,
+    game: gameId.toUpperCase(),
+    betAmount: amount,
+    currency,
+    multiplier: outcome.multiplier,
+    win: isWin,
+    payout
+  });
 
   res.json({
     ...outcome,
@@ -1497,11 +1889,11 @@ function updateTelemetry(user, gameId, currency, betAmount, won, payout, outcome
 
   // Challenge-specific tracking
   // dice_over90: track SC wagered on OVER 90 bets (matches challenge description)
-  if (gameId === 'dice' && currency === 'SC' && outcome?.params?.target >= 90 && outcome?.params?.condition === 'OVER') {
+  if (gameId === 'dice' && currency === 'SC' && outcome?.details?.target >= 90 && outcome?.details?.condition === 'OVER') {
     t.diceOver90 = (t.diceOver90 || 0) + betAmount;
   }
-  if (gameId === 'crash' && won && payout / betAmount >= 2) (t.crashCashout2x = (t.crashCashout2x || 0) + 1);
-  if (gameId === 'blackjack') (t.blackjackHands = (t.blackjackHands || 0) + 1);
+  if (gameId === 'crash' && won && payout / betAmount >= 2) { t.crashCashout2x = (t.crashCashout2x || 0) + 1; }
+  if (gameId === 'blackjack') { t.blackjackHands = (t.blackjackHands || 0) + 1; }
 
   // Push to history (cap at 100 entries)
   t.history.push({ ts: Date.now(), game: gameId, currency, bet: betAmount, won, payout });
