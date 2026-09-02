@@ -2177,9 +2177,14 @@ app.use((req, res) => {
   }
   res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
 // -----------------------------------------------------------------------------
 // 13. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
 // -----------------------------------------------------------------------------
-server.listen(PORT, () => {
-  console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
-});
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  server.listen(PORT, () => {
+    console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
+  });
+}
