@@ -347,9 +347,21 @@ async function getDb() {
   return db;
 }
 
+function dropAllTables() {
+  const tables = [
+    'users', 'transactions', 'provably_fair_seeds', 'bonus_state',
+    'telemetry', 'jackpot_pool', 'affiliates', 'affiliate_earnings'
+  ];
+  for (const t of tables) {
+    try { db.run(`DROP TABLE IF EXISTS ${t}`); } catch (e) { /* ignore */ }
+  }
+}
+
 module.exports = {
   getDb,
   persistSync,
+  createSchema,
+  dropAllTables,
 
   findById: async (id) => {
     const database = await getDb();

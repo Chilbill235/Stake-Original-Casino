@@ -2422,6 +2422,93 @@ app.get('/api/user/transactions/bets-casino', verifyToken, (req, res) => {
   res.json({ transactions: filtered, category: 'bets-casino', count: filtered.length });
 });
 
+// -----------------------------------------------------------------------------
+// 15. ADMIN: WIPE + RESEED (gated by RESET_SECRET env var)
+// -----------------------------------------------------------------------------
+//
+//   POST /api/admin/reset
+//   Header: x-reset-secret: <RESET_SECRET>
+//
+//   Body (optional): { "demoEmail": "demo@casino.local", "demoPassword": "Demo1234!" }
+//
+//   Wipes every user/transaction/seed/affiliate row, recreates schema, then
+//   seeds ONE Demo user with the supplied credentials (or the defaults).
+//
+app.post('/api/admin/reset', async (req, res) => {
+  const required = process.env.RESET_SECRET;
+  if (!required) {
+    return res.status(503).json({ error: 'RESET_SECRET is not configured on this server.' });
+  }
+  const provided = req.headers['x-reset-secret'] || req.body?.secret;
+  if (provided !== required) {
+    return res.status(401).json({ error: 'Invalid reset secret.' });
+  }
+
+  try {
+    const demoEmail = String(req.body?.demoEmail || 'demo@casino.local').toLowerCase().trim();
+    const demoUsername = String(req.body?.demoUsername || 'Demo').trim();
+    const demoPassword = String(req.body?.demoPassword || 'Demo1234!');
+
+    db.dropAllTables();
+    db.createSchema();
+    db.persistSync();
+
+    const hashed = await bcrypt.hash(demoPassword, 12);
+    const existing = await db.findByEmail(demoEmail);
+    let userId;
+    if (existing) {
+      userId = existing.id;
+      await db.updateUser(userId, {
+        username: demoUsername,
+        email: demoEmail,
+        password: hashed,
+        gc_balance: 10000,
+        sc_unplayed: 10,
+        sc_played: 0,
+        kyc_status: 'VERIFIED',
+        kyc_tier: 2,
+        kyc_verified_at: new Date().toISOString(),
+        state: 'CA'
+      });
+    } else {
+      userId = await db.createUser({
+        username: demoUsername,
+        email: demoEmail,
+        password: hashed,
+        gcBalance: 10000,
+        scBalance: 10
+      });
+      await db.updateUser(userId, {
+        kyc_status: 'VERIFIED',
+        kyc_tier: 2,
+        kyc_verified_at: new Date().toISOString(),
+        state: 'CA'
+      });
+    }
+
+    users.clear();
+    transactions.clear();
+    userSeeds.clear();
+    processedEvents.clear();
+    cryptoPayments.clear();
+    amoeRegistry.clear();
+    nextUserId = 1;
+    nextUserId = userId + 1;
+
+    saveData();
+
+    console.log(`[ADMIN RESET]: database wiped, Demo user seeded (id=${userId}).`);
+    return res.json({
+      success: true,
+      demo: { id: userId, username: demoUsername, email: demoEmail },
+      message: 'Database reset complete. All users except the Demo account were deleted.'
+    });
+  } catch (e) {
+    console.error('[ADMIN RESET]:', e.message);
+    return res.status(500).json({ error: 'Reset failed: ' + e.message });
+  }
+});
+
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Malformed JSON body.' });
