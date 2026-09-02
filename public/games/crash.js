@@ -54,21 +54,28 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
   const target = details.target;
   const isWin = win;
 
+  // Clear any prior interval
+  if (state.crashIntervalHandle) {
+    clearInterval(state.crashIntervalHandle);
+    state.crashIntervalHandle = null;
+  }
+  state.crashCashOutEarly = false;
+  state.crashAutoTarget = null;
+
   let currentMult = 1.00;
-  const tickRate = 40;
+  const tickRate = 60;
   const tickMult = 0.015;
   let crashed = false;
   let hasCashedOut = false;
 
   display.innerHTML =
     '<div id="crash-game-container" style="text-align:center;padding:20px;">' +
-    '<div id="crash-multiplier" style="font-size:2.5rem;font-weight:900;font-variant-numeric:tabular-nums; color:#00e701;">1.00x</div>' +
-    '<div id="crash-rocket" style="font-size:4rem;margin:20px 0;transition:margin-top 0.2s ease;">🚀</div>' +
-    '<div id="crash-target-ui" style="color:#b1bad2;font-size:0.85rem;margin-bottom:16px;">Cashout at ' + target.toFixed(2) + 'x • Tap STOP below</div>' +
+    '<div id="crash-multiplier" style="font-size:3rem;font-weight:900;font-variant-numeric:tabular-nums;color:#00e701;line-height:1.1;">1.00x</div>' +
+    '<div id="crash-rocket" style="font-size:4rem;margin:12px 0;transition:margin-top 0.2s ease;">🚀</div>' +
+    '<div id="crash-target-ui" style="color:#b1bad2;font-size:0.85rem;margin-bottom:12px;">Auto-cashout at ' + target.toFixed(2) + 'x</div>' +
     '<canvas id="crash-canvas" width="320" height="180" style="background:#0b141e;border-radius:8px;border:1px solid #243542;margin-bottom:16px;"></canvas>' +
     '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">' +
-    '<button class="game-btn-action" id="crash-stop-btn" onclick="stopCrashCashout()" style="background:var(--accent-green);color:#000;animation:pulse-green 1.5s infinite;">STOP — CASHOUT AT ' + target.toFixed(2) + 'x</button>' +
-    '<button class="game-btn-action" id="crash-auto-btn" onclick="autoCrashCashout()" style="background:var(--bg-card);color:var(--text-secondary);">AUTO</button>' +
+    '<button class="game-btn-action" id="crash-stop-btn" onclick="stopCrashCashout()" style="background:var(--accent-green);color:#000;font-weight:800;padding:12px 22px;">CASH OUT NOW</button>' +
     '</div>' +
     '</div>';
 
@@ -79,9 +86,8 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
   const canvas = document.getElementById('crash-canvas');
   const ctx = canvas ? canvas.getContext('2d') : null;
 
-  state.crashTickHandle = 0;
-  state.crashCashOutEarly = false;
   const points = [];
+  const maxPoints = 200;
 
   function drawGraph() {
     if (!ctx) return;
@@ -91,8 +97,8 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
 
     if (points.length < 2) return;
 
-    const maxVal = Math.max(crashPoint, target, ...points) * 1.1;
-    ctx.strokeStyle = '#00e701';
+    const maxVal = Math.max(crashPoint, target, 2) * 1.1;
+    ctx.strokeStyle = isWin ? '#00e701' : (hasCashedOut ? '#00e701' : '#ff4d4d');
     ctx.lineWidth = 2;
     ctx.beginPath();
     points.forEach((p, i) => {
@@ -103,70 +109,66 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
     });
     ctx.stroke();
 
-    ctx.fillStyle = '#ffc700';
+    ctx.fillStyle = hasCashedOut ? '#00e701' : (crashed ? '#ff4d4d' : '#ffc700');
     const lastY = 170 - (points[points.length - 1] / maxVal) * 160;
     ctx.beginPath();
     ctx.arc(320, lastY, 4, 0, Math.PI * 2);
     ctx.fill();
   }
 
+  function finish(cashedOut) {
+    if (state.crashIntervalHandle) {
+      clearInterval(state.crashIntervalHandle);
+      state.crashIntervalHandle = null;
+    }
+    if (rocketEl) rocketEl.textContent = cashedOut ? '✅' : '💥';
+    if (multEl) multEl.textContent = crashPoint.toFixed(2) + 'x ' + (cashedOut ? '✓' : '💥');
+    if (targetEl) targetEl.textContent = cashedOut ? ('Cashed out at ' + target.toFixed(2) + 'x ✓') : ('CRASHED at ' + crashPoint.toFixed(2) + 'x');
+    if (stopBtn) {
+      stopBtn.disabled = true;
+      stopBtn.textContent = crashed ? 'CRASHED' : 'CASHED OUT';
+      stopBtn.style.background = crashed ? '#ff4d4d' : '#00e701';
+    }
+
+    if (cashedOut) {
+      const resultHTML = '<div id="crash-cashout-result" style="margin-top:14px;padding:10px 18px;border-radius:8px;font-weight:800;display:inline-block;' +
+        'background:rgba(0,231,1,0.15);color:#00e701;">' +
+        '✓ + ' + Number(payout).toFixed(2) + ' ' + state.currency +
+        '</div>';
+      const container = document.getElementById('crash-game-container');
+      if (container) container.insertAdjacentHTML('beforeend', resultHTML);
+      if (window.state) window.state.balances = window.state.balances; // ensure no-op
+      if (typeof updateWalletUI === 'function') updateWalletUI();
+      playSound('win');
+    } else {
+      playSound('loss');
+    }
+  }
+
   const interval = setInterval(() => {
     if (crashed) return;
     currentMult = parseFloat((currentMult + tickMult).toFixed(2));
     points.push(currentMult);
-    if (points.length > 80) points.shift();
+    if (points.length > maxPoints) points.shift();
 
     if (multEl) multEl.textContent = currentMult.toFixed(2) + 'x';
-    if (rocketEl) rocketEl.style.marginTop = (20 - Math.min(20, currentMult * 1.5)) + 'px';
-    if (targetEl) targetEl.textContent = 'Cashout at ' + target.toFixed(2) + 'x • Current: ' + currentMult.toFixed(2) + 'x';
+    if (rocketEl) rocketEl.style.marginTop = (Math.max(0, 60 - currentMult * 2)) + 'px';
+    if (targetEl) targetEl.textContent = 'Auto-cashout at ' + target.toFixed(2) + 'x • Current: ' + currentMult.toFixed(2) + 'x';
 
     drawGraph();
 
     if (currentMult >= crashPoint) {
       crashed = true;
-      clearInterval(interval);
-      finishCrashGame(crashPoint, target, payout, isWin, details, multEl, rocketEl, targetEl, stopBtn);
+      hasCashedOut = false;
+      finish(false);
+      return;
     }
-    if ((state.crashCashOutEarly || state.crashAutoTarget) && currentMult >= Math.min(state.crashAutoTarget || Infinity, target)) {
+    if (currentMult >= target) {
       hasCashedOut = true;
-      clearInterval(interval);
-      finishCrashGame(crashPoint, target, payout, isWin, details, multEl, rocketEl, targetEl, stopBtn, true);
+      finish(true);
+      return;
     }
   }, tickRate);
 
   state.crashIntervalHandle = interval;
 };
-
-function finishCrashGame(crashPoint, target, payout, win, details, multEl, rocketEl, targetEl, stopBtn, cashedOut) {
-  if (rocketEl) rocketEl.textContent = '💥';
-  if (multEl) multEl.textContent = crashPoint.toFixed(2) + 'x 💥';
-  if (targetEl) targetEl.textContent = (cashedOut ? 'Cashed out at ' + target.toFixed(2) + 'x ✓' : 'CRASHED at ' + crashPoint.toFixed(2) + 'x');
-  if (stopBtn) stopBtn.disabled = true;
-
-  const container = document.getElementById('crash-game-container');
-  if (container) {
-    const resultHTML = '<div id="crash-cashout-result" style="margin-top:14px;padding:8px 16px;border-radius:8px;font-weight:700;display:inline-block;' +
-      'background:' + (win ? 'rgba(0,231,1,0.15)' : 'rgba(255,77,77,0.15)') + ';' +
-      'color:' + (win ? '#00e701' : '#ff4d4d') + ';">' +
-      (win ? '+ ' + Number(payout).toFixed(2) + ' ' + state.currency + ' ✓' : 'BUST — did not cash out') +
-      '</div>';
-    container.insertAdjacentHTML('beforeend', resultHTML);
-  }
-
-  GameRenderers.addCrashHistory(crashPoint);
-  if (win) playSound('win'); else playSound('loss');
-}
-
-function stopCrashCashout() {
-  state.crashCashOutEarly = true;
-  playSound('click');
-}
-
-function autoCrashCashout() {
-  const current = parseFloat(document.getElementById('crash-multiplier')?.textContent || '1.00');
-  const newTarget = prompt('Set auto-cashout multiplier:', '2.00');
-  if (newTarget) {
-    state.crashAutoTarget = parseFloat(newTarget);
-    playSound('click');
-  }
-}

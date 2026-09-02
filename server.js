@@ -1735,16 +1735,48 @@ setInterval(() => {
   }
 }, 30000);
 
-// Challenge definitions — pool to draw 3 from each day
 const CHALLENGE_POOL = [
-  { id: 'bet_100_sc',           desc: 'Wager 100 SC in 24 hours',           task: 'sc_wagered', target: 100,  minReward: 1.00,  maxReward: 5.00  },
-  { id: 'bet_50_gc',            desc: 'Wager 50,000 GC in 24 hours',         task: 'gc_wagered', target: 50000, minReward: 1.00,  maxReward: 5.00  },
-  { id: 'rounds_10',            desc: 'Play 10 rounds in 24 hours',          task: 'rounds',     target: 10,   minReward: 0.50,  maxReward: 3.00  },
-  { id: 'win_5_rounds',         desc: 'Win 5 rounds in 24 hours',            task: 'rounds_won', target: 5,    minReward: 1.00,  maxReward: 8.00  },
-  { id: 'play_3_games',         desc: 'Play 3 different games in 24 hours',  task: 'games_played', target: 3,  minReward: 0.50,  maxReward: 2.50 },
-  { id: 'lose_5_sc_max',        desc: 'Wager 100 SC on Dice (OVER 90)',      task: 'dice_over90', target: 100, minReward: 0.50,  maxReward: 15.00 },
-  { id: 'crash_2x_cashout',     desc: 'Cashout Crash at 2x or higher 3 times', task: 'crash_cashout_2x', target: 3, minReward: 0.50, maxReward: 7.00 },
-  { id: 'blackjack_3_hands',    desc: 'Play 3 Blackjack hands',              task: 'blackjack_hands', target: 3, minReward: 0.50, maxReward: 3.00 }
+  // --- WAGERING & STREAKS ---
+  { id: 'sc_high_roller',      desc: 'Wager 250 SC across any games',       task: 'sc_wagered',       target: 250,    minReward: 2.50,  maxReward: 10.00 },
+  { id: 'gc_volume_king',      desc: 'Wager 250,000 GC in 24 hours',        task: 'gc_wagered',       target: 250000, minReward: 1.50,  maxReward: 7.50  },
+  { id: 'win_streak_3',        desc: 'Hit a 3-game winning streak',          task: 'win_streak',       target: 3,      minReward: 1.00,  maxReward: 5.00  },
+  { id: 'hot_streak_5',        desc: 'Hit a 5-game winning streak',          task: 'win_streak',       target: 5,      minReward: 3.00,  maxReward: 15.00 },
+  { id: 'marathon_50_rounds',  desc: 'Play 50 total rounds',                 task: 'rounds',           target: 50,     minReward: 1.50,  maxReward: 6.00  },
+
+  // --- MULTIPLIERS & BIG WINS ---
+  { id: 'multi_10x_hit',       desc: 'Hit a 10x multiplier or higher',       task: 'hit_multiplier',   target: 10,     minReward: 1.00,  maxReward: 5.00  },
+  { id: 'multi_50x_legend',    desc: 'Hit a 50x multiplier or higher',       task: 'hit_multiplier',   target: 50,     minReward: 5.00,  maxReward: 25.00 },
+  { id: 'sc_profit_20',        desc: 'Net profit 20 SC in a single session',  task: 'sc_net_profit',    target: 20,     minReward: 2.00,  maxReward: 8.00  },
+  { id: 'big_win_single',      desc: 'Win at least 25 SC in a single round', task: 'single_round_win', target: 25,     minReward: 2.50,  maxReward: 12.00 },
+
+  // --- DICE SPECIFIC ---
+  { id: 'dice_over90',         desc: 'Win a Dice roll set to OVER 90',       task: 'dice_over90_win',  target: 1,      minReward: 1.50,  maxReward: 10.00 },
+  { id: 'dice_under10',        desc: 'Win a Dice roll set to UNDER 10',      task: 'dice_under10_win', target: 1,      minReward: 1.50,  maxReward: 10.00 },
+  { id: 'dice_precision_50',   desc: 'Hit an exact 50.00 roll on Dice',      task: 'dice_exact_50',    target: 1,      minReward: 10.00, maxReward: 50.00 },
+  { id: 'dice_speed_15',       desc: 'Complete 15 Dice rolls',               task: 'dice_rounds',      target: 15,     minReward: 0.50,  maxReward: 2.50  },
+
+  // --- CRASH SPECIFIC ---
+  { id: 'crash_cashout_2x',    desc: 'Cash out Crash at 2x+ (3 times)',      task: 'crash_2x_count',   target: 3,      minReward: 1.00,  maxReward: 5.00  },
+  { id: 'crash_cashout_5x',    desc: 'Cash out Crash at 5x or higher',       task: 'crash_5x_count',   target: 1,      minReward: 2.00,  maxReward: 10.00 },
+  { id: 'crash_iron_hands',    desc: 'Cash out Crash at 10x or higher',      task: 'crash_10x_count',  target: 1,      minReward: 5.00,  maxReward: 25.00 },
+  { id: 'crash_sniper_1_1x',   desc: 'Cash out Crash between 1.10x & 1.25x (5 times)', task: 'crash_snipe', target: 5, minReward: 0.75, maxReward: 3.50 },
+
+  // --- BLACKJACK SPECIFIC ---
+  { id: 'bj_natural_21',       desc: 'Get dealt a Natural Blackjack (21)',   task: 'bj_natural',       target: 1,      minReward: 1.50,  maxReward: 7.50  },
+  { id: 'bj_win_double',       desc: 'Win a Blackjack hand on a Double Down', task: 'bj_double_win',   target: 1,      minReward: 1.00,  maxReward: 5.00  },
+  { id: 'bj_dealer_bust',      desc: 'Win 3 Blackjack hands via Dealer Bust',task: 'bj_dealer_bust',  target: 3,      minReward: 1.25,  maxReward: 6.00  },
+  { id: 'bj_marathon_10',      desc: 'Play 10 Blackjack hands',              task: 'bj_hands',         target: 10,     minReward: 0.75,  maxReward: 3.50  },
+
+  // --- MINES / SLOTS / PLINKO ---
+  { id: 'mines_clear_3',       desc: 'Uncover 3 safe tiles in Mines (1 win)', task: 'mines_tiles',     target: 3,      minReward: 0.50,  maxReward: 2.50  },
+  { id: 'mines_high_risk',     desc: 'Win a Mines round with 5+ mines active',task: 'mines_hard_win',  target: 1,      minReward: 2.50,  maxReward: 12.00 },
+  { id: 'plinko_high_bucket',  desc: 'Hit a 10x+ outer bucket in Plinko',    task: 'plinko_outer',     target: 1,      minReward: 1.50,  maxReward: 8.00  },
+  { id: 'slots_bonus_trigger', desc: 'Trigger a Bonus Round or Free Spins',   task: 'slot_bonus',       target: 1,      minReward: 3.00,  maxReward: 15.00 },
+
+  // --- EXPLORATION & TIMING ---
+  { id: 'genre_explorer',      desc: 'Play at least 4 different game titles', task: 'unique_games',     target: 4,      minReward: 1.00,  maxReward: 4.00  },
+  { id: 'jack_of_all_trades',  desc: 'Win at least 1 round in 3 different games', task: 'unique_wins',  target: 3,      minReward: 1.50,  maxReward: 6.00  },
+  { id: 'quick_draw',          desc: 'Play 5 rounds within 5 minutes of login', task: 'speed_rounds',  target: 5,      minReward: 0.50,  maxReward: 2.00  }
 ];
 
 // Initialize user fields for bonus systems

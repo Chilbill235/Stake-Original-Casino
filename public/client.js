@@ -37,41 +37,35 @@ const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 let audioCtx = null;
 let audioReady = false;
 
-function getAudioContext() {
-  if (!audioCtx) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextClass) {
-      try {
-        audioCtx = new AudioContextClass();
-      } catch (e) {
-        console.warn('[Audio]: Failed to init AudioContext', e);
-      }
-    }
-  }
-  return audioCtx;
-}
-
 function initAudioContext() {
-  if (audioReady) return;
-  const ctx = getAudioContext();
-  if (ctx) {
-    if (ctx.state === 'suspended') {
-      ctx.resume().then(() => { audioReady = true; }).catch(() => {});
-    } else if (ctx.state === 'running') {
+  if (audioCtx) {
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().then(() => { audioReady = true; }).catch(() => {});
+    } else if (audioCtx.state === 'running') {
       audioReady = true;
     }
+    return;
+  }
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    audioCtx = new AudioContextClass();
+    if (audioCtx.state === 'running') audioReady = true;
+    else audioCtx.resume().then(() => { audioReady = true; }).catch(() => {});
+  } catch (e) {
+    console.warn('[Audio]: Failed to init AudioContext', e);
   }
 }
 
 function playSound(type) {
   if (!state.sfxEnabled) return;
-  const ctx = getAudioContext();
-  if (!ctx) return;
+  if (!audioCtx) return;
 
+  const ctx = audioCtx;
   if (ctx.state === 'suspended') {
-    ctx.resume();
+    ctx.resume().catch(() => {});
   }
-  if (ctx.state === 'suspended') return;
+  if (ctx.state !== 'running') return;
 
   const now = ctx.currentTime;
   const osc = ctx.createOscillator();
@@ -1127,13 +1121,58 @@ function showLobby() {
   document.getElementById('view-bonus')?.classList.add('hidden');
   document.getElementById('view-challenges')?.classList.add('hidden');
   document.getElementById('view-rakeback')?.classList.add('hidden');
+  document.querySelector('.main-layout')?.classList.remove('is-game');
   state.currentGame = null;
   state.activeGameState = null;
   state.isProcessing = false;
-  state.crashIntervalHandle = 0;
+  if (state.crashIntervalHandle) {
+    clearInterval(state.crashIntervalHandle);
+    state.crashIntervalHandle = null;
+  }
   state.crashCashOutEarly = false;
   state.crashAutoTarget = null;
   clearGameControls();
+  closeGlobalFeed();
+}
+
+function closeGlobalFeed() {
+  const drawer = document.getElementById('global-bets-drawer');
+  if (drawer) drawer.classList.remove('open');
+}
+
+function toggleGlobalFeed() {
+  let drawer = document.getElementById('global-bets-drawer');
+  if (!drawer) {
+    drawer = document.createElement('aside');
+    drawer.id = 'global-bets-drawer';
+    drawer.className = 'global-bets-drawer';
+    drawer.innerHTML =
+      '<div class="global-bets-drawer-header">' +
+      '  <h3>⚡ Global Bets</h3>' +
+      '  <button class="x-close" onclick="closeGlobalFeed()" aria-label="Close feed">×</button>' +
+      '</div>' +
+      '<div style="display:flex; gap:4px; padding:8px 12px; background:#0f171e; border-bottom:1px solid #243542;">' +
+      '  <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter(\'ALL\')">All</button>' +
+      '  <button class="btn-secondary-action feed-tab-btn" data-filter="MY_BETS" onclick="setFeedFilter(\'MY_BETS\')">My Bets</button>' +
+      '  <button class="btn-secondary-action feed-tab-btn" data-filter="HIGH_ROLLERS" onclick="setFeedFilter(\'HIGH_ROLLERS\')">High Rollers</button>' +
+      '</div>' +
+      '<div class="bets-feed-header" style="padding:6px 12px;"><span>USER / GAME</span><span>MULT.</span></div>' +
+      '<div class="bets-feed" id="bets-feed-drawer"></div>' +
+      '<div class="game-results-header"><h4>🔥 Recent Results</h4></div>' +
+      '<div class="game-result-feed" id="game-result-feed-drawer"></div>';
+    document.body.appendChild(drawer);
+  }
+
+  drawer.classList.toggle('open');
+
+  if (drawer.classList.contains('open')) {
+    const drawerFeed = document.getElementById('bets-feed-drawer');
+    const drawerResults = document.getElementById('game-result-feed-drawer');
+    const mainFeed = document.getElementById('bets-feed');
+    const mainResults = document.getElementById('game-result-feed');
+    if (drawerFeed && mainFeed) drawerFeed.innerHTML = mainFeed.innerHTML;
+    if (drawerResults && mainResults) drawerResults.innerHTML = mainResults.innerHTML;
+  }
 }
 
 function clearGameControls() {
@@ -1177,6 +1216,8 @@ async function launchGame(gameId) {
   document.getElementById('view-lobby')?.classList.add('hidden');
   document.getElementById('view-game')?.classList.remove('hidden');
   document.getElementById('active-game-title').textContent = gameId.toUpperCase();
+  document.querySelector('.main-layout')?.classList.add('is-game');
+  closeGlobalFeed();
 
   if (window.location.hash !== '#' + gameId) {
     window.location.hash = '#' + gameId;
@@ -1699,6 +1740,22 @@ async function cashoutTower() {
   }
 }
 
+/* --- CRASH ENGINE --- */
+function stopCrashCashout() {
+  state.crashCashOutEarly = true;
+  playSound('click');
+}
+
+function autoCrashCashout(target) {
+  if (typeof target === 'number' && target > 1) {
+    state.crashAutoTarget = target;
+  } else {
+    const input = prompt('Set auto-cashout multiplier:', '2.00');
+    if (input) state.crashAutoTarget = parseFloat(input);
+  }
+  playSound('click');
+}
+
 /* --- LIMBO ENGINE --- */
 async function executeLimboBet(betAmount) {
   state.isProcessing = true;
@@ -1959,8 +2016,7 @@ async function buySlotsBonus() {
       currency: state.currency,
       betAmount
     });
-    state.balances = mergeBalances(data.balances);
-    updateWalletUI();
+    if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
     if (window.GameRenderers && typeof GameRenderers.renderSlots === 'function') {
       GameRenderers.renderSlots(data.details, data.multiplier, data.payout);
     } else {
@@ -2712,45 +2768,39 @@ function renderAccountPage(page = 'overview') {
   }[kyc.status] || 'kyc-badge-unverified';
   const gc = formatCoins(state.balances.gc || 0);
   const sc = formatCoins(state.balances.sc || 0);
+  const scUnplayed = formatCoins(state.balances.sc_unplayed || 0);
+  const scPlayed = formatCoins(state.balances.sc_played || 0);
   const vip = p.vip || {};
   const vipText = vip.tier || 'Bronze';
   const totalWageredGC = formatCoins(vip.totalWageredGC || 0);
   const totalWageredSC = formatCoins(vip.totalWageredSC || 0);
   const memberSince = p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'N/A';
+  const isGuest = !!(p.isGuest || (p.email && p.email.endsWith('@guest.casino')));
 
   const sidebarName = document.getElementById('account-sidebar-name');
   const sidebarTier = document.getElementById('account-sidebar-tier');
   if (sidebarName) sidebarName.textContent = p.username || 'Guest';
   if (sidebarTier) sidebarTier.textContent = (vipText || 'Bronze') + ' VIP';
 
+  const initial = (p.username || 'G').charAt(0).toUpperCase();
+  const sidebarAvatar = document.querySelector('.account-sidebar-avatar');
+  if (sidebarAvatar) sidebarAvatar.textContent = initial;
+
   let html = '';
 
   if (page === 'overview') {
     html = `
       <div class="account-hero">
-        <div class="account-avatar">👤</div>
+        <div class="account-avatar">${escapeHTML(initial)}</div>
         <div class="account-hero-info">
           <h1 class="account-username">${escapeHTML(p.username || 'Guest')}</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
         </div>
       </div>
+
       <div class="account-stats-row">
         <div class="stat-card">
           <div class="stat-icon">🪙</div>
-          <div class="stat-info">
-            <span class="stat-value">${totalWageredGC}</span>
-            <span class="stat-label">GC Wagered</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">💎</div>
-          <div class="stat-info">
-            <span class="stat-value">${totalWageredSC}</span>
-            <span class="stat-label">SC Wagered</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">💰</div>
           <div class="stat-info">
             <span class="stat-value">${gc}</span>
             <span class="stat-label">Gold Coins</span>
@@ -2763,61 +2813,34 @@ function renderAccountPage(page = 'overview') {
             <span class="stat-label">Sweeps Coins</span>
           </div>
         </div>
+        <div class="stat-card">
+          <div class="stat-icon">🎲</div>
+          <div class="stat-info">
+            <span class="stat-value">${totalWageredSC}</span>
+            <span class="stat-label">SC Wagered</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🏆</div>
+          <div class="stat-info">
+            <span class="stat-value">${formatCoins(vip.rakebackAccruedSC || 0)}</span>
+            <span class="stat-label">SC Rakeback</span>
+          </div>
+        </div>
       </div>
+
       <div class="account-details-grid">
-        <div class="account-card profile-card">
-          <h3 class="account-card-title">Profile Information</h3>
+        <div class="account-card">
+          <h3 class="account-card-title">Profile</h3>
           <div class="account-detail-list">
-            <div class="account-detail-item">
-              <span class="detail-label">Username</span>
-              <span class="detail-value">${escapeHTML(p.username || 'Guest')}</span>
-            </div>
-            <div class="account-detail-item">
-              <span class="detail-label">Email</span>
-              <span class="detail-value">${escapeHTML(p.email || 'guest@casino')}</span>
-            </div>
-            <div class="account-detail-item">
-              <span class="detail-label">Location</span>
-              <span class="detail-value">${escapeHTML(p.state || 'CA')}</span>
-            </div>
-            <div class="account-detail-item">
-              <span class="detail-label">Member Since</span>
-              <span class="detail-value">${memberSince}</span>
-            </div>
+            <div class="account-detail-item"><span class="detail-label">Username</span><span class="detail-value">${escapeHTML(p.username || 'Guest')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || (isGuest ? 'guest@casino' : '—'))}</span></div>
+            <div class="account-detail-item"><span class="detail-label">State</span><span class="detail-value">${escapeHTML(p.state || 'CA')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Member Since</span><span class="detail-value">${memberSince}</span></div>
           </div>
         </div>
-        <div class="account-card balances-card">
-          <h3 class="account-card-title">Balances</h3>
-          <div class="balance-cards">
-            <div class="balance-card gc">
-              <div class="balance-card-header">
-                <span class="balance-icon">🪙</span>
-                <span class="balance-type">Gold Coins</span>
-              </div>
-              <div class="balance-amount">${gc}</div>
-              <div class="balance-sub">GC</div>
-            </div>
-            <div class="balance-card sc">
-              <div class="balance-card-header">
-                <span class="balance-icon">💎</span>
-                <span class="balance-type">Sweeps Coins</span>
-              </div>
-              <div class="balance-amount">${sc}</div>
-              <div class="balance-sub">Total SC</div>
-            </div>
-          </div>
-          <div class="balance-breakdown">
-            <div class="breakdown-item">
-              <span class="breakdown-label">Unplayed SC</span>
-              <span class="breakdown-value">${formatCoins(state.balances.sc_unplayed || 0)}</span>
-            </div>
-            <div class="breakdown-item">
-              <span class="breakdown-label">Redeemable SC</span>
-              <span class="breakdown-value">${formatCoins(state.balances.sc_played || 0)}</span>
-            </div>
-          </div>
-        </div>
-        <div class="account-card kyc-card">
+
+        <div class="account-card">
           <h3 class="account-card-title">Identity Verification</h3>
           <div class="kyc-status-badge ${kycClass}">${escapeHTML(kycStatusText)}</div>
           ${kyc.rejectionReason ? `<div class="kyc-rejection">${escapeHTML(kyc.rejectionReason)}</div>` : ''}
@@ -2827,12 +2850,32 @@ function renderAccountPage(page = 'overview') {
           </div>
           <div class="kyc-actions">
             ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
-            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification in Progress</button>' : ''}
-            ${kyc.status === 'REJECTED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Retry Verification</button>' : ''}
-            ${kyc.status === 'UNVERIFIED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Verify Identity</button>' : ''}
+            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button>' : ''}
+            ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
           </div>
         </div>
-        <div class="account-card rewards-card">
+
+        <div class="account-card">
+          <h3 class="account-card-title">Balances</h3>
+          <div class="balance-cards">
+            <div class="balance-card gc">
+              <div class="balance-card-header"><span class="balance-icon">🪙</span><span class="balance-type">Gold Coins</span></div>
+              <div class="balance-amount">${gc}</div>
+              <div class="balance-sub">GC</div>
+            </div>
+            <div class="balance-card sc">
+              <div class="balance-card-header"><span class="balance-icon">💎</span><span class="balance-type">Sweeps Coins</span></div>
+              <div class="balance-amount">${sc}</div>
+              <div class="balance-sub">Total SC</div>
+            </div>
+          </div>
+          <div class="balance-breakdown">
+            <div class="breakdown-item"><span class="breakdown-label">Unplayed SC</span><span class="breakdown-value">${scUnplayed}</span></div>
+            <div class="breakdown-item"><span class="breakdown-label">Redeemable SC</span><span class="breakdown-value">${scPlayed}</span></div>
+          </div>
+        </div>
+
+        <div class="account-card">
           <h3 class="account-card-title">Rewards & Bonuses</h3>
           <div class="rewards-grid">
             <div class="reward-item">
@@ -2841,20 +2884,34 @@ function renderAccountPage(page = 'overview') {
             </div>
             <div class="reward-item">
               <span class="reward-label">Rakeback Accrued</span>
-              <span class="reward-value rakeback">${formatCoins(p.vip?.rakebackAccruedSC || 0)} SC</span>
+              <span class="reward-value rakeback">${formatCoins(vip.rakebackAccruedSC || 0)} SC</span>
             </div>
             <div class="reward-item">
               <span class="reward-label">Last Claim</span>
               <span class="reward-value">${p.bonus?.lastClaimAt ? new Date(p.bonus.lastClaimAt).toLocaleDateString() : 'Never'}</span>
             </div>
+            <div class="reward-item">
+              <span class="reward-label">VIP Tier</span>
+              <span class="reward-value">${escapeHTML(vipText)}</span>
+            </div>
           </div>
           <div class="rewards-actions">
-            <button class="btn-reward" onclick="openBonusModal()">🎁 Daily Bonus</button>
+            <button class="btn-reward" onclick="history.pushState(null,'','/bonus');handleRouteChange()">🎁 Daily Bonus</button>
             <button class="btn-reward" onclick="history.pushState(null,'','/challenges');handleRouteChange()">🎯 Challenges</button>
             <button class="btn-reward" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Rakeback</button>
           </div>
         </div>
-        <div class="account-card security-card">
+
+        <div class="account-card">
+          <h3 class="account-card-title">Quick Actions</h3>
+          <div class="rewards-actions">
+            <button class="btn-reward" onclick="openStoreModal()">🪙 Buy Coins</button>
+            <button class="btn-reward" onclick="openRedeemModal()">💸 Redeem SC</button>
+            <button class="btn-reward" onclick="openProvablyFairModal()">🛡️ Provably Fair</button>
+          </div>
+        </div>
+
+        <div class="account-card">
           <h3 class="account-card-title">Account Security</h3>
           <div class="security-actions">
             <button class="btn-security" onclick="openForgotPasswordModal()">🔑 Reset Password</button>
@@ -2865,32 +2922,33 @@ function renderAccountPage(page = 'overview') {
   } else if (page === 'profile') {
     html = `
       <div class="account-hero">
-        <div class="account-avatar">👤</div>
+        <div class="account-avatar">${escapeHTML(initial)}</div>
         <div class="account-hero-info">
           <h1 class="account-username">Profile</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
         </div>
       </div>
       <div class="account-details-grid">
-        <div class="account-card profile-card">
-          <h3 class="account-card-title">Profile Information</h3>
+        <div class="account-card">
+          <h3 class="account-card-title">Account Information</h3>
           <div class="account-detail-list">
-            <div class="account-detail-item">
-              <span class="detail-label">Username</span>
-              <span class="detail-value">${escapeHTML(p.username || 'Guest')}</span>
-            </div>
-            <div class="account-detail-item">
-              <span class="detail-label">Email</span>
-              <span class="detail-value">${escapeHTML(p.email || 'guest@casino')}</span>
-            </div>
-            <div class="account-detail-item">
-              <span class="detail-label">Location</span>
-              <span class="detail-value">${escapeHTML(p.state || 'CA')}</span>
-            </div>
-            <div class="account-detail-item">
-              <span class="detail-label">Member Since</span>
-              <span class="detail-value">${memberSince}</span>
-            </div>
+            <div class="account-detail-item"><span class="detail-label">Username</span><span class="detail-value">${escapeHTML(p.username || 'Guest')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || '—')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">State</span><span class="detail-value">${escapeHTML(p.state || 'CA')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Member Since</span><span class="detail-value">${memberSince}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Account Type</span><span class="detail-value">${isGuest ? 'Guest' : 'Registered'}</span></div>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">VIP Status</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Current Tier</span><span class="detail-value"><span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span></span></div>
+            <div class="account-detail-item"><span class="detail-label">Total GC Wagered</span><span class="detail-value">${totalWageredGC}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Total SC Wagered</span><span class="detail-value">${totalWageredSC}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Rakeback Earned</span><span class="detail-value">${formatCoins(vip.rakebackAccruedSC || 0)} SC</span></div>
+          </div>
+          <div class="profile-actions" style="margin-top: 6px;">
+            <button class="btn-profile-action" onclick="openProvablyFairModal()">🛡️ Provably Fair Settings</button>
           </div>
         </div>
       </div>`;
@@ -2900,39 +2958,35 @@ function renderAccountPage(page = 'overview') {
         <div class="account-avatar">💰</div>
         <div class="account-hero-info">
           <h1 class="account-username">Wallet</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
         </div>
       </div>
       <div class="account-details-grid">
-        <div class="account-card balances-card">
-          <h3 class="account-card-title">Balances</h3>
+        <div class="account-card">
+          <h3 class="account-card-title">Current Balances</h3>
           <div class="balance-cards">
             <div class="balance-card gc">
-              <div class="balance-card-header">
-                <span class="balance-icon">🪙</span>
-                <span class="balance-type">Gold Coins</span>
-              </div>
+              <div class="balance-card-header"><span class="balance-icon">🪙</span><span class="balance-type">Gold Coins</span></div>
               <div class="balance-amount">${gc}</div>
               <div class="balance-sub">GC</div>
             </div>
             <div class="balance-card sc">
-              <div class="balance-card-header">
-                <span class="balance-icon">💎</span>
-                <span class="balance-type">Sweeps Coins</span>
-              </div>
+              <div class="balance-card-header"><span class="balance-icon">💎</span><span class="balance-type">Sweeps Coins</span></div>
               <div class="balance-amount">${sc}</div>
               <div class="balance-sub">Total SC</div>
             </div>
           </div>
           <div class="balance-breakdown">
-            <div class="breakdown-item">
-              <span class="breakdown-label">Unplayed SC</span>
-              <span class="breakdown-value">${formatCoins(state.balances.sc_unplayed || 0)}</span>
-            </div>
-            <div class="breakdown-item">
-              <span class="breakdown-label">Redeemable SC</span>
-              <span class="breakdown-value">${formatCoins(state.balances.sc_played || 0)}</span>
-            </div>
+            <div class="breakdown-item"><span class="breakdown-label">Unplayed SC (must wager 1x)</span><span class="breakdown-value">${scUnplayed}</span></div>
+            <div class="breakdown-item"><span class="breakdown-label">Redeemable SC</span><span class="breakdown-value">${scPlayed}</span></div>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Manage Funds</h3>
+          <div class="wallet-actions">
+            <button class="btn-wallet-action" onclick="openStoreModal()">🪙 Buy Coin Package</button>
+            <button class="btn-wallet-action" onclick="openRedeemModal()">💸 Redeem SC</button>
+            <button class="btn-wallet-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Claim Rakeback</button>
           </div>
         </div>
       </div>`;
@@ -2942,11 +2996,11 @@ function renderAccountPage(page = 'overview') {
         <div class="account-avatar">🛡️</div>
         <div class="account-hero-info">
           <h1 class="account-username">Identity Verification</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
         </div>
       </div>
       <div class="account-details-grid">
-        <div class="account-card kyc-card">
+        <div class="account-card">
           <h3 class="account-card-title">Verification Status</h3>
           <div class="kyc-status-badge ${kycClass}">${escapeHTML(kycStatusText)}</div>
           ${kyc.rejectionReason ? `<div class="kyc-rejection">${escapeHTML(kyc.rejectionReason)}</div>` : ''}
@@ -2956,9 +3010,17 @@ function renderAccountPage(page = 'overview') {
           </div>
           <div class="kyc-actions">
             ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
-            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification in Progress</button>' : ''}
-            ${kyc.status === 'REJECTED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Retry Verification</button>' : ''}
-            ${kyc.status === 'UNVERIFIED' ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">Verify Identity</button>' : ''}
+            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button>' : ''}
+            ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Why Verify?</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Tier 1</span><span class="detail-value">Email & basic info</span></div>
+            <div class="account-detail-item"><span class="detail-label">Tier 2</span><span class="detail-value">Government ID document</span></div>
+            <div class="account-detail-item"><span class="detail-label">Required to</span><span class="detail-value">Redeem Sweeps Coins for cash</span></div>
+            <div class="account-detail-item"><span class="detail-label">Provider</span><span class="detail-value">Persona (secure)</span></div>
           </div>
         </div>
       </div>`;
@@ -2968,11 +3030,11 @@ function renderAccountPage(page = 'overview') {
         <div class="account-avatar">📋</div>
         <div class="account-hero-info">
           <h1 class="account-username">Transaction History</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
         </div>
       </div>
       <div class="account-details-grid">
-        <div class="account-card">
+        <div class="account-card" style="grid-column: 1 / -1;">
           <h3 class="account-card-title">Recent Transactions</h3>
           <div id="account-transactions-list">
             <div class="account-placeholder">Loading transactions...</div>
@@ -2985,14 +3047,24 @@ function renderAccountPage(page = 'overview') {
         <div class="account-avatar">🔒</div>
         <div class="account-hero-info">
           <h1 class="account-username">Account Security</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
         </div>
       </div>
       <div class="account-details-grid">
-        <div class="account-card security-card">
-          <h3 class="account-card-title">Security Actions</h3>
+        <div class="account-card">
+          <h3 class="account-card-title">Authentication</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || '—')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Password</span><span class="detail-value">••••••••</span></div>
+            <div class="account-detail-item"><span class="detail-label">Two-factor</span><span class="detail-value">Coming soon</span></div>
+          </div>
           <div class="security-actions">
             <button class="btn-security" onclick="openForgotPasswordModal()">🔑 Reset Password</button>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Session</h3>
+          <div class="security-actions">
             <button class="btn-security logout" onclick="logout()">🚪 Logout</button>
           </div>
         </div>
@@ -3002,6 +3074,17 @@ function renderAccountPage(page = 'overview') {
   content.innerHTML = html;
   if (page === 'transactions') {
     loadAccountTransactions();
+  }
+}
+
+async function startKycVerification() {
+  try {
+    const data = await apiRequest('/api/user/kyc/start', 'POST');
+    if (data.personaConfig) {
+      alert('KYC verification flow would open here. Status: ' + data.kycStatus + '. Sandbox mode: use /api/user/kyc/verify-sandbox to mark verified.');
+    }
+  } catch (err) {
+    alert(err.message || 'Could not start KYC verification.');
   }
 }
 
@@ -3015,7 +3098,19 @@ async function loadAccountTransactions() {
       list.innerHTML = '<div class="account-placeholder">No transactions found.</div>';
       return;
     }
-    list.innerHTML = '<div class="tx-list">' + txs.map(tx => '<div class="tx-item"><span class="tx-type">' + escapeHTML(tx.type) + '</span><span class="tx-amount">' + formatCoins(tx.amount) + ' ' + escapeHTML(tx.currency) + '</span><span class="tx-date">' + new Date(tx.timestamp).toLocaleString() + '</span></div>').join('') + '</div>';
+    list.innerHTML = '<div class="tx-list">' + txs.map(tx => {
+      const sign = (tx.sc_delta || 0) > 0 ? '+' : '';
+      const amt = Math.abs(tx.amount || tx.sc_delta || tx.gc_delta || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cur = tx.currency || (tx.sc_delta ? 'SC' : (tx.gc_delta ? 'GC' : ''));
+      return '<div class="tx-item">' +
+        '<span class="tx-type">' + escapeHTML(tx.type) + '</span>' +
+        '<div class="tx-row-meta">' +
+        '  <span class="tx-desc">' + escapeHTML(tx.description || '') + '</span>' +
+        '  <span class="tx-date">' + new Date(tx.timestamp).toLocaleString() + '</span>' +
+        '</div>' +
+        '<span class="tx-amount">' + sign + amt + ' ' + escapeHTML(cur) + '</span>' +
+        '</div>';
+    }).join('') + '</div>';
   } catch (err) {
     list.innerHTML = '<div class="account-placeholder">Failed to load transactions.</div>';
   }
@@ -3782,6 +3877,8 @@ function handleRouteChange() {
     if (state.currentGame !== hash) launchGame(hash);
     return;
   }
+
+  document.querySelector('.main-layout')?.classList.remove('is-game');
 
   if (path === '/account') {
     document.getElementById('view-lobby')?.classList.add('hidden');

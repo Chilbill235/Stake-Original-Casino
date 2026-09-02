@@ -128,16 +128,27 @@ GameRenderers.revealBaccaratCards = function() {
     html += '</div>';
 
     html += '<div class="baccarat-result ' + (won ? 'bacc-win' : 'bacc-loss') + '">';
-    html += '<div class="result-outcome">' + outcome + (won ? ' — YOU WIN' : '') + '</div>';
+    if (payout > 0) {
+      html += '<div class="result-outcome">' + outcome + ' — ' + (won ? 'YOU WIN' : 'PUSH') + '</div>';
+    } else {
+      html += '<div class="result-outcome">' + outcome + '</div>';
+    }
     html += '<div class="result-payout">' + Number(payout).toFixed(2) + ' ' + state.currency + '</div>';
     html += '</div>';
 
     html += '</div>';
     display.innerHTML = html;
 
+    if (state.baccaratPendingBalance) {
+      if (window.mergeBalances) {
+        state.balances = window.mergeBalances(state.baccaratPendingBalance);
+      } else {
+        const b = state.baccaratPendingBalance;
+        state.balances = { gc: b.gc, sc: (b.sc_unplayed || 0) + (b.sc_played || 0), sc_unplayed: b.sc_unplayed, sc_played: b.sc_played };
+      }
+    }
+    if (typeof updateWalletUI === 'function') updateWalletUI();
     setTimeout(() => {
-      state.balances = state.baccaratPendingBalance || state.balances;
-      updateWalletUI();
       state.activeGameState = null;
       delete state.baccaratPendingReveal;
       delete state.baccaratPendingBalance;
@@ -145,7 +156,9 @@ GameRenderers.revealBaccaratCards = function() {
       resetBaccaratSideBets();
     }, 2500);
 
-    if (won) playSound('win'); else playSound('loss');
+    if (won && Number(payout) > 0 && !details.pushed) playSound('win');
+    else if (won && details.pushed) playSound('chip');
+    else playSound('loss');
   }
 };
 

@@ -542,8 +542,8 @@
       </div>
     </main>
 
-    <!-- RIGHT SIDEBAR: Live Global Bets Feed -->
-    <aside class="bets-sidebar">
+    <!-- RIGHT SIDEBAR: Live Global Bets Feed (lobby only) -->
+    <aside class="bets-sidebar" id="global-bets-sidebar">
       <div class="bets-header">
         <h3>⚡ Global Bets</h3>
         <span class="live-tag">LIVE</span>
@@ -568,6 +568,12 @@
         <div class="game-result-feed" id="game-result-feed"></div>
       </div>
     </aside>
+
+    <!-- Floating toggle for Global Bets (visible during game play) -->
+    <button class="global-bets-fab" id="global-bets-fab" onclick="toggleGlobalFeed()" aria-label="Toggle live bets feed">
+      <span class="fab-icon">📊</span>
+      <span class="fab-label">Live</span>
+    </button>
   </div>
 
   <!-- MODAL DIALOGS -->
