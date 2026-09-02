@@ -34,7 +34,12 @@ if (STRIPE_SECRET_KEY) {
 const bcrypt = require('bcryptjs');
 const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
 
-const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
+const RESTRICTED_STATES = [
+  // Explicitly Banned / Enforced
+  'WA', 'ID', 'NV', 'MI', 'MT', 'CT', 'NJ', 'NY', 'LA', 'TN', 'IN', 'ME', 'OK',
+  // High-Risk / Frequently Opted-Out
+  'KY', 'GA', 'AL', 'DE'
+];
 
 // Coin Package Configurations
 const COIN_PACKAGES = {
@@ -300,11 +305,12 @@ class ProvablyFair {
 // -----------------------------------------------------------------------------
 // 4. HELPER & COMPLIANCE FUNCTIONS
 // -----------------------------------------------------------------------------
+
 function getUserSeedPair(userId) {
   if (!userSeeds.has(userId)) {
     userSeeds.set(userId, {
       serverSeed: ProvablyFair.generateServerSeed(),
-      clientSeed: 'default_client_seed',
+      clientSeed: crypto.randomBytes(16).toString('hex'), // Generates a random 32-character hex string
       nonce: 0
     });
   }
@@ -771,11 +777,15 @@ app.post('/api/auth/guest', async (req, res) => {
       scBalance: 10
     });
 
+    // Always create an affiliate record so the user has a referral code
+    // they can share, even if they arrived without ?ref=
+    await ensureAffiliateRecordFor(userId, generateReferralCode(username), null);
+
     if (req.body?.ref) {
       try {
         const referrerAff = await db.getAffiliateByCode(String(req.body.ref).trim());
         if (referrerAff && referrerAff.user_id !== userId) {
-          await ensureAffiliateRecordFor(userId, generateReferralCode(username), referrerAff.user_id);
+          await db.setAffiliateReferredBy(userId, referrerAff.user_id);
         }
       } catch (e) {
         console.warn('[Guest Referral Hook]:', e.message);
@@ -928,8 +938,8 @@ app.post('/api/auth/register', async (req, res) => {
       username,
       email,
       password: hashedPassword,
-      gcBalance: 10000,
-      scBalance: 10
+      gcBalance: 2500,
+      scBalance: 0
     });
 
     await db.updateUser(userId, {
@@ -938,14 +948,15 @@ app.post('/api/auth/register', async (req, res) => {
       kyc_tier: 0
     });
 
-    // Auto-attribute referral if a valid code is provided and user has no existing referrer
-    let referredById = null;
+    // Always create an affiliate record so the user has a referral code
+    await ensureAffiliateRecordFor(userId, generateReferralCode(username), null);
+
+    // Auto-attribute referral if a valid code is provided
     if (ref) {
       try {
         const referrerAff = await db.getAffiliateByCode(String(ref).trim());
         if (referrerAff && referrerAff.user_id !== userId) {
-          referredById = referrerAff.user_id;
-          await ensureAffiliateRecordFor(userId, generateReferralCode(username), referredById);
+          await db.setAffiliateReferredBy(userId, referrerAff.user_id);
         }
       } catch (e) {
         console.warn('[Register Referral Hook]:', e.message);
@@ -1432,16 +1443,18 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, async (req, res) => {
 
   const usdAmount = pkg.priceInCents / 100;
   const cryptoAddresses = {
-    BTC: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-    ETH: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    USDT: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    LTC: 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976'
+    BTC: process.env.MERCHANT_BTC || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+    ETH: process.env.MERCHANT_ETH || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+    USDT: process.env.MERCHANT_USDT || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+    LTC: process.env.MERCHANT_LTC || 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976',
+    SOL: process.env.MERCHANT_SOL || '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE'
   };
   const cryptoAmounts = {
     BTC: (usdAmount / 50000).toFixed(8),
     ETH: (usdAmount / 3000).toFixed(6),
     USDT: usdAmount.toFixed(2),
-    LTC: (usdAmount / 100).toFixed(4)
+    LTC: (usdAmount / 100).toFixed(4),
+    SOL: (usdAmount / 150).toFixed(6)
   };
 
   const paymentId = crypto.randomUUID();
@@ -1486,6 +1499,93 @@ app.post('/api/user/crypto-payment/webhook', express.json(), (req, res) => {
   }
 
   res.json({ success: true });
+});
+
+// -----------------------------------------------------------------------------
+// Phantom (Solana) payment confirmation
+// Verifies the on-chain transfer matches the expected lamports, then credits.
+// -----------------------------------------------------------------------------
+const PHANTOM_MERCHANT = '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE';
+const SOLANA_RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
+app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, async (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (user.isGuest || (user.email && user.email.endsWith('@guest.casino'))) {
+    return res.status(403).json({ error: 'Guest accounts cannot purchase coins.', requiresAccount: true });
+  }
+
+  const { paymentId, txSignature, fromAddress } = req.body || {};
+  const payment = cryptoPayments.get(paymentId);
+  if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+  if (payment.userId !== user.id) return res.status(403).json({ error: 'Payment does not belong to this user.' });
+  if (payment.status === 'COMPLETED') return res.status(409).json({ error: 'Payment already credited.' });
+  if (payment.currency !== 'SOL') return res.status(400).json({ error: 'Phantom flow only handles SOL.' });
+
+  // Idempotency guard
+  if (!acquireLock(user.id, 'phantom-' + paymentId)) {
+    return res.status(409).json({ error: 'Confirmation already in progress.' });
+  }
+
+  try {
+    // Verify on-chain transaction via Solana RPC
+    let verified = false;
+    try {
+      const rpcRes = await fetch(SOLANA_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getTransaction',
+          params: [txSignature, { encoding: 'json', commitment: 'confirmed' }]
+        })
+      });
+      const rpcData = await rpcRes.json();
+      const tx = rpcData?.result?.transaction;
+      const meta = rpcData?.result?.meta;
+      if (tx && meta && !meta.err) {
+        const accountKeys = tx.message?.accountKeys || [];
+        const fromIdx = accountKeys.findIndex(k => (typeof p === 'string' ? k : k.pubkey) === fromAddress);
+        const toIdx = accountKeys.findIndex(k => (typeof p === 'string' ? k : k.pubkey) === PHANTOM_MERCHANT);
+        if (fromIdx !== -1 && toIdx !== -1) {
+          const pre = meta.preBalances?.[fromIdx] ?? 0;
+          const post = meta.postBalances?.[fromIdx] ?? 0;
+          const lamportsSent = pre - post;
+          const expected = Math.round(parseFloat(payment.amount) * 1e9);
+          // Allow 1% tolerance for tx fees / network jitter
+          if (Math.abs(lamportsSent - expected) <= Math.max(5000, expected * 0.01)) {
+            verified = true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Phantom] on-chain verification RPC error:', e.message);
+    }
+
+    if (!verified && process.env.NODE_ENV === 'production') {
+      return res.status(400).json({ error: 'On-chain payment could not be verified. Please contact support.' });
+    }
+
+    // Mark complete + credit balances
+    payment.status = 'COMPLETED';
+    user.gc_balance += payment.gcAmount;
+    user.sc_unplayed += payment.scAmount;
+    saveData();
+    logTransaction(user.id, 'PURCHASE', 'Phantom (SOL) payment', payment.gcAmount, payment.scAmount, { paymentId, txSignature });
+    creditReferrerForDeposit(user, payment.usdAmount || 0);
+
+    res.json({
+      success: true,
+      credited: { gc: payment.gcAmount, sc: payment.scAmount },
+      balances: balancesOf(user)
+    });
+  } catch (e) {
+    console.error('[Phantom] confirm error:', e.message);
+    res.status(500).json({ error: 'Failed to confirm payment.' });
+  } finally {
+    releaseLock(user.id, 'phantom-' + paymentId);
+  }
 });
 
 app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
@@ -1994,9 +2094,9 @@ function calcChallengeReward(challenge) {
 // -----------------------------------------------------------------------------
 // 12a. DAILY CLAIM ENDPOINTS
 // -----------------------------------------------------------------------------
-// Fixed reward: 10,000 GC + 10.00 SC, strict 24-hour cooldown
+// Fixed reward: 1,000 GC + 1.00 SC (≈ $1 USD value), strict 24-hour cooldown
 
-const DAILY_CLAIM_REWARD = { gc: 10000, sc: 10.00 };
+const DAILY_CLAIM_REWARD = { gc: 1000, sc: 1.00 };
 
 app.get('/api/bonus/status', verifyToken, (req, res) => {
   const user = users.get(req.user.id);
@@ -2139,12 +2239,25 @@ const RAKEBACK_WINDOWS = {
 
 function getRakebackLosses(user) {
   const bonus = ensureBonusFields(user);
+  const rb = bonus.rakeback;
   const t = bonus.telemetry;
-  // Net SC loss = SC wagered - SC won (for each window)
-  const dailyLoss = Math.max(0, (t.dailyLossSC || 0));
-  const weeklyLoss = Math.max(0, (t.weeklyLossSC || 0));
-  const monthlyLoss = Math.max(0, (t.monthlyLossSC || 0));
-  return { daily: dailyLoss, weekly: weeklyLoss, monthly: monthlyLoss };
+  const now = Date.now();
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const ONE_WEEK = 7 * ONE_DAY;
+  const ONE_MONTH = 30 * ONE_DAY;
+
+  // Per-tier: count losses since the last claim. If last claim is older than
+  // the window, count all losses within the window.
+  const dailyLossSinceClaim = (now - rb.lastDailyAt < ONE_DAY)
+    ? (t.dailyLossSC || 0)
+    : (now - (rb.lastDailyAt || 0) < ONE_DAY ? (t.dailyLossSC || 0) : (t.dailyLossSC || 0));
+  const weeklyLossSinceClaim = (t.weeklyLossSC || 0);
+  const monthlyLossSinceClaim = (t.monthlyLossSC || 0);
+  return {
+    daily:   Math.max(0, dailyLossSinceClaim),
+    weekly:  Math.max(0, weeklyLossSinceClaim),
+    monthly: Math.max(0, monthlyLossSinceClaim)
+  };
 }
 
 app.get('/api/rakeback/status', verifyToken, (req, res) => {
@@ -2216,6 +2329,13 @@ app.post('/api/rakeback/claim', verifyToken, (req, res) => {
   }
 
   rb[w.field] = now;
+
+  // Reset the loss counter for this period so the next accrual starts fresh.
+  // Rakeback only counts losses since the last claim.
+  if (tier === 'daily')   bonus.telemetry.dailyLossSC = 0;
+  if (tier === 'weekly')  bonus.telemetry.weeklyLossSC = 0;
+  if (tier === 'monthly') bonus.telemetry.monthlyLossSC = 0;
+
   user.sc_unplayed += amount;
   saveData();
     logTransaction(user.id, 'RAKEBACK', `${tier.charAt(0).toUpperCase() + tier.slice(1)} Rakeback (${(rate * 100).toFixed(0)}%)`, 0, amount, { tier });
@@ -2380,7 +2500,7 @@ app.post('/api/affiliate/apply', verifyToken, async (req, res) => {
     if (!referrer) return res.status(404).json({ error: 'Referrer not found.' });
 
     await ensureAffiliateRecord(user);
-    await db.createAffiliate(user.id, (await db.getAffiliateByUserId(user.id)).referral_code, referrer.id);
+    await db.setAffiliateReferredBy(user.id, referrer.id);
 
     user.referred_by = referrer.id;
     saveData();

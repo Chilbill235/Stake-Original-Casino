@@ -567,6 +567,15 @@ module.exports = {
     scheduleSave();
   },
 
+  setAffiliateReferredBy: async (userId, referredBy) => {
+    const database = await getDb();
+    database.run(
+      'UPDATE affiliates SET referred_by = ? WHERE user_id = ?',
+      [referredBy, userId]
+    );
+    scheduleSave();
+  },
+
   getReferredUsers: async (affiliateUserId) => {
     const database = await getDb();
     const stmt = database.prepare(

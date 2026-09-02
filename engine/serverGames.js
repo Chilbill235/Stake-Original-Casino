@@ -12,7 +12,7 @@ function round2(n) {
 
 // How many random floats each game needs per round
 const GAME_FLOAT_COUNTS = {
-  slots: 9,
+  slots: 15,
   dice: 1,
   limbo: 1,
   crash: 1,
@@ -60,9 +60,12 @@ const WHEEL_SEGMENTS = [
 ];
 const WHEEL_WEIGHTS = [10.0, 2.0, 1.0, 1.5, 0.8, 10.0, 2.0, 1.0, 1.5, 0.5, 0.15, 0.05];
 
-const SLOT_SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣'];
-const SLOT_WEIGHTS = [0.40, 0.25, 0.18, 0.10, 0.05, 0.02];
+const SLOT_SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣', '⭐'];
+const SLOT_WEIGHTS = [0.34, 0.21, 0.16, 0.10, 0.06, 0.025, 0.10]; // ⭐ = scatter
 const SLOT_PAYOUTS = { '🍒': 1.5, '🍋': 3, '🍇': 5, '🔔': 10, '💎': 25, '7️⃣': 75 };
+const SCATTER_SYMBOL = '⭐';
+const FREE_SPINS_AWARDED = 10;
+const FREE_SPIN_MULTIPLIER = 3; // All wins during free spins are tripled
 
 // Jackpot tiers — mini pays 5x bet, minor 20x, major 150x, grand 1000x
 const SLOT_JACKPOTS = {
@@ -125,17 +128,24 @@ function baccaratHandScore(hand) {
 
 const GAMES = {
   /**
-   * SLOTS — 3x3 grid, 5 paylines, plus progressive mini/minor/major/grand jackpots.
+   * SLOTS — 5×3 grid (5 reels, 3 rows), 25 paylines, scatter free spins,
+   *         and progressive mini/minor/major/grand jackpots.
+   *
+   *   Server returns the **stopping symbols** for each reel position. The
+   *   client animates the reels; server math is authoritative for the result.
    */
   slots: (floats, params) => {
     const betAmount = params.betAmount || 1;
+    const freeSpinMode = params.freeSpin === true;
     slotJackpotProgress(parseFloat(betAmount));
 
+    // 5 reels × 3 rows = 15 cells
+    const REELS = 5, ROWS = 3;
     const grid = [];
-    for (let r = 0; r < 3; r++) {
+    for (let r = 0; r < ROWS; r++) {
       const row = [];
-      for (let c = 0; c < 3; c++) {
-        const rand = floats[r * 3 + c];
+      for (let c = 0; c < REELS; c++) {
+        const rand = floats[r * REELS + c];
         let acc = 0;
         let sym = SLOT_SYMBOLS[0];
         for (let i = 0; i < SLOT_SYMBOLS.length; i++) {
@@ -147,32 +157,73 @@ const GAMES = {
       grid.push(row);
     }
 
-    const paylines = [
-      [[0, 0], [0, 1], [0, 2]],
-      [[1, 0], [1, 1], [1, 2]],
-      [[2, 0], [2, 1], [2, 2]],
-      [[0, 0], [1, 1], [2, 2]],
-      [[2, 0], [1, 1], [0, 2]]
+    // 25 fixed paylines — defined as ordered column positions
+    // Each line is an array of row indices (one per reel)
+    const PAYLINES = [
+      [0,0,0,0,0], [1,1,1,1,1], [2,2,2,2,2], // top/mid/bot straight
+      [0,1,2,1,0], [2,1,0,1,2],               // two zig-zags
+      [1,0,1,2,1], [1,2,1,0,1],               // two V shapes
+      [0,0,1,2,2], [2,2,1,0,0],               // outward diagonals
+      [0,1,1,1,2], [2,1,1,1,0],               // concave
+      [0,1,0,1,0], [2,1,2,1,2],               // bouncing
+      [0,0,0,1,2], [2,2,2,1,0],               // ramp up/down
+      [0,0,1,0,0], [2,2,1,2,2],               // spike
+      [0,1,2,0,1], [2,1,0,2,1],               // bowtie
+      [1,0,0,0,1], [1,2,2,2,1],               // outer arc
+      [0,2,2,2,0], [1,0,2,0,1], [1,2,0,2,1]  // corner + bowtie
     ];
 
     let rawMult = 0;
     const winningLines = [];
-    paylines.forEach((line, idx) => {
-      const symbols = line.map(([r, c]) => grid[r][c]);
-      if (symbols[0] === symbols[1] && symbols[1] === symbols[2]) {
-        rawMult += SLOT_PAYOUTS[symbols[0]];
-        winningLines.push({ line: idx, symbols, multiplier: SLOT_PAYOUTS[symbols[0]] });
+
+    PAYLINES.forEach((line, idx) => {
+      const symbols = line.map((rowIdx, col) => grid[rowIdx][col]);
+      // Determine the match: walk from left until a scatter, then collect
+      // matching non-scatter symbols. Scatters anywhere on the line pay the
+      // highest payout for that line.
+      let bestSymbol = null;
+      let matchCount = 0;
+      for (let i = 0; i < symbols.length; i++) {
+        const s = symbols[i];
+        if (s === SCATTER_SYMBOL) {
+          // Scatters only pay on the dedicated scatter rule, not on lines
+          continue;
+        }
+        if (!bestSymbol) { bestSymbol = s; matchCount = 1; }
+        else if (s === bestSymbol) { matchCount++; }
+        else { break; }
+      }
+      if (matchCount >= 3 && bestSymbol && SLOT_PAYOUTS[bestSymbol]) {
+        const multPerSymbol = SLOT_PAYOUTS[bestSymbol];
+        // 3-of-a-kind = base, 4 = 1.5x base, 5 = 2x base
+        const lineFactor = matchCount === 3 ? 1 : matchCount === 4 ? 1.5 : 2;
+        const lineMult = multPerSymbol * lineFactor;
+        winningLines.push({ line: idx, matchCount, symbol: bestSymbol, multiplier: round2(lineMult) });
+        rawMult += lineMult;
       }
     });
 
-    // Check for jackpot trigger
-    const jackpot = checkSlotJackpots(grid, betAmount);
-    if (jackpot) {
-      rawMult += jackpot.multiplier;
+    // Free-spin scatter rule — 3+ scatters anywhere on the reels awards free spins
+    let scatterCount = 0;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < REELS; c++) {
+        if (grid[r][c] === SCATTER_SYMBOL) scatterCount++;
+      }
     }
+    const freeSpinsTriggered = scatterCount >= 3 && !freeSpinMode;
+    const scatterPayout = scatterCount >= 3 ? scatterCount * 1.5 : 0; // 3⭐=4.5x, 4⭐=6x, 5⭐=7.5x
+    rawMult += scatterPayout;
+
+    // Free spins get a multiplier
+    if (freeSpinMode) rawMult *= FREE_SPIN_MULTIPLIER;
+
+    // Jackpot
+    const jackpot = checkSlotJackpots(grid, betAmount);
+    if (jackpot) rawMult += jackpot.multiplier;
 
     const multiplier = round2(rawMult);
     const totalPayout = round2(multiplier * parseFloat(betAmount));
+
     return {
       win: multiplier > 0,
       multiplier,
@@ -180,6 +231,10 @@ const GAMES = {
       details: {
         grid,
         winningLines,
+        scatterCount,
+        freeSpinsTriggered,
+        freeSpinsAwarded: freeSpinsTriggered ? FREE_SPINS_AWARDED : 0,
+        freeSpinMode,
         jackpot: jackpot || null,
         jackpotPool: {
           mini: round2(SLOT_JACKPOT_POOL.mini),

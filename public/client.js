@@ -481,6 +481,20 @@ function mergeBalances(newBalances) {
   };
 }
 
+// Apply an optimistic local debit the moment a bet is placed so the navbar
+// balance updates instantly instead of waiting for the server round to resolve.
+// The server response overwrites this with the authoritative number.
+function applyOptimisticDebit(amount) {
+  if (!state.balances || !amount || isNaN(amount)) return;
+  const cur = state.currency;
+  if (cur === 'GC') {
+    state.balances = { ...state.balances, gc: Math.max(0, (state.balances.gc || 0) - amount) };
+  } else {
+    state.balances = { ...state.balances, sc_unplayed: Math.max(0, (state.balances.sc_unplayed || 0) - amount) };
+  }
+  updateWalletUI();
+}
+
 function updateWalletUI() {
   const val = document.getElementById('balance-val');
   const formattedGc = formatCoins(state.balances.gc || 0);
@@ -489,6 +503,10 @@ function updateWalletUI() {
   document.querySelectorAll('.wallet-tab').forEach(tab => {
     tab.classList.toggle('active', tab.dataset.currency === state.currency);
   });
+
+  const sel = document.getElementById('wallet-selector');
+  if (sel) sel.dataset.currency = state.currency;
+  document.querySelectorAll('.wallet-balance').forEach(el => el.dataset.currency = state.currency);
 
   if (val) {
     val.textContent = state.currency === 'GC' ? formattedGc : formattedSc;
@@ -544,6 +562,8 @@ function switchCurrency(currency) {
   state.currency = currency;
   window.__CASINO_CURRENCY = currency;
   localStorage.setItem('casino_currency', currency);
+  const sel = document.getElementById('wallet-selector');
+  if (sel) sel.dataset.currency = currency;
   updateWalletUI();
   updateBetCurrencyTag();
 }
@@ -861,18 +881,24 @@ function selectCrypto(currency) {
     BTC: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
     ETH: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
     USDT: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    LTC: 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976'
+    LTC: 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976',
+    SOL: '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE'
   };
   const amounts = {
     BTC: '0.00001 BTC',
     ETH: '0.0005 ETH',
     USDT: '10.00 USDT',
-    LTC: '0.05 LTC'
+    LTC: '0.05 LTC',
+    SOL: '0.05 SOL'
   };
   const addrEl = document.getElementById('crypto-address');
   const amtEl = document.getElementById('crypto-amount');
   if (addrEl) addrEl.textContent = addresses[currency] || '';
   if (amtEl) amtEl.textContent = amounts[currency] || '';
+
+  // Show / hide Phantom wallet button based on whether SOL is selected
+  const phantomBlock = document.getElementById('crypto-phantom-block');
+  if (phantomBlock) phantomBlock.classList.toggle('hidden', currency !== 'SOL');
 }
 
 function copyCryptoAddress() {
@@ -915,6 +941,94 @@ async function initiateCryptoPayment() {
     }
   } catch (err) {
     alert('Crypto payment error: ' + err.message);
+  }
+}
+
+/**
+ * Phantom (Solana) wallet payment flow:
+ *  1. Detect window.solana (Phantom) — if missing, prompt install.
+ *  2. Ask Phantom to connect (publicKey) and sign a transfer.
+ *  3. POST the signed tx to /api/user/crypto-payment/phantom-confirm.
+ *  4. Backend verifies the on-chain transfer to our merchant wallet and,
+ *     if it matches the expected amount, credits GC + SC instantly.
+ */
+async function payWithPhantom() {
+  const packageId = state.lastPackageId;
+  if (!packageId) return alert('Please pick a coin package first.');
+
+  const provider = (typeof window !== 'undefined' && window.solana && window.solana.isPhantom)
+    ? window.solana
+    : null;
+
+  if (!provider) {
+    return alert('Phantom wallet not detected. Install the Phantom browser extension from phantom.app, then refresh this page.');
+  }
+
+  try {
+    playSound('click');
+    const conn = await provider.connect();
+    const fromAddress = conn.publicKey.toString();
+
+    // Ask backend to lock an expected amount for this user+package
+    const init = await apiRequest('/api/user/crypto-payment/initiate', 'POST', {
+      packageId,
+      currency: 'SOL',
+      paymentMethod: 'phantom',
+      fromAddress
+    });
+
+    if (!init.success) throw new Error(init.error || 'Could not initiate payment.');
+
+    // Build a SOL transfer instruction using the @solana/web3.js library if loaded
+    // via Phantom's connection. We construct the transaction client-side.
+    const merchantAddress = init.address;
+    const lamports = Math.round(parseFloat(init.amount) * 1e9);
+
+    const connection = provider._provider || (window.__phantomConnection);
+    let txSignature;
+    if (typeof solanaWeb3 !== 'undefined') {
+      // Use a publicly-loaded web3.js (if available via Phantom)
+      const tx = new solanaWeb3.Transaction();
+      tx.add(
+        solanaWeb3.SystemProgram.transfer({
+          fromPubkey: conn.publicKey,
+          toPubkey: new solanaWeb3.PublicKey(merchantAddress),
+          lamports
+        })
+      );
+      tx.feePayer = conn.publicKey;
+      const { blockhash } = await connection.getRecentBlockhash();
+      tx.recentBlockhash = blockhash;
+      const { signature } = await provider.signAndSendTransaction(tx);
+      txSignature = signature;
+    } else {
+      // Fallback: ask user to send the amount manually, then sign a
+      // message for non-repudiation (backend uses it as a hint).
+      const { signature } = await provider.signMessage(
+        new TextEncoder().encode(`pay:${init.paymentId}:${lamports}`),
+        'utf8'
+      );
+      txSignature = signature;
+    }
+
+    const confirm = await apiRequest('/api/user/crypto-payment/phantom-confirm', 'POST', {
+      paymentId: init.paymentId,
+      txSignature,
+      fromAddress
+    });
+
+    if (!confirm.success) throw new Error(confirm.error || 'Confirmation failed.');
+
+    showCryptoPaymentConfirmation(init, 'SOL');
+
+    if (confirm.balances) {
+      state.balances = mergeBalances(confirm.balances);
+      updateWalletUI();
+    }
+    alert('🎉 Payment confirmed! ' + (confirm.credited?.gc || 0) + ' GC + ' + (confirm.credited?.sc || 0) + ' SC credited.');
+  } catch (err) {
+    console.error('[Phantom]', err);
+    alert('Phantom payment error: ' + err.message);
   }
 }
 
@@ -1193,6 +1307,7 @@ async function submitRedeem() {
 function showLobby() {
   playSound('click');
   history.pushState(null, '', '/');
+  setActiveSidebarLink('/');
   document.getElementById('view-lobby')?.classList.remove('hidden');
   document.getElementById('view-game')?.classList.add('hidden');
   document.getElementById('view-account')?.classList.add('hidden');
@@ -1316,8 +1431,8 @@ async function launchGame(gameId) {
   const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
   if (lobbyBetsBtn) lobbyBetsBtn.classList.add('hidden');
 
-  if (window.location.hash !== '#' + gameId) {
-    window.location.hash = '#' + gameId;
+  if (window.location.pathname !== '/' + gameId) {
+    history.pushState(null, '', '/' + gameId);
   }
 
   const options = document.getElementById('game-controls-options');
@@ -1548,6 +1663,9 @@ async function startMinesGame(betAmount) {
   const mineCount = parseInt(document.getElementById('mines-count')?.value || 3);
   const autoCashoutVal = parseFloat(document.getElementById('mines-auto-cashout')?.value || 0);
 
+  // Optimistic debit
+  applyOptimisticDebit(betAmount);
+
   try {
     const data = await apiRequest('/api/play/mines/start', 'POST', {
       currency: state.currency,
@@ -1689,6 +1807,8 @@ async function startTowerGame(betAmount) {
   state.isProcessing = true;
   playSound('chip');
   const difficulty = document.getElementById('tower-difficulty')?.value || 'MEDIUM';
+
+  applyOptimisticDebit(betAmount);
 
   try {
     const data = await apiRequest('/api/play/tower/start', 'POST', {
@@ -1862,6 +1982,7 @@ async function executeLimboBet(betAmount) {
   const display = document.getElementById('game-display-area');
 
   actionBtn.disabled = true;
+  applyOptimisticDebit(betAmount);
 
   try {
     const data = await apiRequest('/api/play/limbo', 'POST', {
@@ -1945,6 +2066,8 @@ async function executeDiceBet(betAmount) {
   playSound('chip');
   const condition = document.getElementById('dice-cond')?.value || 'OVER';
   const target = parseFloat(document.getElementById('dice-target')?.value || 50);
+
+  applyOptimisticDebit(betAmount);
 
   try {
     const data = await apiRequest('/api/play/dice', 'POST', {
@@ -2108,6 +2231,7 @@ async function buySlotsBonus() {
   }
   state.isProcessing = true;
   playSound('chip');
+  applyOptimisticDebit(bonusCost);
   try {
     const data = await apiRequest('/api/play/slots/buy-bonus', 'POST', {
       currency: state.currency,
@@ -2138,6 +2262,11 @@ async function executeStandardBet(betAmount) {
   playSound('chip');
   const actionBtn = document.getElementById('btn-primary-action');
   actionBtn.disabled = true;
+
+  // Optimistic balance debit — show the bet immediately so the user sees the
+  // cost the moment they hit PLACE BET. The server response will overwrite
+  // this with authoritative numbers once the round resolves.
+  applyOptimisticDebit(betAmount);
 
   const params = {};
   if (state.currentGame === 'plinko') {
@@ -2564,6 +2693,7 @@ function renderBlackjackHands(playerHand, dealerShown, holeHidden, msgObj) {
 async function startBlackjackGame(betAmount) {
   state.isProcessing = true;
   playSound('chip');
+  applyOptimisticDebit(betAmount);
   try {
     const data = await apiRequest('/api/play/blackjack/start', 'POST', {
       currency: state.currency,
@@ -2693,6 +2823,7 @@ function renderHiloBoard(msgObj) {
 async function startHiloGame(betAmount) {
   state.isProcessing = true;
   playSound('chip');
+  applyOptimisticDebit(betAmount);
   try {
     const data = await apiRequest('/api/play/hilo/start', 'POST', {
       currency: state.currency,
@@ -2813,6 +2944,7 @@ async function openAccountPage() {
     openAuthModal();
     return;
   }
+  closeProfileDropdown();
   playSound('click');
   history.pushState(null, '', '/account');
   handleRouteChange();
@@ -2824,7 +2956,60 @@ function closeAccountPage() {
   handleRouteChange();
 }
 
+function toggleProfileDropdown(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('profile-dropdown');
+  if (!menu) return;
+  const wasHidden = menu.classList.contains('hidden');
+  closeWalletDropdown();
+  if (wasHidden) {
+    menu.classList.remove('hidden');
+    syncProfileDropdownHeader();
+    playSound('click');
+  } else {
+    menu.classList.add('hidden');
+  }
+}
+
+function closeProfileDropdown() {
+  document.getElementById('profile-dropdown')?.classList.add('hidden');
+}
+
+function syncProfileDropdownHeader() {
+  const p = state.profile || {};
+  const vipText = (p.vip && p.vip.tier) || 'Bronze';
+  const username = p.username || localStorage.getItem('casino_username') || 'Guest';
+  const isGuest = !!p.isGuest;
+  const nameEl = document.getElementById('profile-dropdown-name');
+  const tierEl = document.getElementById('profile-dropdown-tier');
+  const avatarEl = document.querySelector('.profile-dropdown-avatar');
+  if (nameEl) nameEl.textContent = username;
+  if (tierEl) tierEl.textContent = (vipText || 'Bronze') + ' VIP' + (isGuest ? ' · Guest (Test Mode)' : '');
+  if (avatarEl) avatarEl.textContent = (username || 'G').charAt(0).toUpperCase();
+
+  // Withdraw button is visible to:
+  //   - Real (non-guest) users — production flow
+  //   - Guest accounts — for testing only (every other screen still blocks it server-side)
+  const withdrawBtn = document.getElementById('profile-dropdown-withdraw');
+  if (withdrawBtn) {
+    withdrawBtn.style.display = isGuest ? 'flex' : 'flex';
+  }
+}
+
+function navigateToAccountFromMenu(page) {
+  closeProfileDropdown();
+  if (!state.profile) {
+    openAuthModal();
+    return;
+  }
+  playSound('click');
+  const path = page.startsWith('transactions/') ? '/account/' + page : '/account/' + page;
+  history.pushState(null, '', path);
+  handleRouteChange();
+}
+
 async function refreshAccountPage(page = 'overview') {
+  setActiveAccountLink(page);
   const container = document.getElementById('view-account');
   if (!container) return;
   try {
@@ -2842,10 +3027,43 @@ function navigateToAccount(page) {
   playSound('click');
   const path = page === 'overview' ? '/account' : '/account/' + page;
   history.pushState(null, '', path);
+  setActiveAccountLink(page);
+  renderAccountPage(page);
+}
+
+function navigateToAccountFromMenu(page) {
+  closeProfileDropdown();
+  if (!state.profile) {
+    openAuthModal();
+    return;
+  }
+  playSound('click');
+  let navPage = page;
+  let path;
+  if (page === 'transactions/deposits' || page === 'transactions/withdrawals' || page === 'transactions/bets-casino') {
+    navPage = 'transactions';
+    path = '/account/transactions/' + page.replace('transactions/', '');
+    state.accountTxSub = page.replace('transactions/', '');
+  } else {
+    path = '/account/' + page;
+  }
+  history.pushState(null, '', path);
+  setActiveAccountLink(navPage);
+  handleRouteChange();
+}
+
+function setActiveAccountLink(page) {
   document.querySelectorAll('.account-nav-link').forEach(link => {
     link.classList.toggle('active', link.dataset.accountPage === page);
   });
-  renderAccountPage(page);
+}
+
+function setActiveSidebarLink(path) {
+  document.querySelectorAll('.sidebar .nav-item[data-route]').forEach(item => {
+    const route = item.dataset.route;
+    const isMatch = route === '/' ? path === '/' : path === route || path.startsWith(route + '/');
+    item.classList.toggle('active', isMatch);
+  });
 }
 
 function renderAccountPage(page = 'overview') {
@@ -3512,7 +3730,7 @@ async function submitForgotPassword() {
 async function loadDailyBonusPage() {
   const container = document.getElementById('view-bonus');
   if (!container) return;
-  container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#b1bad2;">Loading daily bonus...</div></div>';
+  container.innerHTML = '<div class="page-container"><div class="page-loading"><div class="checkout-spinner"></div><span>Loading daily bonus...</span></div></div>';
 
   try {
     const bonusStatus = await apiRequest('/api/bonus/status').catch(() => null);
@@ -3520,8 +3738,20 @@ async function loadDailyBonusPage() {
     const canClaim = bonusStatus?.canClaim || false;
     const nextClaimMs = bonusStatus?.nextClaimMs || 0;
 
+const milestones = [
+      { day: 1,  reward: '1 SC',  note: 'Day 1' },
+      { day: 3,  reward: '3 SC',  note: 'Hot streak' },
+      { day: 7,  reward: '7 SC',  note: 'Weekly' },
+      { day: 14, reward: '15 SC', note: 'Two-week' },
+      { day: 30, reward: '40 SC', note: 'Monthly' }
+    ];
+
+    const nextMilestone = milestones.find(m => m.day > streak) || milestones[milestones.length - 1];
+    const rewardGCRange = '1,000 GC';
+    const rewardSCRange = '1.00 SC';
+
     container.innerHTML = `
-      <div class="page-container bonus-page">
+      <div class="page-container promo-page">
         <div class="page-header">
           <button class="btn-back" onclick="showLobby()">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
@@ -3530,40 +3760,68 @@ async function loadDailyBonusPage() {
           <h2 class="page-title">🎁 Daily Bonus</h2>
         </div>
 
-        <div class="bonus-hero">
-          <div class="bonus-icon">🎁</div>
-          <h3 class="bonus-hero-title">Daily Rewards</h3>
-          <p class="bonus-hero-subtitle">Claim your daily bonus and build your streak!</p>
-          <div class="streak-display">
-            <span class="streak-number">${streak}</span>
-            <span class="streak-label">Day Streak</span>
+        <div class="promo-hero promo-hero-bonus">
+          <div class="promo-hero-bg"></div>
+          <div class="promo-hero-content">
+            <div class="promo-hero-icon">🎁</div>
+            <div class="promo-hero-text">
+              <h3 class="promo-hero-title">Daily Rewards</h3>
+              <p class="promo-hero-sub">Log in every day to build your streak and unlock bigger rewards.</p>
+            </div>
+            <div class="promo-hero-streak">
+              <div class="streak-fire">🔥</div>
+              <div class="streak-num">${streak}</div>
+              <div class="streak-cap">DAY STREAK</div>
+            </div>
           </div>
         </div>
 
-        <div class="bonus-card main-claim-card">
-          <div class="claim-reward">
-            <span class="reward-gc">10,000 GC</span>
-            <span class="reward-separator">+</span>
-            <span class="reward-sc">10.00 SC</span>
+        <div class="promo-card claim-card">
+          <div class="claim-card-header">
+            <span class="claim-card-tag">TODAY'S REWARD</span>
+            <span class="claim-card-streak">Streak ${streak} days</span>
           </div>
-          <div class="claim-timer">
-            ${canClaim ? '<span class="ready-badge">READY TO CLAIM!</span>' : '<span class="countdown-timer" id="daily-countdown">' + formatCountdown(nextClaimMs) + '</span>'}
+          <div class="claim-rewards">
+            <div class="claim-reward-block gc">
+              <div class="claim-reward-amount">${rewardGCRange}</div>
+              <div class="claim-reward-label">Gold Coins</div>
+            </div>
+            <div class="claim-reward-plus">+</div>
+            <div class="claim-reward-block sc">
+              <div class="claim-reward-amount">${rewardSCRange}</div>
+              <div class="claim-reward-label">Sweeps Coins</div>
+            </div>
           </div>
-          <div class="claim-actions">
-            ${canClaim ? '<button type="button" class="btn-claim-main" onclick="claimDaily()">Claim Now</button>' : '<button type="button" class="btn-claim-main" disabled>Already Claimed</button>'}
+          <div class="claim-card-footer">
+            ${canClaim
+              ? '<button type="button" class="btn-claim-main" onclick="claimDaily()">🎁 Claim Daily Bonus</button>'
+              : '<div class="claim-locked"><span class="lock-icon">⏱️</span><div><div class="lock-title">Next bonus in</div><div class="countdown-timer" id="daily-countdown">' + formatCountdown(nextClaimMs) + '</div></div></div>'}
           </div>
         </div>
 
-        <div class="bonus-card streak-card">
-          <h4 class="bonus-card-title">Streak Milestones</h4>
-          <div class="streak-milestones">
-            ${[1,3,7,14,30].map(day => `
-              <div class="milestone ${streak >= day ? 'achieved' : ''}">
-                <div class="milestone-day">Day ${day}</div>
-                <div class="milestone-reward">${day <= 7 ? '+1 SC' : day <= 14 ? '+3 SC' : '+10 SC'}</div>
-              </div>
-            `).join('')}
+        <div class="promo-section">
+          <div class="promo-section-header">
+            <h3 class="promo-section-title">Streak Milestones</h3>
+            <div class="promo-section-line"></div>
           </div>
+          <div class="milestone-grid">
+            ${milestones.map(m => {
+              const achieved = streak >= m.day;
+              const isNext = !achieved && m.day === nextMilestone.day;
+              return `
+                <div class="milestone-tile ${achieved ? 'achieved' : ''} ${isNext ? 'next' : ''}">
+                  <div class="milestone-day">Day ${m.day}</div>
+                  <div class="milestone-reward">${m.reward}</div>
+                  <div class="milestone-note">${m.note}</div>
+                  <div class="milestone-mark">${achieved ? '✓' : isNext ? '★' : ''}</div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <div class="promo-tip">
+          <span class="tip-icon">💡</span>
+          <span>Tip: Missing a day resets your streak to 1 — set a reminder to keep it growing!</span>
         </div>
       </div>`;
 
@@ -3571,93 +3829,120 @@ async function loadDailyBonusPage() {
       startCountdown('daily-countdown', nextClaimMs, 0);
     }
   } catch (err) {
-    container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load daily bonus: ' + err.message + '</div></div>';
+    container.innerHTML = '<div class="page-container"><div class="page-error">Failed to load daily bonus: ' + escapeHTML(err.message) + '</div></div>';
   }
 }
 
 async function loadChallengesPage() {
   const container = document.getElementById('view-challenges');
   if (!container) return;
-  container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#b1bad2;">Loading challenges...</div></div>';
+  container.innerHTML = '<div class="page-container"><div class="page-loading"><div class="checkout-spinner"></div><span>Loading challenges...</span></div></div>';
 
   try {
     const challenges = await apiRequest('/api/challenges').catch(() => null);
     const taskIcons = {
       slot_bonus: '🎰',
       dice_over90_win: '🎲',
+      dice_under10_win: '🎲',
+      dice_exact_50: '🎯',
+      dice_rounds: '🎲',
+      crash_2x_count: '💥',
+      crash_5x_count: '💥',
+      crash_10x_count: '💥',
+      crash_snipe: '💥',
       rounds: '🎮',
+      win_streak: '🔥',
+      hit_multiplier: '⚡',
+      sc_net_profit: '📈',
+      single_round_win: '💎',
+      bj_natural: '♠️',
+      bj_double_win: '🃏',
+      bj_dealer_bust: '♠️',
       bj_hands: '♠️',
+      mines_tiles: '💣',
+      mines_hard_win: '💣',
+      plinko_outer: '⚪',
       sc_wagered: '💎',
       gc_wagered: '🪙',
       unique_games: '🎯',
       unique_wins: '🏆',
       speed_rounds: '⚡'
     };
+
+    const list = (challenges && challenges.challenges) || [];
+    const completedCount = list.filter(c => c.completed).length;
+    const claimedCount = list.filter(c => c.claimed).length;
+    const totalRewardMax = list.reduce((s, c) => s + (c.maxReward || 0), 0);
+
     container.innerHTML = `
-      <div class="page-container bonus-page">
+      <div class="page-container promo-page">
         <div class="page-header">
           <button class="btn-back" onclick="showLobby()">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
             <span>Back to Lobby</span>
           </button>
-          <h2 class="page-title">🎯 Daily Challenges</h2>
+          <h2 class="page-title">🎯 Challenges</h2>
         </div>
 
-        <div class="challenges-hero">
-          <div class="challenges-hero-content">
-            <div class="challenges-hero-icon">🎯</div>
-            <h3 class="challenges-hero-title">Complete Daily Challenges</h3>
-            <p class="challenges-hero-subtitle">Complete 3 challenges each day to earn up to <strong>50 SC</strong>!</p>
+        <div class="promo-hero promo-hero-challenges">
+          <div class="promo-hero-bg"></div>
+          <div class="promo-hero-content">
+            <div class="promo-hero-icon">🎯</div>
+            <div class="promo-hero-text">
+              <h3 class="promo-hero-title">Daily Challenges</h3>
+              <p class="promo-hero-sub">Complete challenges to bank up to <strong>${formatCoins(totalRewardMax)} SC</strong> per day. New challenges every 24 hours.</p>
+            </div>
+            <div class="promo-hero-stats">
+              <div class="hero-stat"><div class="hero-stat-num">${claimedCount}/${list.length}</div><div class="hero-stat-cap">CLAIMED</div></div>
+              <div class="hero-stat"><div class="hero-stat-num">${completedCount}</div><div class="hero-stat-cap">READY</div></div>
+            </div>
           </div>
         </div>
 
-        <div class="challenges-grid">
-          ${challenges && challenges.challenges ? challenges.challenges.map(c => {
-            const pct = Math.min(100, (c.progress / c.target) * 100);
-            const isComplete = c.completed && !c.claimed;
-            const isClaimed = c.claimed;
-            const rewardTier = c.maxReward >= 10 ? 'high' : c.maxReward >= 5 ? 'medium' : 'low';
-            const icon = taskIcons[c.task] || '🎯';
-            return `
-              <div class="challenge-card ${isComplete ? 'complete' : ''} ${isClaimed ? 'claimed' : ''}">
-                <div class="challenge-header">
-                  <div class="challenge-icon">${icon}</div>
-                  <div class="challenge-info">
-                    <h4 class="challenge-title">${c.desc}</h4>
-                    <span class="challenge-reward challenge-reward-${rewardTier}">${c.minReward}-${c.maxReward} SC</span>
+        <div class="promo-section">
+          <div class="promo-section-header">
+            <h3 class="promo-section-title">Today's Challenges</h3>
+            <div class="promo-section-line"></div>
+          </div>
+          <div class="challenge-grid">
+            ${list.length === 0 ? '<div class="no-challenges-card">No challenges available right now. Check back later!</div>' : list.map(c => {
+              const pct = Math.min(100, (c.progress / c.target) * 100);
+              const isComplete = c.completed && !c.claimed;
+              const isClaimed = c.claimed;
+              const rewardTier = c.maxReward >= 10 ? 'high' : c.maxReward >= 5 ? 'medium' : 'low';
+              const icon = taskIcons[c.task] || '🎯';
+              return `
+                <div class="challenge-card-new tier-${rewardTier} ${isComplete ? 'is-complete' : ''} ${isClaimed ? 'is-claimed' : ''}">
+                  <div class="challenge-card-top">
+                    <div class="challenge-icon-new">${icon}</div>
+                    <div class="challenge-card-meta">
+                      <div class="challenge-tier-tag tier-tag-${rewardTier}">${rewardTier.toUpperCase()}</div>
+                      <h4 class="challenge-title-new">${escapeHTML(c.desc)}</h4>
+                    </div>
+                    ${isClaimed ? '<div class="challenge-claimed-mark">✓</div>' : ''}
                   </div>
-                  ${isClaimed ? '<span class="challenge-claimed-marker">✓</span>' : ''}
-                </div>
-                <div class="challenge-progress">
-                  <div class="progress-bar">
-                    <div class="progress-fill challenge-progress-fill" style="width:${pct}%"></div>
+                  <div class="challenge-progress-new">
+                    <div class="progress-bar-new"><div class="progress-fill-new" style="width:${pct}%"></div></div>
+                    <div class="progress-text-new"><strong>${c.progress}</strong> / ${c.target}</div>
                   </div>
-                  <div class="progress-meta">
-                    <span class="progress-text">${c.progress} / ${c.target}</span>
-                    <span class="challenge-tier-badge tier-${rewardTier}">${rewardTier.toUpperCase()}</span>
+                  <div class="challenge-card-foot">
+                    <div class="challenge-reward-pill">
+                      <span class="pill-icon">💎</span>
+                      <span class="pill-text">${formatCoins(c.minReward)} – ${formatCoins(c.maxReward)} SC</span>
+                    </div>
+                    ${isComplete
+                      ? `<button type="button" class="btn-challenge-claim" onclick="claimChallenge('${c.id}')">Claim ${formatCoins(calcChallengeRewardDisplay(c))} SC</button>`
+                      : isClaimed
+                        ? '<span class="challenge-claimed-pill">✓ Claimed</span>'
+                        : '<span class="challenge-inprogress">Keep playing</span>'}
                   </div>
-                </div>
-                <div class="challenge-actions">
-                  ${isComplete ? `<button type="button" class="btn-claim-challenge" onclick="claimChallenge('${c.id}')">Claim <strong>${formatCoins(calcChallengeRewardDisplay(c))}</strong> SC</button>` : ''}
-                  ${isClaimed ? '<span class="claimed-badge">✓ Claimed</span>' : ''}
-                  ${!isComplete && !isClaimed ? '<span class="progress-label">Keep playing to complete!</span>' : ''}
-                </div>
-              </div>
-            `;
-          }).join('') : '<div class="no-challenges">No challenges available. Check back later!</div>'}
+                </div>`;
+            }).join('')}
+          </div>
         </div>
       </div>`;
-
-    // Start countdown timers for non-ready rakeback tiers
-    if (rakeback && rakeback.rakeback) {
-      Object.entries(rakeback.rakeback).forEach(([tier, r]) => {
-        if (r.nextClaimMs > 0 && !r.canClaim) {
-          startCountdown('rakeback-countdown-' + tier, r.nextClaimMs, 0);
-        }
-      });
-    }
   } catch (err) {
-    container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load challenges: ' + err.message + '</div></div>';
+    container.innerHTML = '<div class="page-container"><div class="page-error">Failed to load challenges: ' + escapeHTML(err.message) + '</div></div>';
   }
 }
 
@@ -3668,12 +3953,21 @@ function calcChallengeRewardDisplay(c) {
 async function loadRakebackPage() {
   const container = document.getElementById('view-rakeback');
   if (!container) return;
-  container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#b1bad2;">Loading rakeback...</div></div>';
+  container.innerHTML = '<div class="page-container"><div class="page-loading"><div class="checkout-spinner"></div><span>Loading rakeback...</span></div></div>';
 
-   try {
+  try {
     const rakeback = await apiRequest('/api/rakeback/status').catch(() => null);
+    const tiers = (rakeback && rakeback.rakeback) || {};
+    const tierMeta = {
+      daily:   { label: 'Daily',   icon: '📅', accent: 'cyan',   period: 'Refreshes every 24 hours' },
+      weekly:  { label: 'Weekly',  icon: '📆', accent: 'purple', period: 'Refreshes every 7 days' },
+      monthly: { label: 'Monthly', icon: '📈', accent: 'gold',   period: 'Refreshes every 30 days' }
+    };
+    const totalClaimable = Object.values(tiers).reduce((s, r) => s + (r.claimable || 0), 0);
+    const totalTracked = Object.values(tiers).reduce((s, r) => s + (r.lossTracked || 0), 0);
+
     container.innerHTML = `
-      <div class="page-container bonus-page">
+      <div class="page-container promo-page">
         <div class="page-header">
           <button class="btn-back" onclick="showLobby()">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
@@ -3682,64 +3976,82 @@ async function loadRakebackPage() {
           <h2 class="page-title">💎 Rakeback</h2>
         </div>
 
-        <div class="rakeback-hero">
-          <div class="rakeback-hero-bg"></div>
-          <div class="rakeback-hero-content">
-            <div class="rakeback-icon">💎</div>
-            <h3 class="rakeback-title">Cashback on Every Bet</h3>
-            <p class="rakeback-subtitle">Get back 3-10% of your losses automatically. The longer you play, the higher your rate!</p>
-            <div class="rakeback-rate-range">
-              <span>Rate: 3% - 10%</span>
-              <span>Cap: 50% of losses</span>
+        <div class="promo-hero promo-hero-rakeback">
+          <div class="promo-hero-bg"></div>
+          <div class="promo-hero-content">
+            <div class="promo-hero-icon">💎</div>
+            <div class="promo-hero-text">
+              <h3 class="promo-hero-title">Cashback on Every Bet</h3>
+              <p class="promo-hero-sub">We track your net losses and give back <strong>3%–10%</strong> as Sweeps Coins. Capped at 50% of losses so the house always has the edge — but you always get a slice back.</p>
+            </div>
+            <div class="promo-hero-stats">
+              <div class="hero-stat"><div class="hero-stat-num sc-val">${formatCoins(totalClaimable)}</div><div class="hero-stat-cap">CLAIMABLE</div></div>
+              <div class="hero-stat"><div class="hero-stat-num">${formatCoins(totalTracked)}</div><div class="hero-stat-cap">TRACKED</div></div>
             </div>
           </div>
         </div>
 
-        <div class="rakeback-tiers">
-          ${rakeback && rakeback.rakeback ? Object.entries(rakeback.rakeback).map(([tier, r], idx) => {
-            const icon = tier === 'daily' ? '📅' : tier === 'weekly' ? '📆' : '📈';
-            const tierColor = tier === 'daily' ? 'cyan' : tier === 'weekly' ? 'purple' : 'gold';
-            const isReady = r.canClaim;
-            const hasLosses = r.lossTracked > 0;
-            const hasClaimable = r.claimable > 0;
-            return `
-              <div class="rakeback-tier-card tier-${tier}">
-                <div class="tier-header">
-                  <span class="tier-icon">${icon}</span>
-                  <span class="tier-name">${tier.charAt(0).toUpperCase() + tier.slice(1)} Rakeback</span>
-                  <span class="tier-badge tier-badge-${tierColor}">${tier}</span>
-                </div>
-                <div class="tier-stats">
-                  <div class="tier-stat">
-                    <span class="tier-stat-label">Loss Tracked</span>
-                    <span class="tier-stat-value loss">${formatCoins(r.lossTracked)} SC</span>
+        <div class="promo-section">
+          <div class="promo-section-header">
+            <h3 class="promo-section-title">Rakeback Tiers</h3>
+            <div class="promo-section-line"></div>
+          </div>
+          <div class="rakeback-grid">
+            ${Object.keys(tierMeta).map(tierKey => {
+              const r = tiers[tierKey] || {};
+              const meta = tierMeta[tierKey];
+              const pct = r.lossTracked > 0 ? Math.min(100, ((r.claimable || 0) / (r.lossTracked * 0.5 || 1)) * 100) : 0;
+              return `
+                <div class="rakeback-card-new accent-${meta.accent}">
+                  <div class="rakeback-card-top">
+                    <div class="rakeback-card-icon">${meta.icon}</div>
+                    <div class="rakeback-card-meta">
+                      <div class="rakeback-card-label">${meta.label}</div>
+                      <div class="rakeback-card-period">${meta.period}</div>
+                    </div>
+                    <div class="rakeback-claimable-badge">
+                      <span class="badge-cap">CLAIMABLE</span>
+                      <span class="badge-amount">${formatCoins(r.claimable || 0)} SC</span>
+                    </div>
                   </div>
-                  <div class="tier-stat">
-                    <span class="tier-stat-label">Rate</span>
-                    <span class="tier-stat-value">${r.rateMin}% - ${r.rateMax}%</span>
+                  <div class="rakeback-stats-row">
+                    <div class="rakeback-stat">
+                      <span class="rs-cap">Losses Tracked</span>
+                      <span class="rs-val">${formatCoins(r.lossTracked || 0)} SC</span>
+                    </div>
+                    <div class="rakeback-stat">
+                      <span class="rs-cap">Rate Range</span>
+                      <span class="rs-val">${r.rateMin || 3}% – ${r.rateMax || 10}%</span>
+                    </div>
                   </div>
-                  <div class="tier-stat">
-                    <span class="tier-stat-label">Claimable</span>
-                    <span class="tier-stat-value claimable">${formatCoins(r.claimable)} SC</span>
+                  <div class="rakeback-progress-new">
+                    <div class="progress-bar-new"><div class="progress-fill-new" style="width:${pct}%"></div></div>
                   </div>
-                </div>
-                <div class="tier-progress">
-                  <div class="progress-bar">
-                    <div class="progress-fill tier-progress-fill" style="width:${hasLosses ? Math.min(100, (r.claimable / (r.lossTracked * 0.5)) * 100 || 0) : 0}%"></div>
+                  <div class="rakeback-card-foot">
+                    ${r.canClaim && r.claimable > 0
+                      ? `<button type="button" class="btn-rake-claim" onclick="claimRakeback('${tierKey}')">Claim ${formatCoins(r.claimable)} SC</button>`
+                      : !r.canClaim && r.claimable > 0
+                        ? `<div class="rakeback-countdown"><span>⏱</span><span class="countdown-timer" id="rakeback-countdown-${tierKey}">${formatCountdown(r.nextClaimMs || 0)}</span></div>`
+                        : '<span class="rakeback-empty">Play some SC games to start tracking losses.</span>'}
                   </div>
-                </div>
-                <div class="tier-actions">
-                  ${isReady && hasClaimable ? `<button type="button" class="btn-claim-rake" onclick="claimRakeback('${tier}')">Claim <strong>${formatCoins(r.claimable)}</strong> SC</button>` : ''}
-                  ${!isReady && hasClaimable ? `<div class="countdown-timer" id="rakeback-countdown-${tier}">${formatCountdown(r.nextClaimMs)}</div>` : ''}
-                  ${!hasClaimable ? '<span class="no-claim">No losses to rebate yet</span>' : ''}
-                </div>
-              </div>
-            `;
-          }).join('') : '<div class="no-rakeback">No rakeback data available.</div>'}
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <div class="promo-tip">
+          <span class="tip-icon">💡</span>
+          <span>Tip: Higher VIP tiers unlock bigger rakeback caps. Keep climbing!</span>
         </div>
       </div>`;
+
+    Object.entries(tiers).forEach(([tier, r]) => {
+      if (r.nextClaimMs > 0 && !r.canClaim) {
+        startCountdown('rakeback-countdown-' + tier, r.nextClaimMs, 0);
+      }
+    });
   } catch (err) {
-    container.innerHTML = '<div class="page-container"><div style="padding:40px;text-align:center;color:#ff4d4d;">Failed to load rakeback: ' + err.message + '</div></div>';
+    container.innerHTML = '<div class="page-container"><div class="page-error">Failed to load rakeback: ' + escapeHTML(err.message) + '</div></div>';
   }
 }
 
@@ -4019,6 +4331,7 @@ function updateUserProfileBadge() {
   badge.title = username + ' — Profile & Settings';
   const avatar = badge.querySelector('.avatar-circle');
   if (avatar) avatar.textContent = firstChar.toUpperCase();
+  syncProfileDropdownHeader();
 }
 
 function logout() {
@@ -4052,14 +4365,6 @@ function setupGlobalEventListeners() {
     primaryBtn.addEventListener('click', handlePrimaryAction);
   }
 
-  const audioBtn = document.getElementById('btn-toggle-sfx');
-  if (audioBtn) {
-    audioBtn.addEventListener('click', () => {
-      state.sfxEnabled = !state.sfxEnabled;
-      audioBtn.textContent = state.sfxEnabled ? '🔊 SFX ON' : '🔇 SFX OFF';
-    });
-  }
-
   const sidebarToggle = document.getElementById('sidebar-toggle');
   const sidebarOverlay = document.getElementById('sidebar-overlay');
   if (sidebarToggle) {
@@ -4081,14 +4386,30 @@ function setupGlobalEventListeners() {
   }
 
   document.addEventListener('click', (e) => {
-    const container = document.querySelector('.wallet-selector-container');
-    if (container && !container.contains(e.target)) {
+    const walletContainer = document.querySelector('.wallet-selector');
+    if (walletContainer && !walletContainer.contains(e.target)) {
       closeWalletDropdown();
+    }
+    const profileContainer = document.getElementById('user-badge-wrapper');
+    if (profileContainer && !profileContainer.contains(e.target)) {
+      closeProfileDropdown();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeWalletDropdown();
+      closeProfileDropdown();
     }
   });
 }
 
-window.addEventListener('DOMContentLoaded', initSession);
+window.addEventListener('DOMContentLoaded', () => {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+  initSession();
+});
 ['click', 'touchstart', 'keydown'].forEach(evt => {
   window.addEventListener(evt, initAudioContext, { once: true });
 });
@@ -4143,25 +4464,31 @@ function initHeroParticles() {
 }
 
 function handleRouteChange() {
+  closeProfileDropdown();
+  closeWalletDropdown();
   const path = window.location.pathname;
-  const hash = window.location.hash.slice(1);
+  setActiveSidebarLink(path);
 
-  if (hash && ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
+  const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
+  const gameId = path.startsWith('/') ? path.slice(1) : path;
+  if (gameIds.includes(gameId)) {
+    if (state.currentGame !== gameId) launchGame(gameId);
+    return;
+  }
+
+  const hash = window.location.hash.slice(1);
+  if (hash && gameIds.includes(hash)) {
     if (state.currentGame !== hash) launchGame(hash);
     return;
   }
 
   document.querySelector('.main-layout')?.classList.remove('is-game');
+  state.currentGame = null;
   closeGlobalFeed();
 
   if (path === '/account' || path.startsWith('/account/')) {
-    document.getElementById('view-lobby')?.classList.add('hidden');
-    document.getElementById('view-game')?.classList.add('hidden');
+    hideAllViews();
     document.getElementById('view-account')?.classList.remove('hidden');
-    document.getElementById('view-bonus')?.classList.add('hidden');
-    document.getElementById('view-challenges')?.classList.add('hidden');
-    document.getElementById('view-rakeback')?.classList.add('hidden');
-
     let page = 'overview';
     if (path.startsWith('/account/transactions/')) {
       page = 'transactions';
@@ -4183,32 +4510,21 @@ function handleRouteChange() {
       page = 'transactions';
       state.accountTxSub = state.accountTxSub || 'deposits';
     }
+    setActiveAccountLink(page);
     refreshAccountPage(page);
     return;
   }
 
   if (path === '/bonus') {
-    document.getElementById('view-lobby')?.classList.add('hidden');
-    document.getElementById('view-game')?.classList.add('hidden');
-    document.getElementById('view-account')?.classList.add('hidden');
+    hideAllViews();
     document.getElementById('view-bonus')?.classList.remove('hidden');
-    document.getElementById('view-challenges')?.classList.add('hidden');
-    document.getElementById('view-rakeback')?.classList.add('hidden');
     loadBonusContent();
   } else if (path === '/challenges') {
-    document.getElementById('view-lobby')?.classList.add('hidden');
-    document.getElementById('view-game')?.classList.add('hidden');
-    document.getElementById('view-account')?.classList.add('hidden');
-    document.getElementById('view-bonus')?.classList.add('hidden');
+    hideAllViews();
     document.getElementById('view-challenges')?.classList.remove('hidden');
-    document.getElementById('view-rakeback')?.classList.add('hidden');
     loadChallengesPage();
   } else if (path === '/rakeback') {
-    document.getElementById('view-lobby')?.classList.add('hidden');
-    document.getElementById('view-game')?.classList.add('hidden');
-    document.getElementById('view-account')?.classList.add('hidden');
-    document.getElementById('view-bonus')?.classList.add('hidden');
-    document.getElementById('view-challenges')?.classList.add('hidden');
+    hideAllViews();
     document.getElementById('view-rakeback')?.classList.remove('hidden');
     loadRakebackPage();
   } else {
@@ -4216,25 +4532,96 @@ function handleRouteChange() {
   }
 }
 
+function hideAllViews() {
+  ['view-lobby','view-game','view-account','view-bonus','view-challenges','view-rakeback']
+    .forEach(id => document.getElementById(id)?.classList.add('hidden'));
+}
+
 window.addEventListener('popstate', handleRouteChange);
 window.addEventListener('hashchange', () => {
   const hash = window.location.hash.slice(1);
-  if (hash && ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(hash)) {
+  const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
+  if (hash && gameIds.includes(hash)) {
     if (state.currentGame !== hash) launchGame(hash);
   } else if (!hash) {
-    showLobby();
+    handleRouteChange();
   }
 });
 
+const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
+const initialPath = window.location.pathname.slice(1);
 const initialHash = window.location.hash.slice(1);
-if (initialHash && ['account','bonus','challenges','rakeback'].includes(initialHash)) {
-  history.replaceState(null, '', '/' + initialHash);
-  handleRouteChange();
-} else if (initialHash && ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'].includes(initialHash)) {
+
+if (initialPath && gameIds.includes(initialPath)) {
+  window.addEventListener('load', () => {
+    if (state.currentGame !== initialPath) launchGame(initialPath);
+  });
+} else if (initialHash && gameIds.includes(initialHash)) {
   window.addEventListener('load', () => {
     if (state.currentGame !== initialHash) launchGame(initialHash);
   });
 } else {
   handleRouteChange();
 }
+
+// ==========================================================================
+// 14. WALLET CONNECT (Phantom / Solana)
+// ==========================================================================
+
+function openWalletConnectModal() {
+  document.getElementById('wallet-connect-modal')?.classList.remove('hidden');
+  document.getElementById('wallet-connect-status').textContent = '';
+}
+
+function closeWalletConnectModal() {
+  document.getElementById('wallet-connect-modal')?.classList.add('hidden');
+}
+
+async function connectPhantom() {
+  const statusEl = document.getElementById('wallet-connect-status');
+  if (!statusEl) return;
+
+  const provider = (typeof window !== 'undefined' && window.solana && window.solana.isPhantom)
+    ? window.solana
+    : null;
+
+  if (!provider) {
+    statusEl.textContent = 'Phantom not detected. Install phantom.app and refresh.';
+    statusEl.style.color = 'var(--accent-red)';
+    return;
+  }
+
+  try {
+    statusEl.textContent = 'Connecting...';
+    statusEl.style.color = 'var(--text-secondary)';
+
+    const conn = await provider.connect();
+    const address = conn.publicKey.toString();
+
+    state.connectedWallet = {
+      provider: 'phantom',
+      address,
+      chain: 'solana'
+    };
+
+    statusEl.textContent = 'Connected: ' + address.slice(0, 4) + '...' + address.slice(-4);
+    statusEl.style.color = 'var(--accent-green)';
+
+    const btn = document.getElementById('btn-wallet-connect');
+    if (btn) {
+      btn.querySelector('.wc-label').textContent = address.slice(0, 4) + '...' + address.slice(-4);
+      btn.classList.add('connected');
+    }
+
+    playSound('click');
+  } catch (err) {
+    statusEl.textContent = 'Connection failed: ' + (err.message || err);
+    statusEl.style.color = 'var(--accent-red)';
+  }
+}
+
+// Expose for inline onclick handlers
+window.openWalletConnectModal = openWalletConnectModal;
+window.closeWalletConnectModal = closeWalletConnectModal;
+window.connectPhantom = connectPhantom;
 
