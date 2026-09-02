@@ -150,7 +150,7 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
 
   try {
     const res = await fetch(endpoint, config);
-    
+
     let data = {};
     const text = await res.text();
     if (text) {
@@ -161,12 +161,21 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       }
     }
 
-      if (res.status === 401) {
+    if (res.status === 401 && !state.authRecoveryInFlight) {
+      const isAuthEndpoint = endpoint.startsWith('/api/auth/');
+      const hasToken = !!localStorage.getItem('casino_token');
+      if (!isAuthEndpoint && hasToken) {
+        state.authRecoveryInFlight = true;
         localStorage.removeItem('casino_token');
         localStorage.removeItem('casino_username');
-        await initSession();
+        try {
+          await initSession();
+        } finally {
+          state.authRecoveryInFlight = false;
+        }
         throw new Error('Session expired. Re-authenticated.');
       }
+    }
 
     if (!res.ok) {
       const error = new Error(data.error || 'Server error occurred');
@@ -180,7 +189,12 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
     }
     return data;
   } catch (err) {
-    console.error(`[API Error] ${endpoint}:`, err);
+    const expected = err && (err.status === 401 || err.status === 404);
+    if (expected) {
+      console.warn(`[API] ${endpoint} ${err.status || ''}: ${err.message}`);
+    } else {
+      console.error(`[API Error] ${endpoint}:`, err);
+    }
     throw err;
   }
 }
@@ -314,11 +328,21 @@ function connectWebSocket() {
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const token = localStorage.getItem('casino_token') || '';
-  
+
+  state.wsReconnectAttempts = (state.wsReconnectAttempts || 0) + 1;
+  if (state.wsReconnectAttempts > 5) {
+    if (!state.wsReconnectGaveUp) {
+      console.info('[WebSocket]: Giving up after failed attempts; running offline feed.');
+      state.wsReconnectGaveUp = true;
+    }
+    return;
+  }
+
   try {
     state.ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
 
     state.ws.onopen = () => {
+      state.wsReconnectAttempts = 0;
       if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
     };
 
@@ -357,11 +381,12 @@ function connectWebSocket() {
     };
 
     state.ws.onclose = () => {
-      state.wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+      const delay = Math.min(30000, 3000 * state.wsReconnectAttempts);
+      state.wsReconnectTimer = setTimeout(connectWebSocket, delay);
     };
 
     state.ws.onerror = () => {
-      state.ws?.close();
+      try { state.ws?.close(); } catch (e) {}
     };
   } catch (e) {
     console.warn('[WebSocket Warning]: Connection failed, running standalone offline feed.');
@@ -4001,6 +4026,8 @@ function logout() {
   localStorage.removeItem('casino_username');
   state.profile = null;
   state.balances = { gc: 10000.0, sc: 10.0 };
+  state.wsReconnectAttempts = 0;
+  state.wsReconnectGaveUp = false;
   updateWalletUI();
   updateUserProfileBadge();
   state.ws?.close();
