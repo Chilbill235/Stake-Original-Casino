@@ -290,6 +290,18 @@ body.dark-theme::before {
 .btn-wallet-connect .wc-icon {
   font-size: 0.9rem;
 }
+.btn-wallet-connect.connected {
+  background: rgba(16,185,129,0.9);
+  color: #064e31;
+}
+.btn-wallet-connect.connected .wc-icon { color: inherit; }
+.btn-wallet-connect.btn-full {
+  width: 100%;
+  justify-content: center;
+  padding: 14px 16px;
+  font-size: 0.9rem;
+  gap: 10px;
+}
 
 /* Wallet Toolbar */
 .wallet-toolbar {
@@ -1105,7 +1117,8 @@ opacity: 0.5;
 .hero-content h1 {
   font-size: 2.5rem;
   font-weight: 900;
-  margin-bottom: 12px;
+  margin: 0 auto 12px;
+  max-width: 500px;
   background: linear-gradient(135deg, #fff 0%, var(--accent-gold) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -1115,7 +1128,7 @@ opacity: 0.5;
 .hero-content p {
   color: var(--text-secondary);
   font-size: 1.1rem;
-  margin-bottom: 24px;
+  margin: 0 auto 24px;
   max-width: 500px;
 }
 
@@ -5439,7 +5452,16 @@ opacity: 0.5;
     padding: 32px 24px;
     text-align: center;
   }
+  .hero-content h1 { text-align: center; }
+  .hero-content h1 .hero-highlight,
+  .hero-title .hero-highlight { display: inline; }
+  .hero-badge-row { justify-content: center; }
+  .hero-badge,
+  .hero-badge-2 { display: inline-flex; }
   .hero-title { font-size: 2rem; }
+  .hero-cta-row { justify-content: center; }
+  .hero-meta-row { justify-content: center; gap: 16px; }
+  .hero-meta { align-items: center; }
   .hero-visual { display: none; }
   .featured-scroll { grid-template-columns: repeat(2, 1fr); }
   .live-stats-bar { flex-direction: column; gap: 16px; }
@@ -7931,19 +7953,26 @@ opacity: 0.5;
     padding: var(--space-md);
   }
 
-  .hero-section {
-    grid-template-columns: 1fr;
-    padding: var(--space-2xl);
-    text-align: center;
-  }
-
-  .hero-title {
-    font-size: 1.8rem;
-  }
-
-  .hero-visual {
-    display: none;
-  }
+   .hero-section {
+     grid-template-columns: 1fr;
+     padding: 32px 24px;
+     text-align: center;
+   }
+   .hero-content h1 { text-align: center; }
+   .hero-content h1 .hero-highlight,
+   .hero-title .hero-highlight { display: inline; }
+   .hero-badge-row { justify-content: center; }
+   .hero-badge,
+   .hero-badge-2 { display: inline-flex; }
+   .hero-cta-row { justify-content: center; }
+   .hero-meta-row { justify-content: center; gap: 16px; }
+   .hero-meta { align-items: center; }
+   .hero-title {
+     font-size: 1.8rem;
+   }
+   .hero-visual {
+     display: none;
+   }
 
   .featured-scroll {
     grid-template-columns: repeat(2, 1fr);
@@ -7997,18 +8026,17 @@ opacity: 0.5;
     font-size: 0.9rem;
   }
 
-  .hero-title {
-    font-size: 1.5rem;
-  }
-
-  .hero-subtitle {
-    font-size: 0.9rem;
-  }
-
-  .btn-hero-spin {
-    padding: 12px 24px;
-    font-size: 0.85rem;
-  }
+   .hero-title {
+     font-size: 1.5rem;
+   }
+   .hero-title .hero-highlight {
+     display: inline;
+   }
+   .hero-cta-row { justify-content: center; gap: 8px; }
+   .btn-hero-spin {
+     padding: 12px 24px;
+     font-size: 0.85rem;
+   }
 
   .games-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -9042,4 +9070,459 @@ opacity: 0.5;
   .rakeback-grid { grid-template-columns: 1fr; }
 }
 
+/* ===========================================================
+   CHECKOUT — modern, multi-step, loading animations
+   =========================================================== */
+.checkout-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+  padding: 0 12px;
+}
+.checkout-stepper .checkout-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.checkout-stepper .checkout-step:first-child { justify-content: flex-start; }
+.checkout-stepper .checkout-step:last-child { justify-content: flex-end; }
+.checkout-stepper .checkout-step.is-active {
+  color: var(--text-primary);
+}
+.checkout-stepper .checkout-step.is-complete .step-num {
+  background: var(--accent-green);
+  color: #000;
+}
+.checkout-stepper .checkout-step .step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  box-shadow: 0 0 0 0px transparent;
+  transition: all 0.3s ease;
+}
+.checkout-stepper .checkout-step.is-active .step-num {
+  border-color: var(--accent-green);
+  box-shadow: 0 0 12px rgba(0,231,1,0.4);
+  color: var(--accent-green);
+}
+.checkout-stepper .step-label {
+  white-space: nowrap;
+  opacity: 0.8;
+}
+.checkout-stepper .checkout-step.is-active .step-label { opacity: 1; }
+
+.checkout-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
+}
+.checkout-summary-panel {
+  background: var(--bg-glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.checkout-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.checkout-summary-header h3 { margin: 0; font-size: 1.05rem; }
+.btn-back {
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.btn-back:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-green);
+}
+.checkout-package-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 18px;
+}
+.checkout-package-icon { font-size: 1.6rem; }
+.checkout-package-info { flex: 1; }
+.checkout-package-name { font-weight: 700; color: var(--text-primary); }
+.checkout-package-desc { font-size: 0.8rem; color: var(--text-muted); }
+.checkout-package-price { font-weight: 800; color: var(--accent-gold); font-size: 1.1rem; }
+.checkout-summary-details { margin: 16px 0; }
+.checkout-summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--glass-border);
+  font-size: 0.9rem;
+}
+.checkout-summary-row.checkout-summary-total {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.checkout-summary-row .gc-val { color: var(--accent-green); }
+.checkout-summary-row .sc-val { color: var(--accent-gold); }
+.checkout-summary-row:last-child { border-bottom: none; }
+.checkout-trust-badges {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.trust-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0,231,1,0.08);
+  border: 1px solid rgba(0,231,1,0.2);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  color: var(--accent-green);
+}
+.trust-badge .trust-icon { font-size: 1rem; }
+.checkout-trust-badges .trust-badge:nth-child(2) {
+  background: rgba(255,215,0,0.08);
+  border-color: rgba(255,215,0,0.2);
+  color: var(--accent-gold);
+}
+.checkout-trust-badges .trust-badge:nth-child(3) {
+  background: rgba(153,102,255,0.08);
+  border-color: rgba(153,102,255,0.2);
+  color: #9966ff;
+}
+
+.checkout-payment-panel {
+  background: var(--bg-glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.checkout-payment-header h3 { margin: 0 0 16px; font-size: 1.05rem; }
+.checkout-methods {
+  display: flex;
+  gap: 12px;
+  flex-direction: column;
+  margin-bottom: 18px;
+}
+.payment-method-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 2px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  text-align: left;
+}
+.payment-method-btn:hover {
+  border-color: var(--accent-green);
+  background: rgba(0,231,1,0.05);
+  transform: translateY(-2px);
+}
+.payment-method-btn.active {
+  border-color: var(--accent-green);
+  background: rgba(0,231,1,0.08);
+  box-shadow: 0 0 16px rgba(0,231,1,0.25);
+}
+.payment-method-btn .payment-method-icon { font-size: 1.1rem; }
+.payment-method-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  background: var(--gradient-gold);
+  color: #000;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-weight: 800;
+}
+.payment-method-btn .crypto-badge {
+  background: linear-gradient(135deg, #00ff41, #00b4ff);
+  color: #001a0a;
+}
+.payment-panel { display: none; }
+.payment-panel:not(.hidden) { display: block; }
+.payment-panel + .payment-panel { margin-top: 12px; }
+
+/* Stripe mount container */
+#stripe-checkout-container {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Processing overlay animation */
+.payment-processing-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+.processing-illustration {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.processing-spinner-ring {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  position: relative;
+}
+.processing-spinner-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.08);
+  border-top-color: var(--accent-green);
+  box-sizing: border-box;
+  animation: spin 1.2s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.processing-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,231,1,0.25) 0%, transparent 70%);
+  animation: pulse-glow 1.8s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+.processing-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  animation: dotPulse 1.4s ease-in-out infinite;
+}
+.processing-spinner-ring .dot-1 { top: 10px; left: 50%; transform: translateX(-50%); animation-delay: 0s; }
+.processing-spinner-ring .dot-2 { top: 50%; right: 10px; transform: translateY(-50%); animation-delay: 0.1s; }
+.processing-spinner-ring .dot-3 { bottom: 10px; left: 50%; transform: translateX(-50%); animation-delay: 0.2s; }
+.processing-spinner-ring .dot-4 { top: 50%; left: 10px; transform: translateY(-50%); animation-delay: 0.3s; }
+.processing-spinner-ring .dot-5 { top: 30px; right: 30px; animation-delay: 0.4s; }
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+.processing-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+.processing-sub {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.processing-progress { width: 100%; max-width: 280px; }
+.progress-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-green), #00b4ff);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.processing-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Checkout error state */
+.checkout-error-state { display: flex; flex-direction: column; gap: 10px; }
+.checkout-error-icon {
+  width: 64px; height: 64px;
+  margin: 0 auto;
+  border: 2px solid var(--accent-red);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-red);
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+.checkout-error-title { color: var(--accent-red); margin: 0; }
+.checkout-error-text { color: var(--text-secondary); margin: 0; font-size: 0.9rem; }
+
+/* PWA / iPhone safe-area insets for the modal + fixed UI */
+@supports (padding: max(0px)) {
+  .modal-backdrop,
+  .store-modal,
+  .checkout-section {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Responsive checkout layout */
+@media (max-width: 1024px) {
+  .checkout-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .checkout-summary-panel { padding: 16px; }
+}
+@media (max-width: 600px) {
+  .checkout-stepper { gap: 4px; }
+  .checkout-stepper .checkout-step { font-size: 0.7rem; gap: 4px; }
+  .checkout-stepper .step-num { width: 22px; height: 22px; font-size: 0.7rem; }
+  .checkout-stepper .checkout-step .step-label { display: none; }
+  .checkout-methods { flex-direction: row; }
+  .payment-method-btn { font-size: 0.85rem; padding: 12px; }
+  .processing-illustration { width: 100px; height: 100px; }
+  .processing-title { font-size: 1rem; }
+  .processing-sub { font-size: 0.8rem; }
+}
+
+/* ===========================================================
+   CRYPTO DEPOSIT PAGE — QR + address + txid confirm
+   =========================================================== */
+.crypto-confirm-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.crypto-qr-block { text-align: center; }
+.crypto-qr-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 180px; height: 180px;
+  background: #fff;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  padding: 4px;
+  position: relative;
+  margin: 0 auto 10px;
+}
+.crypto-qr-img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.crypto-qr-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  pointer-events: none;
+  opacity: 0.25;
+}
+.crypto-qr-caption {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+.crypto-amount-card,
+.crypto-address-card,
+.crypto-reward-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+.crypto-amount-card label,
+.crypto-address-card label,
+.crypto-reward-card .crypto-reward-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.crypto-amount-value { font-size: 1.15rem; font-weight: 800; color: var(--accent-gold); margin-top: 4px; }
+.crypto-amount-hint { font-size: 0.78rem; color: var(--text-secondary); margin-top: 4px; }
+.crypto-address-code {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.82rem;
+  word-break: break-all;
+  color: var(--text-primary);
+}
+.crypto-address-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.crypto-reward-title { margin-bottom: 8px; }
+.crypto-reward-items {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+}
+.crypto-reward-item { text-align: center; }
+.reward-num { font-size: 1.15rem; font-weight: 800; display: block; }
+.reward-num.gc { color: var(--accent-green); }
+.reward-num.sc { color: var(--accent-gold); }
+.reward-cap { font-size: 0.72rem; color: var(--text-muted); }
+.crypto-confirm-form label { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; }
+.crypto-txid-input {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  outline: none;
+}
+.crypto-txid-input:focus { border-color: var(--accent-green); }
+.crypto-confirm-actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.crypto-phantom-inline { text-align: center; margin-top: 6px; }
+.crypto-success-state .reward-num { font-size: 1.2rem; }
+.crypto-payment-loading { text-align: center; padding: 32px 12px; }
 

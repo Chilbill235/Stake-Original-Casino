@@ -765,11 +765,18 @@
           </button>
         </div>
       </div>
-
-      <!-- Checkout Section -->
+      <!-- Checkout Section (multi-step) -->
       <div id="checkout-section" class="checkout-section hidden">
+        <!-- Step indicator -->
+        <div class="checkout-stepper">
+          <div class="checkout-step is-active" data-step="1"><span class="step-num">1</span><span class="step-label">Package</span></div>
+          <div class="checkout-step" data-step="2"><span class="step-num">2</span><span class="step-label">Payment</span></div>
+          <div class="checkout-step" data-step="3"><span class="step-num">3</span><span class="step-label">Processing</span></div>
+          <div class="checkout-step" data-step="4"><span class="step-num">✓</span><span class="step-label">Done</span></div>
+        </div>
+
         <div class="checkout-layout">
-          <!-- Left: Order Summary -->
+          <!-- Left: Order Summary (sticky on desktop) -->
           <div class="checkout-summary-panel">
             <div class="checkout-summary-header">
               <h3>Order Summary</h3>
@@ -833,12 +840,33 @@
 
             <!-- Card Payment -->
             <div id="payment-card" class="payment-panel">
+              <div class="checkout-loading" id="checkout-loading-state">
+                <div class="checkout-spinner"></div>
+                <p class="checkout-loading-text">Initializing secure checkout...</p>
+                <p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p>
+              </div>
               <div id="stripe-checkout-container">
-                <div class="checkout-loading">
-                  <div class="checkout-spinner"></div>
-                  <p class="checkout-loading-text">Initializing secure checkout...</p>
-                  <p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p>
+                <!-- Stripe Elements mount here -->
+              </div>
+            </div>
+
+            <!-- Processing overlay (animated) -->
+            <div id="payment-processing" class="payment-panel payment-processing-panel hidden">
+              <div class="processing-illustration">
+                <div class="processing-spinner-ring">
+                  <div class="processing-dot dot-1"></div>
+                  <div class="processing-dot dot-2"></div>
+                  <div class="processing-dot dot-3"></div>
+                  <div class="processing-dot dot-4"></div>
+                  <div class="processing-dot dot-5"></div>
                 </div>
+                <div class="processing-glow"></div>
+              </div>
+              <h4 class="processing-title">Processing Your Payment</h4>
+              <p class="processing-sub">Please keep this window open. Verifying your transaction with our secure gateway…</p>
+              <div class="processing-progress">
+                <div class="progress-bar"><div class="progress-bar-fill" id="progress-bar-fill"></div></div>
+                <div class="processing-hint">This typically takes 5–10 seconds.</div>
               </div>
             </div>
 
@@ -873,21 +901,7 @@
               <div id="crypto-payment-details" class="crypto-details hidden">
                 <div class="crypto-qr-placeholder">
                   <div class="crypto-qr-icon">📱</div>
-                  <p>Scan QR code or send payment to address below</p>
-                </div>
-                <div class="crypto-address-box">
-                  <label>Payment Address</label>
-                  <div class="crypto-address-row">
-                    <code id="crypto-address">bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh</code>
-                    <button class="btn-copy" onclick="copyCryptoAddress()">Copy</button>
-                  </div>
-                </div>
-                <div class="crypto-amount-box">
-                  <label>Amount to Send</label>
-                  <div class="crypto-amount-row">
-                    <span id="crypto-amount">0.00001 BTC</span>
-                    <button class="btn-copy" onclick="copyCryptoAmount()">Copy</button>
-                  </div>
+                  <p>Select a coin above to generate your secure deposit address + QR code.</p>
                 </div>
                 <div id="crypto-phantom-block" class="crypto-phantom-block hidden">
                   <button class="btn-phantom-pay" id="phantom-pay-btn" onclick="payWithPhantom()">
@@ -896,13 +910,6 @@
                   </button>
                   <p class="phantom-hint">Auto-detected. Click to open Phantom, confirm the transaction, and your coins will be credited instantly after 1 confirmation.</p>
                 </div>
-                <div class="crypto-notice">
-                  <span class="notice-icon">⏳</span>
-                  <span>Payment will be confirmed after 1 network confirmation. This usually takes 10-30 minutes.</span>
-                </div>
-                <button class="btn-crypto-pay" onclick="initiateCryptoPayment()">
-                  I Have Sent Payment
-                </button>
               </div>
             </div>
           </div>
@@ -1097,20 +1104,18 @@
   </div>
 
   <!-- Wallet Connect Modal -->
-  <div class="modal-overlay hidden" id="wallet-connect-modal">
-    <div class="modal-box" style="max-width: 420px;">
-      <div class="modal-header">
-        <h3 class="modal-title">👻 Connect Wallet</h3>
-        <button class="modal-close" onclick="closeWalletConnectModal()">×</button>
+  <div class="modal-backdrop hidden" id="wallet-connect-modal">
+    <div class="modal-box" style="max-width: 440px;">
+      <div class="modal-header-flex">
+        <h3>👻 Connect Wallet</h3>
+        <button class="x-close" onclick="closeWalletConnectModal()" aria-label="Close">×</button>
       </div>
-      <div class="modal-body">
-        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;">Connect your Phantom wallet to pay with SOL. Your wallet address will be used to track the payment on-chain.</p>
-        <button class="btn-wallet-connect btn-full" id="phantom-connect-btn" onclick="connectPhantom()">
-          <span class="wc-icon">👻</span>
-          <span>Connect Phantom</span>
-        </button>
-        <div id="wallet-connect-status" style="margin-top: 12px; text-align: center; color: var(--text-muted); font-size: 0.85rem;"></div>
-      </div>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 20px;">Connect your Phantom wallet to pay with SOL. Your wallet address is used only to track this on-chain deposit.</p>
+      <button class="btn-wallet-connect btn-full" id="phantom-connect-btn" onclick="connectPhantom()">
+        <span class="wc-icon">👻</span>
+        <span>Connect Phantom</span>
+      </button>
+      <div id="wallet-connect-status" style="margin-top: 14px; text-align: center; color: var(--text-muted); font-size: 0.85rem; min-height: 1.4em;"></div>
     </div>
   </div>
 

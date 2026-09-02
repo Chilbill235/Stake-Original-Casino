@@ -181,19 +181,19 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       const error = new Error(data.error || 'Server error occurred');
       error.status = res.status;
       error.data = data;
-       error.requiresKyc = data.requiresKyc;
+      error.requiresKyc = data.requiresKyc;
       error.requiresOnboarding = data.requiresOnboarding;
       error.onboardingUrl = data.onboardingUrl;
       error.requiresAccount = data.requiresAccount;
+      error.geoRestricted = data.geo?.restricted || data.geoRestricted || false;
+      error.isVpn = data.geo?.isVpn || false;
+      error.riskScore = data.geo?.riskScore || 0;
       throw error;
     }
     return data;
   } catch (err) {
-    const expected = err && (err.status === 401 || err.status === 404);
-    if (expected) {
-      console.warn(`[API] ${endpoint} ${err.status || ''}: ${err.message}`);
-    } else {
-      console.error(`[API Error] ${endpoint}:`, err);
+    if (err.geoRestricted) {
+      showGeoRestrictionModal(err);
     }
     throw err;
   }
@@ -240,6 +240,10 @@ async function initSession() {
     if (data.username) localStorage.setItem('casino_username', data.username);
     state.profile = data;
   } catch (err) {
+    if (err.geoRestricted) {
+      showGeoRestrictionModal(err);
+      return;
+    }
     console.warn('[Auth failure]: Token invalid, falling back to guest.', err.message);
     localStorage.removeItem('casino_token');
     await continueAsGuest();
@@ -256,6 +260,9 @@ async function initSession() {
   injectMobileAndNavigationDOM();
   applyEmbeddedModeRestrictions();
   updateUserProfileBadge();
+
+  // Deep-link support: re-render the initial route once the session is loaded.
+  reapplyCurrentRoute();
 }
 
 /**
@@ -711,10 +718,48 @@ function updateProvablyFairHash(hash) {
 function openStoreModal() {
   if (state.isEmbedded) return;
   playSound('click');
+  setCheckoutStep(1);
+  hideProcessingPanel();
   const modal = document.getElementById('modal-store');
   if (modal) modal.classList.remove('hidden');
 
   showPackageList();
+}
+
+function setCheckoutStep(step) {
+  state.checkoutStep = step;
+  document.querySelectorAll('.checkout-step').forEach(s => {
+    s.classList.toggle('is-active', Number(s.dataset.step) === step);
+    s.classList.toggle('is-complete', Number(s.dataset.step) < step);
+  });
+}
+
+function hideProcessingPanel() {
+  const panel = document.getElementById('payment-processing');
+  const cardPanel = document.getElementById('payment-card');
+  if (panel) panel.classList.add('hidden');
+  if (cardPanel) cardPanel.classList.remove('hidden');
+  const loadingState = document.getElementById('checkout-loading-state');
+  if (loadingState) loadingState.classList.add('hidden');
+  const container = document.getElementById('stripe-checkout-container');
+  if (container) container.innerHTML = '';
+}
+
+function showProcessingPanel() {
+  const panel = document.getElementById('payment-processing');
+  const cardPanel = document.getElementById('payment-card');
+  const successSection = document.getElementById('checkout-success');
+  if (panel) panel.classList.remove('hidden');
+  if (cardPanel) cardPanel.classList.add('hidden');
+  if (successSection) successSection.classList.add('hidden');
+  const fill = document.getElementById('progress-bar-fill');
+  if (fill) fill.style.width = '0%';
+  let w = 0;
+  const barInterval = setInterval(() => {
+    w = Math.min(85, w + Math.random() * 12);
+    if (fill) fill.style.width = w + '%';
+  }, 350);
+  return () => clearInterval(barInterval);
 }
 
 function closeStoreModal() {
@@ -727,12 +772,7 @@ function closeStoreModal() {
     container.innerHTML = '';
   }
 
-  const checkoutSection = document.getElementById('checkout-section');
-  if (checkoutSection) checkoutSection.classList.add('hidden');
-
-  const successSection = document.getElementById('checkout-success');
-  if (successSection) successSection.classList.add('hidden');
-
+  hideCheckoutSections();
   showPackageList();
 
   if (state.activeCheckoutInstance) {
@@ -741,8 +781,19 @@ function closeStoreModal() {
   }
 }
 
+function hideCheckoutSections() {
+  const checkoutSection = document.getElementById('checkout-section');
+  const successSection = document.getElementById('checkout-success');
+  const processing = document.getElementById('payment-processing');
+  if (checkoutSection) checkoutSection.classList.add('hidden');
+  if (successSection) successSection.classList.add('hidden');
+  if (processing) processing.classList.add('hidden');
+}
+
 function resetStoreModal() {
   state.lastPackageId = null;
+  setCheckoutStep(1);
+  hideProcessingPanel();
   const pkgList = document.getElementById('package-selection');
   const summary = document.getElementById('package-summary');
   const checkoutSection = document.getElementById('checkout-section');
@@ -782,6 +833,7 @@ async function proceedToCheckout() {
   const packageId = state.lastPackageId;
   if (!packageId) return;
   playSound('click');
+  setCheckoutStep(2);
   const pkgList = document.getElementById('package-selection');
   const summary = document.getElementById('package-summary');
   const checkoutSection = document.getElementById('checkout-section');
@@ -828,27 +880,38 @@ function updateCheckoutSummary(packageId) {
 async function loadStripeCheckout(packageId) {
   const container = document.getElementById('stripe-checkout-container');
   if (!container) return;
-  container.innerHTML = '<div class="checkout-loading"><div class="checkout-spinner"></div><p class="checkout-loading-text">Initializing secure checkout...</p><p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p></div>';
 
-  const data = await apiRequest('/api/user/buy-coins', 'POST', { packageId });
-  if (!data.publishableKey || !data.clientSecret) {
-    throw new Error(data.error || 'Invalid session configuration returned from server.');
-  }
-  const StripeSDK = await loadStripeSdk();
-  const stripe = StripeSDK(data.publishableKey);
-  const checkoutEl = document.createElement('div');
-  checkoutEl.id = 'stripe-checkout-root';
-  container.innerHTML = '';
-  container.appendChild(checkoutEl);
-  state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
-    clientSecret: data.clientSecret,
-    onComplete: (result) => {
-      playSound('win');
-      const pkg = PACKAGE_INFO[packageId] || { gc: '0', sc: '0' };
-      showCheckoutSuccess(pkg.gc, pkg.sc);
+  // Step 3: show animated processing panel while the secure gateway initializes
+  const stopProgress = showProcessingPanel();
+  setCheckoutStep(3);
+
+  try {
+    const data = await apiRequest('/api/user/buy-coins', 'POST', { packageId });
+    if (!data.publishableKey || !data.clientSecret) {
+      throw new Error(data.error || 'Invalid session configuration returned from server.');
     }
-  });
-  state.activeCheckoutInstance.mount(checkoutEl);
+    const StripeSDK = await loadStripeSdk();
+    const stripe = StripeSDK(data.publishableKey);
+    const checkoutEl = document.createElement('div');
+    checkoutEl.id = 'stripe-checkout-root';
+    container.innerHTML = '';
+    container.appendChild(checkoutEl);
+    state.activeCheckoutInstance = await stripe.initEmbeddedCheckout({
+      clientSecret: data.clientSecret,
+      onComplete: (result) => {
+        playSound('win');
+        const pkg = PACKAGE_INFO[packageId] || { gc: '0', sc: '0' };
+        stopProgress();
+        setCheckoutStep(4);
+        showCheckoutSuccess(pkg.gc, pkg.sc);
+      }
+    });
+    state.activeCheckoutInstance.mount(checkoutEl);
+  } catch (err) {
+    stopProgress();
+    hideProcessingPanel();
+    throw err;
+  }
 }
 
 function selectPaymentMethod(method) {
@@ -873,62 +936,49 @@ function selectCrypto(currency) {
   document.querySelectorAll('.crypto-btn').forEach(btn => btn.classList.remove('active'));
   const activeBtn = document.querySelector('.crypto-btn[onclick="selectCrypto(\'' + currency + '\')"]');
   if (activeBtn) activeBtn.classList.add('active');
-  const details = document.getElementById('crypto-payment-details');
-  if (!details) return;
-  details.classList.remove('hidden');
 
-  const addresses = {
-    BTC: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-    ETH: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    USDT: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    LTC: 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976',
-    SOL: '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE'
-  };
-  const amounts = {
-    BTC: '0.00001 BTC',
-    ETH: '0.0005 ETH',
-    USDT: '10.00 USDT',
-    LTC: '0.05 LTC',
-    SOL: '0.05 SOL'
-  };
-  const addrEl = document.getElementById('crypto-address');
-  const amtEl = document.getElementById('crypto-amount');
-  if (addrEl) addrEl.textContent = addresses[currency] || '';
-  if (amtEl) amtEl.textContent = amounts[currency] || '';
-
-  // Show / hide Phantom wallet button based on whether SOL is selected
   const phantomBlock = document.getElementById('crypto-phantom-block');
   if (phantomBlock) phantomBlock.classList.toggle('hidden', currency !== 'SOL');
+
+  // Fetch the REAL, env-configured merchant address + a QR from the server.
+  // (Never show hardcoded placeholder addresses.)
+  initiateCryptoPayment(currency);
 }
 
-function copyCryptoAddress() {
-  const addr = document.getElementById('crypto-address');
-  if (!addr || !addr.textContent) return;
-  navigator.clipboard.writeText(addr.textContent).then(() => {
-    playSound('click');
-    alert('Address copied to clipboard!');
-  }).catch(() => {
-    alert('Address: ' + addr.textContent);
-  });
+// Build a scannable crypto payment URI for the QR code.
+function buildCryptoUri(currency, address) {
+  const msg = encodeURIComponent('Casino Deposit');
+  switch (currency) {
+    case 'BTC':  return 'bitcoin:' + address + '?message=' + msg;
+    case 'ETH':
+    case 'USDT': return 'ethereum:' + address + '?message=' + msg;
+    case 'LTC':  return 'litecoin:' + address + '?message=' + msg;
+    case 'SOL':  return 'solana:' + address + '?message=' + msg;
+    default:     return address;
+  }
+}
+function qrUrl(data) {
+  return 'https://api.qrserver.com/v1/api/?size=220x220&margin=2&data=' + encodeURIComponent(data);
 }
 
-function copyCryptoAmount() {
-  const amt = document.getElementById('crypto-amount');
-  if (!amt || !amt.textContent) return;
-  navigator.clipboard.writeText(amt.textContent).then(() => {
-    playSound('click');
-    alert('Amount copied to clipboard!');
-  }).catch(() => {
-    alert('Amount: ' + amt.textContent);
-  });
-}
-
-async function initiateCryptoPayment() {
+async function initiateCryptoPayment(currency) {
   const packageId = state.lastPackageId;
   if (!packageId) return;
-  const symbolEl = document.querySelector('.crypto-btn.active .crypto-symbol');
-  const cryptoType = symbolEl ? symbolEl.textContent : 'BTC';
+  const cryptoType = currency || (document.querySelector('.crypto-btn.active .crypto-symbol')
+    ? document.querySelector('.crypto-btn.active .crypto-symbol').textContent : 'BTC');
   playSound('click');
+
+  const details = document.getElementById('crypto-payment-details');
+  if (details) {
+    details.classList.remove('hidden');
+    details.innerHTML =
+      '<div class="crypto-payment-loading" style="text-align:center;padding:34px;">' +
+      '<div class="checkout-spinner"></div>' +
+      '<p class="checkout-loading-text">Loading your deposit address…</p>' +
+      '<p class="checkout-loading-sub">Generating your secure wallet address</p>' +
+      '</div>';
+  }
+
   try {
     const res = await apiRequest('/api/user/crypto-payment/initiate', 'POST', {
       packageId,
@@ -940,17 +990,161 @@ async function initiateCryptoPayment() {
       throw new Error(res.error || 'Failed to initiate crypto payment.');
     }
   } catch (err) {
-    alert('Crypto payment error: ' + err.message);
+    if (details) details.innerHTML =
+      '<div style="text-align:center;padding:24px;color:var(--accent-red);">⚠ ' + escapeHTML(err.message || err) + '</div>';
   }
+}
+
+function showCryptoPaymentConfirmation(res, cryptoType) {
+  const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
+  const address = res.address || '';
+  const amount = res.amount || '';
+  const uri = buildCryptoUri(cryptoType, address);
+  state.activeCryptoPaymentId = res.paymentId || state.activeCryptoPaymentId;
+
+  const details = document.getElementById('crypto-payment-details');
+  if (!details) return;
+  details.classList.remove('hidden');
+  details.innerHTML =
+    '<div class="crypto-confirm-flow">' +
+
+      '<!-- QR + Address -->' +
+      '<div class="crypto-qr-block">' +
+      '  <div class="crypto-qr-wrap">' +
+      '    <img class="crypto-qr-img" src="' + qrUrl(uri) + '" alt="Scan to pay ' + cryptoType + '" />' +
+      '    <div class="crypto-qr-fallback">📱</div>' +
+      '  </div>' +
+      '  <p class="crypto-qr-caption">Scan the QR code with your wallet to pay, or send manually to the address below.</p>' +
+      '</div>' +
+
+      '<!-- Suggested amount -->' +
+      '<div class="crypto-amount-card">' +
+      '  <label>Suggested amount</label>' +
+      '  <div class="crypto-amount-value">' + amount + ' ' + cryptoType + '</div>' +
+      '  <p class="crypto-amount-hint">Send <strong>any amount</strong> you want — you will receive the selected package below after confirmation.</p>' +
+      '</div>' +
+
+      '<!-- Address (copyable) -->' +
+      '<div class="crypto-address-card">' +
+      '  <label>Send to this address</label>' +
+      '  <div class="crypto-address-row">' +
+      '    <code class="crypto-address-code">' + escapeHTML(address) + '</code>' +
+      '    <button class="btn-copy" onclick="copyCryptoAddressHandler(\'' + escapeHTML(address).replace(/'/g, '&#39;') + '\')">Copy</button>' +
+      '  </div>' +
+      '</div>' +
+
+      '<!-- What you receive -->' +
+      '<div class="crypto-reward-card">' +
+      '  <div class="crypto-reward-title">You will receive</div>' +
+      '  <div class="crypto-reward-items">' +
+      '    <div class="crypto-reward-item"><span class="reward-num">' + pkg.gc + '</span><span class="reward-cap">Gold Coins</span></div>' +
+      '    <div class="crypto-reward-item"><span class="reward-num">+' + pkg.sc + '</span><span class="reward-cap">Sweeps Coins</span></div>' +
+      '  </div>' +
+      '</div>' +
+
+      '<!-- Txid submission -->' +
+      '<div class="crypto-confirm-form">' +
+      '  <label for="crypto-txid">Transaction ID (txid)</label>' +
+      '  <input id="crypto-txid" type="text" placeholder="Paste your transaction hash…" maxlength="128" class="crypto-txid-input" />' +
+      '  <label for="crypto-amount-sent" style="margin-top:12px;">Amount you actually sent (optional)</label>' +
+      '  <input id="crypto-amount-sent" type="text" placeholder="e.g. 0.00001 BTC" class="crypto-txid-input" />' +
+       '  <div class="crypto-confirm-actions">' +
+       '    <button class="btn btn-secondary-action" onclick="backToPackages()" style="min-width:110px;">Back</button>' +
+       '    <button class="btn btn-primary" onclick="confirmCryptoPayment()" id="btn-confirm-crypto" style="min-width:150px;">Confirm Payment</button>' +
+       '  </div>' +
+       (cryptoType === 'SOL' ?
+         '  <div class="crypto-phantom-inline">' +
+         '    <button class="btn-phantom-pay" onclick="payWithPhantom()">' +
+         '      <span class="phantom-icon">👻</span> <span>Pay with Phantom (Solana)</span>' +
+         '    </button>' +
+         '    <p class="phantom-hint">Phantom detected? Sign & send directly — your coins credit instantly after on-chain verification.</p>' +
+         '  </div>' : '') +
+       '</div>' +
+       '</div>';
+}
+
+async function confirmCryptoPayment() {
+  const txidEl = document.getElementById('crypto-txid');
+  const amountEl = document.getElementById('crypto-amount-sent');
+  const txid = (txidEl ? txidEl.value.trim() : '');
+  const amountSent = amountEl ? amountEl.value.trim() : '';
+  if (!txid) return alert('Please paste your transaction ID (txid) before confirming.');
+
+  const btn = document.getElementById('btn-confirm-crypto');
+  if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+
+  try {
+    const res = await apiRequest('/api/user/crypto-payment/confirm', 'POST', {
+      paymentId: state.activeCryptoPaymentId,
+      txid,
+      amountSent: amountSent || undefined
+    });
+    if (res.success) {
+      const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
+      if (res.balances) {
+        state.balances = mergeBalances(res.balances);
+        updateWalletUI();
+      }
+      showCryptoDepositSuccess(pkg, res.verified);
+    } else {
+      throw new Error(res.error || 'Payment could not be confirmed.');
+    }
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm Payment'; }
+    alert('Confirmation error: ' + (err.message || err));
+  }
+}
+
+function showCryptoDepositSuccess(pkg, verified) {
+  const details = document.getElementById('crypto-payment-details');
+  if (!details) return;
+  details.classList.remove('hidden');
+  details.innerHTML =
+    '<div class="crypto-success-state" style="text-align:center;padding:30px;">' +
+    '<div style="font-size:3rem;margin-bottom:12px;">🎉</div>' +
+    '<h4 style="color:var(--accent-green);font-weight:800;margin-bottom:8px;">Deposit Confirmed!</h4>' +
+    '<p style="color:var(--text-secondary);margin-bottom:20px;font-size:0.9rem;">' +
+    (verified ? 'On-chain verification passed. ' : 'Your transaction is being processed. ') +
+    'Your coins have been credited instantly.' +
+    '</p>' +
+    '<div style="display:flex;gap:16px;justify-content:center;margin-bottom:20px;">' +
+    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-green);font-size:1.2rem;">' + pkg.gc + '</div><div style="font-size:0.7rem;color:var(--text-muted);">Gold Coins</div></div>' +
+    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-gold);font-size:1.2rem;">+' + pkg.sc + ' SC</div><div style="font-size:0.7rem;color:var(--text-muted);">Sweeps Coins</div></div>' +
+    '</div>' +
+    '<button class="btn btn-primary" onclick="closeStoreModal()" style="min-width:150px;">Done</button>' +
+    '</div>';
+  playSound('win');
+  setTimeout(() => { mergeBalances({ sc: (state.balances.sc||0) }); updateWalletUI(); }, 500);
+}
+
+function copyCryptoAddressHandler(address) {
+  navigator.clipboard.writeText(address).then(() => {
+    playSound('click');
+    alert('Address copied to clipboard!');
+  }).catch(() => {
+    alert('Address: ' + address);
+  });
+}
+
+// Legacy wrappers kept so the static markup Copy buttons never throw.
+function copyCryptoAddress() {
+  const el = document.getElementById('crypto-address');
+  if (el && el.textContent) copyCryptoAddressHandler(el.textContent);
+}
+function copyCryptoAmount() {
+  const el = document.getElementById('crypto-amount');
+  if (el && el.textContent) navigator.clipboard.writeText(el.textContent).then(() => { playSound('click'); alert('Amount copied!'); }).catch(() => {});
 }
 
 /**
  * Phantom (Solana) wallet payment flow:
  *  1. Detect window.solana (Phantom) — if missing, prompt install.
- *  2. Ask Phantom to connect (publicKey) and sign a transfer.
- *  3. POST the signed tx to /api/user/crypto-payment/phantom-confirm.
- *  4. Backend verifies the on-chain transfer to our merchant wallet and,
- *     if it matches the expected amount, credits GC + SC instantly.
+ *  2. Ask Phantom to connect (publicKey).
+ *  3. POST /api/user/crypto-payment/initiate with paymentMethod:'phantom' to lock the
+ *     expected amount + get the merchant SOL address.
+ *  4. Sign & send a SOL transfer to the merchant wallet.
+ *  5. POST /api/user/crypto-payment/phantom-confirm -> backend verifies the on-chain
+ *     transfer and credits GC+SC instantly.
  */
 async function payWithPhantom() {
   const packageId = state.lastPackageId;
@@ -969,25 +1163,21 @@ async function payWithPhantom() {
     const conn = await provider.connect();
     const fromAddress = conn.publicKey.toString();
 
-    // Ask backend to lock an expected amount for this user+package
     const init = await apiRequest('/api/user/crypto-payment/initiate', 'POST', {
       packageId,
       currency: 'SOL',
       paymentMethod: 'phantom',
       fromAddress
     });
-
     if (!init.success) throw new Error(init.error || 'Could not initiate payment.');
 
-    // Build a SOL transfer instruction using the @solana/web3.js library if loaded
-    // via Phantom's connection. We construct the transaction client-side.
+    state.activeCryptoPaymentId = init.paymentId;
     const merchantAddress = init.address;
     const lamports = Math.round(parseFloat(init.amount) * 1e9);
 
     const connection = provider._provider || (window.__phantomConnection);
     let txSignature;
     if (typeof solanaWeb3 !== 'undefined') {
-      // Use a publicly-loaded web3.js (if available via Phantom)
       const tx = new solanaWeb3.Transaction();
       tx.add(
         solanaWeb3.SystemProgram.transfer({
@@ -1002,8 +1192,6 @@ async function payWithPhantom() {
       const { signature } = await provider.signAndSendTransaction(tx);
       txSignature = signature;
     } else {
-      // Fallback: ask user to send the amount manually, then sign a
-      // message for non-repudiation (backend uses it as a hint).
       const { signature } = await provider.signMessage(
         new TextEncoder().encode(`pay:${init.paymentId}:${lamports}`),
         'utf8'
@@ -1016,51 +1204,18 @@ async function payWithPhantom() {
       txSignature,
       fromAddress
     });
-
     if (!confirm.success) throw new Error(confirm.error || 'Confirmation failed.');
 
-    showCryptoPaymentConfirmation(init, 'SOL');
-
+    const pkg = PACKAGE_INFO[packageId] || { gc: '0', sc: '0' };
     if (confirm.balances) {
       state.balances = mergeBalances(confirm.balances);
       updateWalletUI();
     }
-    alert('🎉 Payment confirmed! ' + (confirm.credited?.gc || 0) + ' GC + ' + (confirm.credited?.sc || 0) + ' SC credited.');
+    showCryptoDepositSuccess(pkg, !!confirm.verified);
   } catch (err) {
     console.error('[Phantom]', err);
-    alert('Phantom payment error: ' + err.message);
+    alert('Phantom payment error: ' + (err.message || err));
   }
-}
-
-function showCryptoPaymentConfirmation(res, cryptoType) {
-  const container = document.getElementById('stripe-checkout-container');
-  if (!container) return;
-  const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
-  container.innerHTML =
-    '<div class="crypto-payment-confirm" style="text-align:center;padding:30px;">' +
-    '<div style="font-size:2.5rem;margin-bottom:12px;">✅</div>' +
-    '<h4 style="color:#00e701;font-weight:800;margin-bottom:8px;">Payment Initiated!</h4>' +
-    '<p style="color:var(--text-secondary);margin-bottom:16px;font-size:0.9rem;">Send <strong>' + res.amount + ' ' + cryptoType + '</strong> to the address below.</p>' +
-    '<div style="background:var(--bg-card);border:1px solid var(--border-default);border-radius:8px;padding:12px 16px;font-family:\'SF Mono\',monospace;font-size:0.85rem;word-break:break-all;margin-bottom:20px;cursor:pointer;" onclick="copyCryptoAddressHandler(\'' + res.address + '\')">' + res.address + ' <span style="color:var(--accent-green);font-size:0.75rem;">(click to copy)</span></div>' +
-    '<div style="background:var(--bg-tertiary);border:1px solid var(--border-default);border-radius:8px;padding:16px;margin-bottom:20px;text-align:left;">' +
-    '<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px;">You will receive after confirmation:</div>' +
-    '<div style="display:flex;gap:16px;justify-content:center;">' +
-    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-green);font-size:1.1rem;">' + pkg.gc + '</div><div style="font-size:0.7rem;color:var(--text-muted);">Gold Coins</div></div>' +
-    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-gold);font-size:1.1rem;">+' + pkg.sc + ' SC</div><div style="font-size:0.7rem;color:var(--text-muted);">Sweeps Coins</div></div>' +
-    '</div>' +
-    '</div>' +
-    '<p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:20px;">Payment will be confirmed after 1 network confirmation (10-30 min).</p>' +
-    '<button class="btn btn-primary" onclick="backToPackages()" style="min-width:140px;">Back to Packages</button>' +
-    '</div>';
-}
-
-function copyCryptoAddressHandler(address) {
-  navigator.clipboard.writeText(address).then(() => {
-    playSound('click');
-    alert('Address copied to clipboard!');
-  }).catch(() => {
-    alert('Address: ' + address);
-  });
 }
 
 function backToPackages() {
@@ -1107,13 +1262,15 @@ function showCheckoutLoading() {
 }
 
 function showCheckoutError(message) {
+  setCheckoutStep(2);
+  hideProcessingPanel();
   const container = document.getElementById('stripe-checkout-container');
   if (!container) return;
   container.innerHTML =
-    '<div style="text-align:center; padding:40px 20px;">' +
-    '<div style="width:64px; height:64px; border:2px solid var(--accent-red); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; color:var(--accent-red); font-size:1.8rem;">!</div>' +
-    '<h4 style="color:var(--accent-red); margin-bottom:8px;">Checkout Error</h4>' +
-    '<p style="color:var(--text-secondary); margin-bottom:20px; font-size:0.9rem;">' + escapeHTML(message) + '</p>' +
+    '<div class="checkout-error-state" style="text-align:center; padding:40px 20px;">' +
+    '<div class="checkout-error-icon">!</div>' +
+    '<h4 class="checkout-error-title">Checkout Error</h4>' +
+    '<p class="checkout-error-text">' + escapeHTML(message) + '</p>' +
     '<div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">' +
     '<button class="btn btn-primary" onclick="retryCheckout()" style="min-width:120px;">Retry</button>' +
     '<button class="btn btn-secondary-action" onclick="showPackageList()">Back to Packages</button>' +
@@ -1208,7 +1365,8 @@ function showCheckoutBackButton() {
 
 async function buyCoinPackage(packageId) {
   if (state.isEmbedded) return;
-  if (state.profile && (state.profile.isGuest || (state.profile.email && state.profile.email.endsWith('@guest.casino')))) {
+  const testMode = !!(state.flags && state.flags.allowGuestPayments);
+  if (!testMode && state.profile && (state.profile.isGuest || (state.profile.email && state.profile.email.endsWith('@guest.casino')))) {
     alert('Guest accounts cannot purchase coins. Please register a real account first.');
     return;
   }
@@ -1226,13 +1384,18 @@ async function retryCheckout() {
 
 function openRedeemModal() {
   if (state.isEmbedded) return;
-  if (state.profile?.isGuest || (state.profile?.email && state.profile.email.endsWith('@guest.casino'))) {
-    alert('Guest accounts cannot redeem Sweeps Coins. Please register a real account first.');
-    return;
-  }
-  if (state.profile?.kyc?.status !== 'VERIFIED') {
-    alert('Identity verification (KYC) is required to redeem Sweeps Coins for cash. Please complete verification in your Profile first.');
-    return;
+  // TEST MODE: when ALLOW_GUEST_PAYMENTS is enabled on the server, skip the
+  // guest + KYC gates so the deposit/withdrawal flow can be exercised end-to-end.
+  const testMode = !!(state.flags && state.flags.allowGuestPayments);
+  if (!testMode) {
+    if (state.profile?.isGuest || (state.profile?.email && state.profile.email.endsWith('@guest.casino'))) {
+      alert('Guest accounts cannot redeem Sweeps Coins. Please register a real account first.');
+      return;
+    }
+    if (state.profile?.kyc?.status !== 'VERIFIED') {
+      alert('Identity verification (KYC) is required to redeem Sweeps Coins for cash. Please complete verification in your Profile first.');
+      return;
+    }
   }
   if ((state.balances.sc_unplayed || 0) < 50) {
     alert('You need at least 50.00 SC (redeemable) to request a withdrawal. Keep playing!');
@@ -1306,6 +1469,10 @@ async function submitRedeem() {
 
 function showLobby() {
   playSound('click');
+  if (!document.getElementById('view-lobby')) {
+    window.location.href = '/';
+    return;
+  }
   history.pushState(null, '', '/');
   setActiveSidebarLink('/');
   document.getElementById('view-lobby')?.classList.remove('hidden');
@@ -1413,6 +1580,10 @@ function searchLobbyGames(query) {
 
 async function launchGame(gameId) {
   playSound('click');
+  if (!document.getElementById('view-game')) {
+    window.location.href = '/' + gameId;
+    return;
+  }
   state.currentGame = gameId;
   state.activeGameState = null;
   state.isProcessing = false;
@@ -3083,10 +3254,11 @@ function renderAccountPage(page = 'overview') {
     VERIFIED: 'kyc-badge-verified',
     REJECTED: 'kyc-badge-rejected'
   }[kyc.status] || 'kyc-badge-unverified';
-  const gc = formatCoins(state.balances.gc || 0);
-  const sc = formatCoins(state.balances.sc || 0);
-  const scUnplayed = formatCoins(state.balances.sc_unplayed || 0);
-  const scPlayed = formatCoins(state.balances.sc_played || 0);
+  const b = state.balances || { gc: 0, sc: 0, sc_unplayed: 0, sc_played: 0 };
+  const gc = formatCoins(b.gc || 0);
+  const sc = formatCoins(b.sc || 0);
+  const scUnplayed = formatCoins(b.sc_unplayed || 0);
+  const scPlayed = formatCoins(b.sc_played || 0);
   const vip = p.vip || {};
   const vipText = vip.tier || 'Bronze';
   const totalWageredGC = formatCoins(vip.totalWageredGC || 0);
@@ -3661,6 +3833,27 @@ function injectMobileAndNavigationDOM() {
     document.body.appendChild(agegate);
   }
 
+  if (!document.getElementById('modal-geo-restriction')) {
+    const geoModal = document.createElement('div');
+    geoModal.id = 'modal-geo-restriction';
+    geoModal.className = 'modal-backdrop hidden';
+    geoModal.innerHTML = `
+      <div class="modal-box" style="max-width: 400px; text-align: center;">
+        <div class="modal-header-flex">
+          <h3>🌍 Jurisdiction Restricted</h3>
+        </div>
+        <p class="modal-subtitle">Sweepstakes play is unavailable in your jurisdiction.</p>
+        <p id="geo-restriction-details" style="color:#e57373; margin:10px 0;"></p>
+        <p style="font-size:0.85rem; color:#b1bad2; margin-top:10px;">
+          If you believe this is an error, please contact support or disable any VPN/proxy services.
+        </p>
+        <div style="margin-top: 15px;">
+          <button type="button" onclick="location.reload()" class="btn-secondary-action btn-full">Refresh</button>
+        </div>
+      </div>`;
+    document.body.appendChild(geoModal);
+  }
+
   if (!document.getElementById('modal-forgot-password')) {
     const forgotModal = document.createElement('div');
     forgotModal.id = 'modal-forgot-password';
@@ -4144,6 +4337,19 @@ async function claimRakeback(tier) {
 }
 // ==========================================================================
 
+function showGeoRestrictionModal(err) {
+  const modal = document.getElementById('modal-geo-restriction');
+  if (!modal) return;
+  const details = document.getElementById('geo-restriction-details');
+  if (details) {
+    const state = err.data?.geo?.state || 'your state';
+    const country = err.data?.geo?.country || 'your country';
+    const reason = err.data?.geo?.isVpn ? 'VPN or proxy detected' : `Location: ${state}, ${country}`;
+    details.textContent = `${err.error} (${reason})`;
+  }
+  modal.classList.remove('hidden');
+}
+
 function confirmAge() {
   const checkbox = document.getElementById('age-confirm');
   if (!checkbox || !checkbox.checked) {
@@ -4218,7 +4424,11 @@ async function submitLogin() {
     closeAuthModal();
     await initSessionFromToken();
   } catch (err) {
-    if (errorEl) errorEl.textContent = err.message || 'Login failed.';
+    if (err.geoRestricted) {
+      showGeoRestrictionModal(err);
+    } else if (errorEl) {
+      errorEl.textContent = err.message || 'Login failed.';
+    }
   }
 }
 
@@ -4255,7 +4465,7 @@ async function submitRegister() {
     return;
   }
 
-  try {
+   try {
     const refCode = new URLSearchParams(window.location.search).get('ref');
     const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate, state: userState, ref: refCode });
     localStorage.setItem('casino_token', data.token);
@@ -4265,8 +4475,12 @@ async function submitRegister() {
     updateUserProfileBadge();
     closeAuthModal();
     await initSessionFromToken();
-  } catch (err) {
-    if (errorEl) errorEl.textContent = err.message || 'Registration failed.';
+   } catch (err) {
+    if (err.geoRestricted) {
+      showGeoRestrictionModal(err);
+    } else if (errorEl) {
+      errorEl.textContent = err.message || 'Registration failed.';
+    }
   }
 }
 
@@ -4289,10 +4503,15 @@ async function continueAsGuest() {
       }
     }
   } catch (err) {
+    if (err.geoRestricted) {
+      showGeoRestrictionModal(err);
+      return;
+    }
     console.warn('[Guest Fallback]:', err.message);
   }
   closeAuthModal();
   await initSessionFromToken();
+  reapplyCurrentRoute();
 }
 
 async function initSessionFromToken() {
@@ -4303,8 +4522,13 @@ async function initSessionFromToken() {
     await fetchFairSeed();
     const data = await apiRequest('/api/user/me');
     if (data.balances) state.balances = mergeBalances(data.balances);
+    if (data.flags) state.flags = data.flags;
     if (data.username) state.profile = data;
   } catch (err) {
+    if (err.geoRestricted) {
+      showGeoRestrictionModal(err);
+      return;
+    }
     console.warn('[initSessionFromToken]: Auth failure, clearing token.', err.message);
     localStorage.removeItem('casino_token');
   }
@@ -4321,6 +4545,19 @@ async function initSessionFromToken() {
   }
   applyEmbeddedModeRestrictions();
   updateUserProfileBadge();
+}
+
+// One-shot re-render of the initial route after the session loads, so deep-linked
+// pages (e.g. /account/wallet) render with populated profile/balances instead of
+// a blank shell. Skips game views (already rendered at module load).
+function reapplyCurrentRoute() {
+  if (state.bootRouted) return;
+  state.bootRouted = true;
+  const path = window.location.pathname;
+  const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
+  const gameId = path.startsWith('/') ? path.slice(1) : path;
+  if (gameIds.includes(gameId)) return;
+  handleRouteChange();
 }
 
 function updateUserProfileBadge() {
@@ -4463,11 +4700,28 @@ function initHeroParticles() {
   }
 }
 
+function routeViewForPath(path) {
+  if (path === '/account' || path.startsWith('/account/')) return 'view-account';
+  if (path === '/bonus') return 'view-bonus';
+  if (path === '/challenges') return 'view-challenges';
+  if (path === '/rakeback') return 'view-rakeback';
+  return null;
+}
+
 function handleRouteChange() {
   closeProfileDropdown();
   closeWalletDropdown();
   const path = window.location.pathname;
   setActiveSidebarLink(path);
+
+  // Hybrid pages: if navigating to a dedicated page whose view is not present in
+  // this shell (e.g. switching between lightweight server-rendered pages), do a
+  // full navigation so the server returns that page's own markup.
+  const requiredView = routeViewForPath(path);
+  if (requiredView && !document.getElementById(requiredView)) {
+    window.location.href = path;
+    return;
+  }
 
   const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
   const gameId = path.startsWith('/') ? path.slice(1) : path;
@@ -4586,13 +4840,16 @@ async function connectPhantom() {
     : null;
 
   if (!provider) {
-    statusEl.textContent = 'Phantom not detected. Install phantom.app and refresh.';
-    statusEl.style.color = 'var(--accent-red)';
+    statusEl.innerHTML =
+      'Phantom not detected. ' +
+      '<a href="https://phantom.app/" target="_blank" rel="noopener noreferrer" style="color:var(--accent-green);font-weight:700;">Install Phantom extension</a> ' +
+      'then refresh this page, or open Casino in the Phantom in-app browser.';
+    statusEl.style.color = 'var(--text-secondary)';
     return;
   }
 
   try {
-    statusEl.textContent = 'Connecting...';
+    statusEl.textContent = 'Connecting…';
     statusEl.style.color = 'var(--text-secondary)';
 
     const conn = await provider.connect();
@@ -4613,6 +4870,7 @@ async function connectPhantom() {
       btn.classList.add('connected');
     }
 
+    setTimeout(() => closeWalletConnectModal(), 1200);
     playSound('click');
   } catch (err) {
     statusEl.textContent = 'Connection failed: ' + (err.message || err);

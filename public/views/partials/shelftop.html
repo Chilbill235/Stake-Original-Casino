@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#05070a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Stake Originals">
+  <meta name="description" content="Provably fair social casino with original games, daily rewards, and sweepstakes prizes.">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <title>Stake Originals — Premium Casino Experience</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body class="dark-theme">
+
+  <!-- TOP NAVIGATION BAR -->
+  <header class="navbar">
+    <div class="navbar-left">
+      <button class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle Sidebar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+      </button>
+      <div class="brand" onclick="showLobby()">
+        <span class="brand-logo">⚡</span>STAKE<span class="highlight">ORIGINALS</span>
+      </div>
+    </div>
+
+<div class="navbar-center">
+      <div class="wallet-toolbar">
+        <!-- Wallet Selector with integrated balance -->
+        <div class="wallet-selector" id="wallet-selector">
+          <div class="wallet-tabs">
+            <button class="wallet-tab active" data-currency="GC" onclick="switchCurrency('GC')">
+              <span class="wallet-tab-icon wallet-tab-icon-gc">🪙</span>
+              <span class="wallet-tab-label">GC</span>
+            </button>
+            <button class="wallet-tab" data-currency="SC" onclick="switchCurrency('SC')">
+              <span class="wallet-tab-icon wallet-tab-icon-sc">💎</span>
+              <span class="wallet-tab-label">SC</span>
+            </button>
+          </div>
+          <div class="wallet-balance" data-currency="GC">
+            <span class="wallet-balance-value" id="balance-val">10,000.00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="navbar-right">
+      <button class="btn-wallet-connect" id="btn-wallet-connect" onclick="openWalletConnectModal()" title="Connect wallet for crypto payments">
+        <span class="wc-icon">👻</span>
+        <span class="wc-label">Connect</span>
+      </button>
+      <div class="user-badge-wrapper" id="user-badge-wrapper">
+        <button class="user-profile-badge" id="user-badge" title="User Profile & Settings" onclick="toggleProfileDropdown(event)">
+          <div class="avatar-circle">👤</div>
+        </button>
+
+        <!-- Profile Dropdown Menu -->
+        <div class="profile-dropdown hidden" id="profile-dropdown">
+          <div class="profile-dropdown-header">
+            <div class="profile-dropdown-avatar">👤</div>
+            <div class="profile-dropdown-info">
+              <div class="profile-dropdown-name" id="profile-dropdown-name">Guest</div>
+              <div class="profile-dropdown-tier" id="profile-dropdown-tier">Bronze VIP</div>
+            </div>
+          </div>
+          <div class="profile-dropdown-divider"></div>
+          <button class="profile-dropdown-item" onclick="navigateToAccountFromMenu('overview')">
+            <span class="pdi-icon">📊</span>
+            <span class="pdi-text">
+              <span class="pdi-label">My Account</span>
+              <span class="pdi-desc">Profile, wallet, verification</span>
+            </span>
+          </button>
+          <button class="profile-dropdown-item" onclick="closeProfileDropdown();openStoreModal()">
+            <span class="pdi-icon">🪙</span>
+            <span class="pdi-text">
+              <span class="pdi-label">Deposit</span>
+              <span class="pdi-desc">Buy Gold Coins</span>
+            </span>
+          </button>
+          <button class="profile-dropdown-item" id="profile-dropdown-withdraw" onclick="closeProfileDropdown();openRedeemModal()">
+            <span class="pdi-icon">💸</span>
+            <span class="pdi-text">
+              <span class="pdi-label">Withdraw</span>
+              <span class="pdi-desc">Redeem Sweeps Coins</span>
+            </span>
+          </button>
+          <button class="profile-dropdown-item" onclick="navigateToAccountFromMenu('affiliates')">
+            <span class="pdi-icon">🤝</span>
+            <span class="pdi-text">
+              <span class="pdi-label">Affiliates</span>
+              <span class="pdi-desc">Earn SC from referrals</span>
+            </span>
+          </button>
+          <button class="profile-dropdown-item" onclick="closeProfileDropdown();openBonusModal()">
+            <span class="pdi-icon">🎁</span>
+            <span class="pdi-text">
+              <span class="pdi-label">Daily Bonus</span>
+              <span class="pdi-desc">Claim free coins</span>
+            </span>
+          </button>
+          <div class="profile-dropdown-divider"></div>
+          <button class="profile-dropdown-item profile-dropdown-item-danger" onclick="closeProfileDropdown();logout()">
+            <span class="pdi-icon">🚪</span>
+            <span class="pdi-text">
+              <span class="pdi-label">Logout</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN APPLICATION LAYOUT -->
+  <div class="main-layout">
+    
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar" id="main-sidebar">
+      <!-- User Profile Card -->
+      <div class="sidebar-user-card" onclick="openAccountPage()">
+        <div class="user-avatar">
+          <span class="avatar-emoji">👤</span>
+          <span class="online-status-dot"></span>
+        </div>
+        <div class="user-info">
+          <div class="user-name" id="sidebar-username">Guest</div>
+          <div class="user-tier">Bronze VIP</div>
+        </div>
+        <svg class="user-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      </div>
+
+      <!-- Main Navigation -->
+      <nav class="sidebar-nav">
+        <div class="nav-item active" id="nav-lobby" data-route="/" onclick="showLobby()">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Lobby</span>
+        </div>
+      </nav>
+
+      <div class="nav-divider"></div>
+      <div class="nav-section-header">
+        <span class="section-icon">🎁</span>
+        <span>PROMOTIONS</span>
+      </div>
+
+      <!-- Promotions: Daily Bonus, Challenges, Rakeback -->
+      <nav class="sidebar-game-list sidebar-promo-list">
+        <div class="nav-item nav-item-promo" id="nav-bonus" data-route="/bonus" onclick="openBonusModal()">
+          <span class="nav-icon">🎁</span>
+          <span class="nav-label">Daily Bonus</span>
+          <span class="nav-promo-pill">FREE</span>
+        </div>
+        <div class="nav-item nav-item-promo" id="nav-challenges" data-route="/challenges" onclick="history.pushState(null,'','/challenges');handleRouteChange()">
+          <span class="nav-icon">🎯</span>
+          <span class="nav-label">Challenges</span>
+          <span class="nav-promo-pill nav-promo-pill-gold">EARN</span>
+        </div>
+        <div class="nav-item nav-item-promo" id="nav-rakeback" data-route="/rakeback" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">
+          <span class="nav-icon">💎</span>
+          <span class="nav-label">Rakeback</span>
+          <span class="nav-promo-pill nav-promo-pill-purple">VIP</span>
+        </div>
+      </nav>
+
+      <div class="nav-divider"></div>
+      <div class="nav-section-header">
+        <span class="section-icon">⚡</span>
+        <span>STAKE ORIGINALS</span>
+      </div>
+
+      <!-- Originals Games -->
+      <nav class="sidebar-game-list">
+        <div class="nav-item nav-item-game" onclick="launchGame('dice')">
+          <span class="nav-icon">🎲</span>
+          <span class="nav-label">Dice</span>
+          <span class="nav-badge nav-badge-green">99% RTP</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('limbo')">
+          <span class="nav-icon">🚀</span>
+          <span class="nav-label">Limbo</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('crash')">
+          <span class="nav-icon">💥</span>
+          <span class="nav-label">Crash</span>
+          <span class="nav-badge nav-badge-red">HOT</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('plinko')">
+          <span class="nav-icon">⚪</span>
+          <span class="nav-label">Plinko</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('mines')">
+          <span class="nav-icon">💣</span>
+          <span class="nav-label">Mines</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('tower')">
+          <span class="nav-icon">🏰</span>
+          <span class="nav-label">Tower</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('wheel')">
+          <span class="nav-icon">🎡</span>
+          <span class="nav-label">Wheel</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('keno')">
+          <span class="nav-icon">🔢</span>
+          <span class="nav-label">Keno</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('hilo')">
+          <span class="nav-icon">🃏</span>
+          <span class="nav-label">Hilo</span>
+        </div>
+      </nav>
+
+      <div class="nav-divider"></div>
+      <div class="nav-section-header">
+        <span class="section-icon">🎰</span>
+        <span>TABLE GAMES</span>
+      </div>
+
+      <!-- Table Games -->
+      <nav class="sidebar-game-list">
+        <div class="nav-item nav-item-game" onclick="launchGame('blackjack')">
+          <span class="nav-icon">♠️</span>
+          <span class="nav-label">Blackjack</span>
+          <span class="nav-badge nav-badge-blue">0.5%</span>
+        </div>
+        <div class="nav-item nav-item-game" onclick="launchGame('baccarat')">
+          <span class="nav-icon">🎴</span>
+          <span class="nav-label">Baccarat</span>
+        </div>
+      </nav>
+
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <div class="sidebar-stats">
+          <div class="stat-item">
+            <span class="stat-dot"></span>
+            <span class="stat-text">1,429 Online</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- CENTER CONTENT STAGE -->
+    <main class="content-stage">
+      
+      

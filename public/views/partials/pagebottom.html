@@ -1,0 +1,528 @@
+</main>
+
+    <!-- RIGHT SIDEBAR: Live Global Bets Feed (lobby only) -->
+    <aside class="bets-sidebar hidden" id="global-bets-sidebar">
+      <div class="bets-header">
+        <h3>⚡ Global Bets</h3>
+        <span class="live-tag">LIVE</span>
+        <button class="bets-close-btn" id="global-bets-close" onclick="closeGlobalFeed()" aria-label="Close feed">×</button>
+      </div>
+      <div style="display:flex; gap:4px; padding:8px 12px; background:#0f171e; border-bottom:1px solid #243542;">
+        <button class="btn-secondary-action feed-tab-btn active" data-filter="ALL" onclick="setFeedFilter('ALL')">All</button>
+        <button class="btn-secondary-action feed-tab-btn" data-filter="MY_BETS" onclick="setFeedFilter('MY_BETS')">My Bets</button>
+        <button class="btn-secondary-action feed-tab-btn" data-filter="HIGH_ROLLERS" onclick="setFeedFilter('HIGH_ROLLERS')">High Rollers</button>
+      </div>
+      <div class="bets-feed-container">
+        <div class="bets-feed-header">
+          <span>USER / GAME</span>
+          <span>MULT.</span>
+        </div>
+        <div class="bets-feed" id="bets-feed"></div>
+      </div>
+
+      <div class="game-results-header">
+        <h4>🔥 Recent Results</h4>
+      </div>
+      <div class="game-result-feed-container">
+        <div class="game-result-feed" id="game-result-feed"></div>
+      </div>
+    </aside>
+
+    <!-- Lobby-only button to open the Global Bets feed -->
+    <button class="lobby-bets-btn hidden" id="lobby-bets-btn" onclick="openGlobalFeedFromLobby()" aria-label="Open live bets feed">
+      <span class="lobby-bets-icon">📊</span>
+      <span class="lobby-bets-label">Live Bets</span>
+    </button>
+
+    <!-- Floating toggle for Global Bets (visible during game play) -->
+    <button class="global-bets-fab" id="global-bets-fab" onclick="toggleGlobalFeed()" aria-label="Toggle live bets feed">
+      <span class="fab-icon">📊</span>
+      <span class="fab-label">Live</span>
+    </button>
+  </div>
+
+  <!-- MODAL DIALOGS -->
+  <div id="modal-store" class="modal-backdrop hidden" aria-modal="true" role="dialog">
+    <div class="modal-box store-modal">
+      <div class="modal-header-flex">
+        <h3>🪙 Coin Store</h3>
+        <button class="x-close" onclick="closeStoreModal()" aria-label="Close Modal">×</button>
+      </div>
+      <p class="modal-subtitle">Purchase Gold Coins (GC) and get <strong>FREE bonus Sweeps Coins (SC)</strong>!</p>
+
+      <!-- Package Selection Section -->
+      <div class="store-section package-selection" id="package-selection">
+        <div class="package-grid">
+          <div class="package-card" onclick="selectPackage('pack_10')" data-package="pack_10">
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">STARTER</span>
+                <div class="package-price">$9.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">15,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+15.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package">Select Package</button>
+            </div>
+          </div>
+
+          <div class="package-card featured" onclick="selectPackage('pack_20')" data-package="pack_20">
+            <div class="package-badge">BEST VALUE</div>
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">POPULAR</span>
+                <div class="package-price">$19.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">25,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+25.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package btn-select-featured">Select Package</button>
+            </div>
+          </div>
+
+          <div class="package-card" onclick="selectPackage('pack_50')" data-package="pack_50">
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">PREMIUM</span>
+                <div class="package-price">$49.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">55,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+55.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package">Select Package</button>
+            </div>
+          </div>
+
+          <div class="package-card" onclick="selectPackage('pack_100')" data-package="pack_100">
+            <div class="package-card-inner">
+              <div class="package-header">
+                <span class="package-name">ELITE</span>
+                <div class="package-price">$99.99</div>
+              </div>
+              <div class="package-body">
+                <div class="package-coins">
+                  <span class="coin-icon gc-icon">🪙</span>
+                  <span class="coin-amount">100,000</span>
+                  <span class="coin-label">Gold Coins</span>
+                </div>
+                <div class="package-bonus">
+                  <span class="bonus-icon">✨</span>
+                  <span class="bonus-text">+105.00 FREE SC</span>
+                </div>
+              </div>
+              <button class="btn-select-package">Select Package</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Order Summary -->
+        <div id="package-summary" class="order-summary hidden">
+          <div class="summary-header">
+            <h4>Order Summary</h4>
+            <button class="btn-change" onclick="resetPackageSelection()">Change</button>
+          </div>
+          <div class="summary-items">
+            <div class="summary-item">
+              <span class="summary-label">Gold Coins</span>
+              <span class="summary-value gc-val" id="summary-gc">15,000</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Bonus Sweeps Coins</span>
+              <span class="summary-value sc-val" id="summary-sc">+15.00</span>
+            </div>
+            <div class="summary-item summary-total">
+              <span class="summary-label">Total</span>
+              <span class="summary-value" id="summary-total">$10.00</span>
+            </div>
+          </div>
+          <div class="summary-security">
+            <span class="security-item">🔒 SSL Encrypted</span>
+            <span class="security-item">⚡ Instant Delivery</span>
+          </div>
+          <button class="btn-checkout" onclick="proceedToCheckout()">
+            Proceed to Checkout →
+          </button>
+        </div>
+      </div>
+      <!-- Checkout Section (multi-step) -->
+      <div id="checkout-section" class="checkout-section hidden">
+        <!-- Step indicator -->
+        <div class="checkout-stepper">
+          <div class="checkout-step is-active" data-step="1"><span class="step-num">1</span><span class="step-label">Package</span></div>
+          <div class="checkout-step" data-step="2"><span class="step-num">2</span><span class="step-label">Payment</span></div>
+          <div class="checkout-step" data-step="3"><span class="step-num">3</span><span class="step-label">Processing</span></div>
+          <div class="checkout-step" data-step="4"><span class="step-num">✓</span><span class="step-label">Done</span></div>
+        </div>
+
+        <div class="checkout-layout">
+          <!-- Left: Order Summary (sticky on desktop) -->
+          <div class="checkout-summary-panel">
+            <div class="checkout-summary-header">
+              <h3>Order Summary</h3>
+              <button class="btn-back" onclick="backToPackages()">← Back</button>
+            </div>
+            <div class="checkout-package-card" id="checkout-package-card">
+              <div class="checkout-package-icon">🪙</div>
+              <div class="checkout-package-info">
+                <div class="checkout-package-name" id="checkout-package-name">15,000 GC + 15 Free SC</div>
+                <div class="checkout-package-desc">Gold Coins + Bonus Sweeps Coins</div>
+              </div>
+              <div class="checkout-package-price" id="checkout-package-price">$9.99</div>
+            </div>
+            <div class="checkout-summary-details">
+              <div class="checkout-summary-row">
+                <span>Gold Coins</span>
+                <span class="gc-val" id="checkout-gc">15,000</span>
+              </div>
+              <div class="checkout-summary-row">
+                <span>Bonus Sweeps Coins</span>
+                <span class="sc-val" id="checkout-sc">+15.00</span>
+              </div>
+              <div class="checkout-summary-row checkout-summary-total">
+                <span>Total</span>
+                <span id="checkout-total">$9.99</span>
+              </div>
+            </div>
+            <div class="checkout-trust-badges">
+              <div class="trust-badge">
+                <span class="trust-icon">🔒</span>
+                <span>SSL Encrypted</span>
+              </div>
+              <div class="trust-badge">
+                <span class="trust-icon">⚡</span>
+                <span>Instant Delivery</span>
+              </div>
+              <div class="trust-badge">
+                <span class="trust-icon">🛡️</span>
+                <span>Secure Payment</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Payment Methods -->
+          <div class="checkout-payment-panel">
+            <div class="checkout-payment-header">
+              <h3>Payment Method</h3>
+            </div>
+            <div class="checkout-methods">
+              <button class="payment-method-btn active" data-method="card" onclick="selectPaymentMethod('card')">
+                <span class="payment-method-icon">💳</span>
+                <span class="payment-method-name">Credit / Debit Card</span>
+                <span class="payment-method-badge">Popular</span>
+              </button>
+              <button class="payment-method-btn" data-method="crypto" onclick="selectPaymentMethod('crypto')">
+                <span class="payment-method-icon">₿</span>
+                <span class="payment-method-name">Cryptocurrency</span>
+                <span class="payment-method-badge crypto-badge">Fast</span>
+              </button>
+            </div>
+
+            <!-- Card Payment -->
+            <div id="payment-card" class="payment-panel">
+              <div class="checkout-loading" id="checkout-loading-state">
+                <div class="checkout-spinner"></div>
+                <p class="checkout-loading-text">Initializing secure checkout...</p>
+                <p class="checkout-loading-sub">Please wait while we prepare your payment gateway</p>
+              </div>
+              <div id="stripe-checkout-container">
+                <!-- Stripe Elements mount here -->
+              </div>
+            </div>
+
+            <!-- Processing overlay (animated) -->
+            <div id="payment-processing" class="payment-panel payment-processing-panel hidden">
+              <div class="processing-illustration">
+                <div class="processing-spinner-ring">
+                  <div class="processing-dot dot-1"></div>
+                  <div class="processing-dot dot-2"></div>
+                  <div class="processing-dot dot-3"></div>
+                  <div class="processing-dot dot-4"></div>
+                  <div class="processing-dot dot-5"></div>
+                </div>
+                <div class="processing-glow"></div>
+              </div>
+              <h4 class="processing-title">Processing Your Payment</h4>
+              <p class="processing-sub">Please keep this window open. Verifying your transaction with our secure gateway…</p>
+              <div class="processing-progress">
+                <div class="progress-bar"><div class="progress-bar-fill" id="progress-bar-fill"></div></div>
+                <div class="processing-hint">This typically takes 5–10 seconds.</div>
+              </div>
+            </div>
+
+            <!-- Crypto Payment -->
+            <div id="payment-crypto" class="payment-panel hidden">
+              <div class="crypto-options">
+                <button class="crypto-btn" onclick="selectCrypto('BTC')">
+                  <span class="crypto-icon">₿</span>
+                  <span class="crypto-name">Bitcoin</span>
+                  <span class="crypto-symbol">BTC</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('ETH')">
+                  <span class="crypto-icon">Ξ</span>
+                  <span class="crypto-name">Ethereum</span>
+                  <span class="crypto-symbol">ETH</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('USDT')">
+                  <span class="crypto-icon">₮</span>
+                  <span class="crypto-name">Tether</span>
+                  <span class="crypto-symbol">USDT</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('LTC')">
+                  <span class="crypto-icon">Ł</span>
+                  <span class="crypto-name">Litecoin</span>
+                  <span class="crypto-symbol">LTC</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('SOL')">
+                  <span class="crypto-icon">◎</span>
+                  <span class="crypto-symbol">SOL</span>
+                </button>
+              </div>
+              <div id="crypto-payment-details" class="crypto-details hidden">
+                <div class="crypto-qr-placeholder">
+                  <div class="crypto-qr-icon">📱</div>
+                  <p>Select a coin above to generate your secure deposit address + QR code.</p>
+                </div>
+                <div id="crypto-phantom-block" class="crypto-phantom-block hidden">
+                  <button class="btn-phantom-pay" id="phantom-pay-btn" onclick="payWithPhantom()">
+                    <span class="phantom-icon">👻</span>
+                    <span>Pay with Phantom (Solana)</span>
+                  </button>
+                  <p class="phantom-hint">Auto-detected. Click to open Phantom, confirm the transaction, and your coins will be credited instantly after 1 confirmation.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Success Section -->
+      <div id="checkout-success" class="checkout-success hidden">
+        <div class="success-animation">
+          <div class="success-checkmark">✓</div>
+          <div class="confetti-container" id="confetti-container"></div>
+        </div>
+        <h4 class="success-title">Payment Successful!</h4>
+        <p class="success-subtext">Your coins have been added to your account.</p>
+        <div class="success-details" id="success-details"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="modal-redeem" class="modal-backdrop hidden" aria-modal="true" role="dialog">
+    <div class="modal-box redeem-modal">
+      <div class="modal-header-flex">
+        <h3>💸 Redeem Sweeps Coins</h3>
+        <button class="x-close" onclick="closeRedeemModal()" aria-label="Close Modal">×</button>
+      </div>
+      <p class="modal-subtitle">Convert your Sweeps Coins to real cash. Minimum redemption: <strong>50.00 SC</strong> (1 SC = $1.00 USD).</p>
+
+      <div class="redeem-info-card">
+        <div class="redeem-info-row">
+          <span class="redeem-info-label">Available Balance</span>
+          <span class="redeem-info-value" id="redeem-available-bal">10.00 SC</span>
+        </div>
+        <div class="redeem-info-row">
+          <span class="redeem-info-label">Redeemable (1x wagered)</span>
+          <span class="redeem-info-value sc-val" id="redeem-wagered-bal">10.00 SC</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="redeem-input" class="form-label">Amount to Redeem (SC)</label>
+        <div class="input-with-symbol">
+          <input type="number" id="redeem-input" value="50" min="50" class="form-input" oninput="updateRedeemPreview()">
+        </div>
+        <div class="redeem-preview" id="redeem-preview">
+          <span class="redeem-preview-label">You will receive:</span>
+          <span class="redeem-preview-value" id="redeem-usd-value">$50.00 USD</span>
+        </div>
+      </div>
+
+      <div class="redeem-notice">
+        <span class="notice-icon">ℹ️</span>
+        <span>Redemptions are processed via bank transfer. KYC verification required.</span>
+      </div>
+
+        <div class="modal-actions-flex" style="margin-top:15px;">
+          <button type="button" onclick="submitRedeem()" class="btn-play btn-full">SUBMIT REDEMPTION</button>
+          <button type="button" onclick="closeRedeemModal()" class="btn-secondary-action btn-full">Cancel</button>
+        </div>
+    </div>
+  </div>
+
+  <!-- Provably Fair Verification Modal -->
+  <div id="modal-pf" class="modal-backdrop hidden" aria-modal="true" role="dialog">
+    <div class="modal-box pf-modal">
+      <div class="modal-header-flex">
+        <h3>🛡️ Provably Fair Verification</h3>
+        <button class="x-close" onclick="closeProvablyFairModal()" aria-label="Close Modal">×</button>
+      </div>
+      <p class="modal-subtitle">Verify game outcomes and customize your random seeds securely.</p>
+      
+      <div class="pf-modal-fields">
+        <div class="form-group">
+          <label for="pf-modal-server-hash" class="form-label">Active Server Seed (Hashed)</label>
+          <input type="text" id="pf-modal-server-hash" class="form-input" readonly value="Unverified">
+        </div>
+
+        <div class="form-group">
+          <label for="pf-client-seed" class="form-label">Client Seed (Customizable)</label>
+          <div class="pf-seed-row">
+            <input type="text" id="pf-client-seed" class="form-input" value="">
+            <button type="button" onclick="updateClientSeed()" class="btn-secondary-action pf-seed-btn">Save</button>
+            <button type="button" onclick="randomizeClientSeed()" class="btn-secondary-action pf-seed-btn" title="Randomize">🎲</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 15px;">
+        <button type="button" onclick="rotateServerSeed()" class="btn-secondary-action btn-full">Rotate Server Seed</button>
+      </div>
+
+      <div class="modal-actions-flex" style="margin-top: 15px;">
+        <button type="button" onclick="closeProvablyFairModal()" class="btn-secondary-action btn-full">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth Modal (Login / Register) -->
+  <div id="modal-auth" class="modal-backdrop hidden" aria-modal="true" role="dialog">
+    <div class="modal-box auth-modal">
+      <div class="modal-header-flex">
+        <h3 id="auth-title">Login to Your Account</h3>
+        <button class="x-close" onclick="closeAuthModal()" aria-label="Close Modal">×</button>
+      </div>
+      <p class="modal-subtitle" id="auth-subtitle">Enter your credentials to access your account.</p>
+
+      <div id="auth-form-login" class="auth-form-section">
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input type="email" id="auth-email" class="form-input" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="auth-password" class="form-input" placeholder="••••••••">
+        </div>
+         <div id="auth-login-error" class="auth-error"></div>
+         <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+           <button type="button" onclick="submitLogin()" class="btn-play btn-full">LOGIN</button>
+           <button type="button" onclick="switchAuthMode('register')" class="btn-secondary-action btn-full">Create New Account</button>
+           <button type="button" onclick="continueAsGuest()" class="btn-secondary-action btn-full guest-btn">Continue as Guest</button>
+         </div>
+      </div>
+
+      <div id="auth-form-register" class="auth-form-section hidden">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input type="text" id="reg-username" class="form-input" placeholder="Choose a username">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input type="email" id="reg-email" class="form-input" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="reg-password" class="form-input" placeholder="Min 8 characters">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Birth Date</label>
+          <input type="date" id="reg-birthdate" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="form-label">State</label>
+          <select id="reg-state" class="form-input">
+            <option value="CA">California</option>
+            <option value="TX">Texas</option>
+            <option value="FL">Florida</option>
+            <option value="NY">New York</option>
+            <option value="CO">Colorado</option>
+            <option value="NC">North Carolina</option>
+            <option value="OH">Ohio</option>
+            <option value="PA">Pennsylvania</option>
+            <option value="IL">Illinois</option>
+            <option value="AZ">Arizona</option>
+            <option value="MN">Minnesota</option>
+            <option value="IA">Iowa</option>
+            <option value="VA">Virginia</option>
+            <option value="LA">Louisiana</option>
+            <option value="MI" disabled>Michigan (Restricted)</option>
+            <option value="NV" disabled>Nevada (Restricted)</option>
+            <option value="WA" disabled>Washington (Restricted)</option>
+            <option value="ID" disabled>Idaho (Restricted)</option>
+            <option value="KY" disabled>Kentucky (Restricted)</option>
+            <option value="GA" disabled>Georgia (Restricted)</option>
+          </select>
+        </div>
+          <div id="auth-register-error" class="auth-error"></div>
+          <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
+            <button type="button" onclick="submitRegister()" class="btn-play btn-full">REGISTER & PLAY</button>
+            <button type="button" onclick="switchAuthMode('login')" class="btn-secondary-action btn-full">Back to Login</button>
+          </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Age Gate Modal -->
+  <div id="modal-agegate" class="modal-backdrop hidden" aria-modal="true" role="dialog" style="z-index: 3000;">
+    <div class="modal-box" style="max-width: 400px; text-align: center;">
+      <div class="modal-header-flex">
+        <h3>🔞 Age Verification</h3>
+      </div>
+      <p class="modal-subtitle">This casino contains gambling content and is restricted to adults 18 and older.</p>
+      <div class="age-confirm-box">
+        <label class="age-confirm-label">
+          <input type="checkbox" id="age-confirm">
+          <span>I confirm I am 18 years of age or older</span>
+        </label>
+      </div>
+      <div style="margin-top: 15px;">
+        <button type="button" onclick="confirmAge()" class="btn-play btn-full">ENTER CASINO</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wallet Connect Modal -->
+  <div class="modal-backdrop hidden" id="wallet-connect-modal">
+    <div class="modal-box" style="max-width: 440px;">
+      <div class="modal-header-flex">
+        <h3>👻 Connect Wallet</h3>
+        <button class="x-close" onclick="closeWalletConnectModal()" aria-label="Close">×</button>
+      </div>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 20px;">Connect your Phantom wallet to pay with SOL. Your wallet address is used only to track this on-chain deposit.</p>
+      <button class="btn-wallet-connect btn-full" id="phantom-connect-btn" onclick="connectPhantom()">
+        <span class="wc-icon">👻</span>
+        <span>Connect Phantom</span>
+      </button>
+      <div id="wallet-connect-status" style="margin-top: 14px; text-align: center; color: var(--text-muted); font-size: 0.85rem; min-height: 1.4em;"></div>
+    </div>
+  </div>
+
+  <script src="games/loader.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>

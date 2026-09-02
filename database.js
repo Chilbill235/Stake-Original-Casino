@@ -45,7 +45,13 @@ function createSchema() {
       vip_tier TEXT DEFAULT 'Bronze',
       total_wagered_gc REAL DEFAULT 0,
       total_wagered_sc REAL DEFAULT 0,
-      rakeback_accrued_sc REAL DEFAULT 0
+      rakeback_accrued_sc REAL DEFAULT 0,
+      geo_ip TEXT,
+      geo_country TEXT,
+      geo_city TEXT,
+      geo_is_vpn INTEGER DEFAULT 0,
+      geo_risk_score INTEGER DEFAULT 0,
+      registered_at INTEGER DEFAULT 0
     )
   `);
 
@@ -325,6 +331,25 @@ function ensureSchema() {
     `);
     db.run(`CREATE INDEX IF NOT EXISTS idx_affiliate_earnings_user ON affiliate_earnings(affiliate_user_id)`);
   }
+
+  const geoColumns = ['geo_ip', 'geo_country', 'geo_city', 'geo_is_vpn', 'geo_risk_score', 'registered_at'];
+  const existingCols = tableNames.includes('users')
+    ? (() => {
+        const stmt = db.prepare("PRAGMA table_info(users)");
+        const cols = [];
+        while (stmt.step()) {
+          cols.push(stmt.getAsObject().name);
+        }
+        stmt.free();
+        return cols;
+      })()
+    : [];
+  for (const col of geoColumns) {
+    if (!existingCols.includes(col)) {
+      const colType = col === 'geo_is_vpn' || col === 'geo_risk_score' ? 'INTEGER DEFAULT 0' : 'TEXT';
+      db.run(`ALTER TABLE users ADD COLUMN ${col} ${colType}`);
+    }
+  }
 }
 
 function persistSync() {
@@ -423,8 +448,8 @@ module.exports = {
 
   updateUser: async (id, fields) => {
     const database = await getDb();
-    const keys = Object.keys(fields);
-    const values = Object.values(fields);
+    const keys = Object.keys(fields).filter(k => fields[k] !== undefined);
+    const values = keys.map(k => fields[k]);
     const setClause = keys.map(k => `${k} = ?`).join(', ');
     database.run(`UPDATE users SET ${setClause} WHERE id = ?`, [...values, id]);
     scheduleSave();

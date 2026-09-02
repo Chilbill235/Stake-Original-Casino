@@ -35,11 +35,56 @@ const bcrypt = require('bcryptjs');
 const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
 
 const RESTRICTED_STATES = [
-  // Explicitly Banned / Enforced
   'WA', 'ID', 'NV', 'MI', 'MT', 'CT', 'NJ', 'NY', 'LA', 'TN', 'IN', 'ME', 'OK',
-  // High-Risk / Frequently Opted-Out
-  'KY', 'GA', 'AL', 'DE'
+  'KY', 'GA', 'AL', 'DE', 'AR', 'FL', 'HI', 'IL', 'IA', 'KS', 'MD', 'MN', 'MS',
+  'MO', 'NE', 'NH', 'NC', 'ND', 'PA', 'RI', 'SC', 'SD', 'TX', 'UT', 'VT', 'VA',
+  'WV', 'WI', 'WY'
 ];
+
+const RESTRICTED_COUNTRIES = [
+  'AF', 'IQ', 'IR', 'KP', 'LY', 'PK', 'SA', 'SD', 'SS', 'SY', 'YE', 'CN', 'RU'
+];
+
+const GEO_CACHE_TTL = 1000 * 60 * 60; // 1 hour
+
+const GEO_PROVIDERS = [
+  (ip) => fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`).then(r => r.json()) ,
+  (ip) => fetch(`https://ipwho.is/${encodeURIComponent(ip)}`).then(r => r.json()) ,
+  (ip) => fetch(`https://ip-api.com/json/${encodeURIComponent(ip)}`).then(r => r.json())
+];
+
+const VPN_ASN_KEYWORDS = [
+  // Generic VPN, Proxy & Security Services
+  'vpn', 'proxy', 'anonymizer', 'tunnel', 'tor', 'exit-node', 'mullvad', 
+  'nordvpn', 'expressvpn', 'surfshark', 'cyberghost', 'privateinternetaccess', 
+  'pia', 'ipvanish', 'vyprvpn', 'windscribe', 'proton', 'protonvpn', 'purevpn',
+  'hide.me', 'zenmate', 'strongvpn', 'tunnelbear', 'airvpn', 'mullvad', 'ivpn',
+
+  // Cloud Providers & Hyperscalers
+  'aws', 'amazon', 'azure', 'gcp', 'google cloud', 'oracle cloud', 'alibaba', 
+  'alicloud', 'tencent', 'ibm cloud', 'scaleway', 'ovh', 'ovhcloud', 
+
+  // Hosting, VPS & Infrastructure
+  'hosting', 'datacenter', 'data center', 'server', 'vps', 'cloud', 'colo', 
+  'colocation', 'dedi', 'dedicated', 'bare metal', 'rackspace', 'digitalocean', 
+  'linode', 'akamai', 'hetzner', 'contabo', 'vultr', 'upcloud', 'hostinger', 
+  'bluehost', 'hostgator', 'godaddy', 'ionos', 'a2 hosting', 'siteground', 
+  'fastcomet', 'inmotion', 'dreamhost', 'liquid web', 'leaseweb', 'choopa', 
+
+  // Network Infrastructure & Backbone/Transit
+  'transit', 'backbone', 'peering', 'ixp', 'interconnection', 'cdn', 
+  'cloudflare', 'fastly', 'imperva', 'incapsula', 'stackpath', 'limelight', 
+  'edgio', 'denial', 'ddos-guard', 'sucuri', 'cogent', 'cogentco', 'he.net', 
+  'hurricane electric', 'gtt', 'pccw', 'zayo', 'level3', 'lumen', 'telia', 
+  'arelion', 'tata communications', 'seaborn', 'telstra global',
+
+  // Datacenter Real Estate & Interconnects
+  'equinix', 'digital realty', 'cyrusone', 'switch', 'tierpoint', 'telehouse', 
+  'coresite', 'flexential', 'iron mountain', 'qts', 'databank'
+];
+
+// In-memory geo cache: ip -> { data, expiresAt }
+const geoCache = new Map();
 
 // Coin Package Configurations
 const COIN_PACKAGES = {
@@ -59,6 +104,113 @@ const activeSessions = new Map();
 const userSeeds = new Map();
 const amoeRegistry = new Map();
 const cryptoPayments = new Map();
+
+// -----------------------------------------------------------------------------
+// 2a. GEOLOCATION / JURISDICTION COMPLIANCE
+// -----------------------------------------------------------------------------
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'];
+  if (forwarded) {
+    return String(forwarded).split(',')[0].trim().replace('::ffff:', '');
+  }
+  return (req.socket.remoteAddress || '').replace('::ffff:', '');
+}
+
+function isVpnOrHosting(asn, org) {
+  if (!asn && !org) return false;
+  const haystack = `${asn || ''} ${org || ''}`.toLowerCase();
+  return VPN_ASN_KEYWORDS.some(k => haystack.includes(k));
+}
+
+async function geoLookup(ip) {
+  if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') {
+    return { ip, state: null, country: 'US', city: null, restricted: false, isVpn: false, asn: null, org: null, riskScore: 0 };
+  }
+
+  const cached = geoCache.get(ip);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  let lastError = null;
+  for (const provider of GEO_PROVIDERS) {
+    try {
+      const data = await provider(ip);
+      if (!data || data.status === 'fail') {
+        lastError = data?.reason || 'provider returned fail';
+        continue;
+      }
+
+      const state = (data.region_code || data.region || data.state || data.subdivision || null);
+      const country = (data.country_code || data.country || null);
+      const restricted = RESTRICTED_STATES.includes((state || '').toUpperCase()) ||
+                         RESTRICTED_COUNTRIES.includes((country || '').toUpperCase());
+      const asn = data.asn || data.as || null;
+      const org = data.org || data.isp || data.as || null;
+      const isVpn = isVpnOrHosting(asn, org);
+      const riskScore = (restricted ? 50 : 0) + (isVpn ? 30 : 0) + (data.proxy ? 20 : 0) + (data.hosting ? 20 : 0);
+
+      const result = {
+        ip,
+        state: state ? String(state).toUpperCase() : null,
+        country: country ? String(country).toUpperCase() : null,
+        city: data.city || null,
+        restricted,
+        isVpn,
+        asn,
+        org,
+        riskScore: Math.min(100, riskScore),
+        provider: 'geo',
+        lookedUpAt: Date.now()
+      };
+
+      geoCache.set(ip, { data: result, expiresAt: Date.now() + GEO_CACHE_TTL });
+      return result;
+    } catch (e) {
+      lastError = e.message;
+      continue;
+    }
+  }
+
+  console.warn(`[Geo] All providers failed for ${ip}: ${lastError}`);
+  return { ip, state: null, country: null, city: null, restricted: null, isVpn: false, asn: null, org: null, riskScore: -1, error: lastError };
+}
+
+async function enforceJurisdiction(req, res, next) {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const ip = getClientIp(req);
+  const geo = await geoLookup(ip);
+
+  const userState = (user.state || 'CA').toUpperCase();
+  const geoState = (geo.state || userState).toUpperCase();
+  const geoCountry = (geo.country || 'US').toUpperCase();
+
+  if (RESTRICTED_STATES.includes(geoState) || RESTRICTED_COUNTRIES.includes(geoCountry)) {
+    return res.status(403).json({
+      error: `Sweepstakes play is unavailable in your jurisdiction (${geoState || geoCountry}).`,
+      requiresAccount: true,
+      geo: { state: geo.state, country: geo.country, restricted: true }
+    });
+  }
+
+  if (geo.isVpn || geo.riskScore >= 50) {
+    return res.status(403).json({
+      error: 'Access from VPN, proxy, or hosting provider is not allowed.',
+      requiresAccount: true,
+      geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
+    });
+  }
+
+  if (user.state && geo.state && user.state.toUpperCase() !== geo.state) {
+    console.warn(`[Geo] State mismatch for user #${user.id}: stored=${user.state}, ip=${geo.state}, ip=${ip}`);
+  }
+
+  req.geo = geo;
+  next();
+}
 
 // Generate a unique user ID (avoids collisions from deletions/counters)
 let nextUserId = 1;
@@ -161,11 +313,17 @@ async function saveData() {
         daily_streak: user.dailyStreak,
         ads_watched_today: user.adsWatchedToday,
         last_ad_reset: user.lastAdReset,
-        state: user.state,
-        vip_tier: user.vipTier,
-        total_wagered_gc: user.totalWageredGC,
-        total_wagered_sc: user.totalWageredSC,
-        rakeback_accrued_sc: user.rakebackAccruedSC
+      state: user.state,
+      vip_tier: user.vipTier,
+      total_wagered_gc: user.totalWageredGC,
+      total_wagered_sc: user.totalWageredSC,
+      rakeback_accrued_sc: user.rakebackAccruedSC,
+      geo_ip: user.geoIp,
+      geo_country: user.geoCountry,
+      geo_city: user.geoCity,
+      geo_is_vpn: user.geoIsVpn ? 1 : 0,
+      geo_risk_score: user.geoRiskScore || 0,
+       registered_at: user.registeredAt || user.createdAt || null
       });
     }
   } catch (e) {
@@ -769,12 +927,41 @@ app.post('/api/auth/guest', async (req, res) => {
     const username = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
     const email = `${username.toLowerCase()}@guest.casino`;
 
+    const clientIp = getClientIp(req);
+    const geo = await geoLookup(clientIp);
+    const detectedState = (geo.state || 'CA').toUpperCase();
+    const detectedCountry = (geo.country || 'US').toUpperCase();
+
+    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
+      return res.status(403).json({
+        error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
+        geo: { state: geo.state, country: geo.country, restricted: true }
+      });
+    }
+
+    if (geo.isVpn || geo.riskScore >= 50) {
+      return res.status(403).json({
+        error: 'Access from VPN, proxy, or hosting provider is not allowed.',
+        geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
+      });
+    }
+
     const userId = await db.createUser({
       username,
       email,
       password: null,
       gcBalance: 10000,
       scBalance: 10
+    });
+
+    await db.updateUser(userId, {
+      state: detectedState,
+      geo_ip: clientIp,
+      geo_country: geo.country || null,
+      geo_city: geo.city || null,
+      geo_is_vpn: geo.isVpn ? 1 : 0,
+      geo_risk_score: geo.riskScore || 0,
+      registered_at: Date.now()
     });
 
     // Always create an affiliate record so the user has a referral code
@@ -812,12 +999,18 @@ app.post('/api/auth/guest', async (req, res) => {
       dailyStreak: 0,
       adsWatchedToday: 0,
       lastAdReset: Date.now(),
-      state: 'CA',
+      state: detectedState,
       createdAt: Date.now(),
       vipTier: 'Bronze',
       totalWageredGC: 0,
       totalWageredSC: 0,
       rakebackAccruedSC: 0,
+      geoIp: clientIp,
+      geoCountry: geo.country || null,
+      geoCity: geo.city || null,
+      geoIsVpn: !!geo.isVpn,
+      geoRiskScore: geo.riskScore || 0,
+      registeredAt: Date.now(),
       isGuest: true,
       bonus: {
         lastClaimAt: 0,
@@ -848,7 +1041,15 @@ app.post('/api/auth/guest', async (req, res) => {
      const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
     res.json({
       token,
-      user: { id: userId, username, email, isGuest: true, kyc: newUser.kyc },
+      user: {
+        id: userId,
+        username,
+        email,
+        isGuest: true,
+        kyc: newUser.kyc,
+        state: detectedState,
+        geo: { ip: clientIp, country: geo.country, state: geo.state, city: geo.city, isVpn: geo.isVpn, riskScore: geo.riskScore }
+      },
       balances: { gc: 10000, sc: 10 }
      });
   } catch (e) {
@@ -857,24 +1058,18 @@ app.post('/api/auth/guest', async (req, res) => {
   }
 });
 
-app.get('/api/geo/lookup', (req, res) => {
-  const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '';
-  const clientIp = ip.replace('::ffff:', '');
-
-  fetch(`https://ipapi.co/${encodeURIComponent(clientIp)}/json/`)
-    .then(r => r.json())
-    .then(geo => {
-      res.json({
-        ip: clientIp,
-        state: geo.region_code || geo.state || null,
-        country: geo.country_code || null,
-        city: geo.city || null,
-        restricted: RESTRICTED_STATES.includes((geo.region_code || geo.state || '').toUpperCase())
-      });
-    })
-    .catch(() => {
-      res.json({ ip: clientIp, state: null, country: null, city: null, restricted: null });
-    });
+app.get('/api/geo/lookup', async (req, res) => {
+  const clientIp = getClientIp(req);
+  const geo = await geoLookup(clientIp);
+  res.json({
+    ip: geo.ip,
+    state: geo.state,
+    country: geo.country,
+    city: geo.city,
+    restricted: geo.restricted,
+    isVpn: geo.isVpn,
+    riskScore: geo.riskScore
+  });
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -922,6 +1117,25 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(403).json({ error: `Online gaming is not available in ${stateCode}.` });
     }
 
+    // Strict geo check: verify IP-based location matches claimed state and isn't restricted
+    const clientIp = getClientIp(req);
+    const geo = await geoLookup(clientIp);
+    const detectedState = (geo.state || stateCode).toUpperCase();
+    const detectedCountry = (geo.country || 'US').toUpperCase();
+
+    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
+      return res.status(403).json({
+        error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
+        geo: { state: geo.state, country: geo.country, restricted: true }
+      });
+    }
+
+    if (state && geo.state && state.toUpperCase() !== geo.state.toUpperCase()) {
+      console.warn(`[Geo] State mismatch during registration: user claimed ${state}, IP detected ${geo.state}, IP=${clientIp}`);
+    }
+
+    const finalState = (geo.state || stateCode).toUpperCase();
+
     const existingEmail = await db.findByEmail(email);
     if (existingEmail) {
       return res.status(409).json({ error: 'Email already registered.' });
@@ -943,9 +1157,15 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     await db.updateUser(userId, {
-      state: stateCode,
+      state: finalState,
       kyc_status: 'UNVERIFIED',
-      kyc_tier: 0
+      kyc_tier: 0,
+      geo_ip: clientIp,
+      geo_country: geo.country || null,
+      geo_city: geo.city || null,
+      geo_is_vpn: !!geo.isVpn,
+      geo_risk_score: geo.riskScore || 0,
+      registered_at: Date.now()
     });
 
     // Always create an affiliate record so the user has a referral code
@@ -1064,6 +1284,12 @@ app.post('/api/auth/login', async (req, res) => {
           totalWageredGC: dbUser.total_wagered_gc,
           totalWageredSC: dbUser.total_wagered_sc,
           rakebackAccruedSC: dbUser.rakeback_accrued_sc,
+          geoIp: dbUser.geo_ip,
+          geoCountry: dbUser.geo_country,
+          geoCity: dbUser.geo_city,
+          geoIsVpn: dbUser.geo_is_vpn,
+          geoRiskScore: dbUser.geo_risk_score,
+          registeredAt: dbUser.registered_at,
           isGuest: dbUser.email && dbUser.email.endsWith('@guest.casino')
         };
         users.set(dbUser.id, foundUser);
@@ -1076,10 +1302,45 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, foundUser.password || '');
     if (!valid) return res.status(401).json({ error: 'Invalid credentials.' });
 
+    const clientIp = getClientIp(req);
+    const geo = await geoLookup(clientIp);
+    const detectedState = (geo.state || foundUser.state || 'CA').toUpperCase();
+    const detectedCountry = (geo.country || 'US').toUpperCase();
+
+    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
+      return res.status(403).json({
+        error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
+        geo: { state: geo.state, country: geo.country, restricted: true }
+      });
+    }
+
+    if (geo.isVpn || geo.riskScore >= 50) {
+      return res.status(403).json({
+        error: 'Access from VPN, proxy, or hosting provider is not allowed.',
+        geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
+      });
+    }
+
+    await db.updateUser(foundUser.id, {
+      geo_ip: clientIp,
+      geo_country: geo.country || null,
+      geo_city: geo.city || null,
+      geo_is_vpn: geo.isVpn ? 1 : 0,
+      geo_risk_score: geo.riskScore || 0
+    });
+
     const token = jwt.sign({ id: foundUser.id, username: foundUser.username }, JWT_SECRET, { expiresIn: '7d' });
     res.json({
       token,
-      user: { id: foundUser.id, username: foundUser.username, email: foundUser.email, isGuest: foundUser.isGuest || (foundUser.email && foundUser.email.endsWith('@guest.casino')) || false, kyc: foundUser.kyc },
+      user: {
+        id: foundUser.id,
+        username: foundUser.username,
+        email: foundUser.email,
+        isGuest: foundUser.isGuest || (foundUser.email && foundUser.email.endsWith('@guest.casino')) || false,
+        kyc: foundUser.kyc,
+        state: foundUser.state,
+        geo: { ip: clientIp, country: geo.country, state: geo.state, city: geo.city, isVpn: geo.isVpn, riskScore: geo.riskScore }
+      },
       balances: { gc: foundUser.gc_balance, sc: foundUser.sc_unplayed + foundUser.sc_played }
     });
   } catch (e) {
@@ -1091,6 +1352,38 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/user/me', verifyToken, async (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User profile not found.' });
+
+  // Geo check on profile access
+  const clientIp = getClientIp(req);
+  const geo = await geoLookup(clientIp);
+  const detectedState = (geo.state || user.state || 'CA').toUpperCase();
+  const detectedCountry = (geo.country || 'US').toUpperCase();
+  if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
+    return res.status(403).json({
+      error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
+      geo: { state: geo.state, country: geo.country, restricted: true }
+    });
+  }
+  if (geo.isVpn || geo.riskScore >= 50) {
+    return res.status(403).json({
+      error: 'Access from VPN, proxy, or hosting provider is not allowed.',
+      geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
+    });
+  }
+
+  // Update geo in DB
+  await db.updateUser(user.id, {
+    geo_ip: clientIp,
+    geo_country: geo.country || null,
+    geo_city: geo.city || null,
+    geo_is_vpn: geo.isVpn ? 1 : 0,
+    geo_risk_score: geo.riskScore || 0
+  });
+  user.geoIp = clientIp;
+  user.geoCountry = geo.country || null;
+  user.geoCity = geo.city || null;
+  user.geoIsVpn = !!geo.isVpn;
+  user.geoRiskScore = geo.riskScore || 0;
 
   let transfersActive = false;
   if (user.stripeAccountId) {
@@ -1107,6 +1400,14 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     username: user.username,
     email: user.email,
     state: user.state,
+    geo: {
+      ip: user.geoIp || null,
+      country: user.geoCountry || null,
+      city: user.geoCity || null,
+      isVpn: !!user.geoIsVpn,
+      riskScore: user.geoRiskScore || 0,
+      registeredAt: user.registeredAt || null
+    },
     isGuest: user.email && user.email.endsWith('@guest.casino'),
     createdAt: user.createdAt,
     balances: { 
@@ -1124,6 +1425,9 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     },
     hasPayoutAccount: !!user.stripeAccountId,
     transfersActive,
+    flags: {
+      allowGuestPayments: process.env.ALLOW_GUEST_PAYMENTS === 'true'
+    },
     dailyBonus: {
       canClaim: Date.now() - (user.bonus?.lastClaimAt || user.lastDailyClaim || 0) > 24 * 60 * 60 * 1000,
       nextClaimMs: Math.max(0, ((user.bonus?.lastClaimAt || user.lastDailyClaim || 0) + 24 * 60 * 60 * 1000) - Date.now()),
@@ -1152,22 +1456,44 @@ app.get('/api/session-status', (req, res) => {
     if (!user) {
       return res.json({ authenticated: false });
     }
+
+    const clientIp = getClientIp(req);
+    const detectedState = (user.state || 'CA').toUpperCase();
+    const detectedCountry = (user.geoCountry || 'US').toUpperCase();
+    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
+      return res.json({ authenticated: false, geoRestricted: true, state: detectedState, country: detectedCountry });
+    }
+    if (user.geoIsVpn || (user.geoRiskScore || 0) >= 50) {
+      return res.json({ authenticated: false, geoRestricted: true, isVpn: !!user.geoIsVpn, riskScore: user.geoRiskScore || 0 });
+    }
+
     res.json({
       authenticated: true,
       id: user.id,
       username: user.username,
       email: user.email,
       state: user.state,
+      geo: {
+        ip: user.geoIp || null,
+        country: user.geoCountry || null,
+        city: user.geoCity || null,
+        isVpn: !!user.geoIsVpn,
+        riskScore: user.geoRiskScore || 0,
+        registeredAt: user.registeredAt || null
+      },
       isGuest: user.email ? user.email.endsWith('@guest.casino') : false,
       kyc: user.kyc || { status: 'UNVERIFIED', tier: 0 },
-      balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
+      balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played },
+      flags: {
+        allowGuestPayments: process.env.ALLOW_GUEST_PAYMENTS === 'true'
+      }
     });
   } catch (err) {
     res.json({ authenticated: false });
   }
 });
 
-app.get('/api/user/transactions', verifyToken, (req, res) => {
+app.get('/api/user/transactions', verifyToken, enforceJurisdiction, (req, res) => {
   const userTransactions = transactions.get(req.user.id) || [];
   
   const typeFilter = req.query.type;
@@ -1204,7 +1530,7 @@ app.get('/api/user/transactions', verifyToken, (req, res) => {
 // 9. STAKE-STYLE KYC VERIFICATION & USER ACTION ENDPOINTS
 // -----------------------------------------------------------------------------
 
-app.post('/api/user/kyc/start', verifyToken, (req, res) => {
+app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
@@ -1225,7 +1551,7 @@ app.post('/api/user/kyc/start', verifyToken, (req, res) => {
   });
 });
 
-app.post('/api/user/kyc/verify-sandbox', verifyToken, (req, res) => {
+app.post('/api/user/kyc/verify-sandbox', verifyToken, enforceJurisdiction, (req, res) => {
   // Sandbox KYC is only available in development/test environments
   if (process.env.NODE_ENV === 'production') {
     return res.status(403).json({ error: 'Sandbox verification is not available in production.' });
@@ -1246,7 +1572,7 @@ app.post('/api/user/kyc/verify-sandbox', verifyToken, (req, res) => {
   });
 });
 
-app.post('/api/user/amoe-code', verifyToken, (req, res) => {
+app.post('/api/user/amoe-code', verifyToken, enforceJurisdiction, (req, res) => {
   const code = `AMOE-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
   amoeRegistry.set(code, { userId: req.user.id, issuedAt: Date.now(), redeemed: false });
   
@@ -1257,7 +1583,7 @@ app.post('/api/user/amoe-code', verifyToken, (req, res) => {
   });
 });
 
-app.post('/api/user/claim-rakeback', verifyToken, (req, res) => {
+app.post('/api/user/claim-rakeback', verifyToken, enforceJurisdiction, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
@@ -1295,7 +1621,7 @@ app.post('/api/user/claim-rakeback', verifyToken, (req, res) => {
   });
 });
 
-app.post('/api/user/daily-bonus', verifyToken, (req, res) => {
+app.post('/api/user/daily-bonus', verifyToken, enforceJurisdiction, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
@@ -1334,7 +1660,7 @@ app.post('/api/user/daily-bonus', verifyToken, (req, res) => {
   });
 });
 
-app.post('/api/user/rewarded-ad', verifyToken, (req, res) => {
+app.post('/api/user/rewarded-ad', verifyToken, enforceJurisdiction, (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
@@ -1366,7 +1692,7 @@ app.post('/api/user/rewarded-ad', verifyToken, (req, res) => {
   });
 });
 
-app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
+app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, res) => {
   const { packageId, uiMode } = req.body;
   const pkg = COIN_PACKAGES[packageId || 'pack_10'];
 
@@ -1375,7 +1701,8 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
-  if (user.isGuest || (user.email && user.email.endsWith('@guest.casino'))) {
+  const guestPaymentsAllowed = process.env.ALLOW_GUEST_PAYMENTS === 'true';
+  if (!guestPaymentsAllowed && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
     return res.status(403).json({
       error: 'Guest accounts cannot purchase coins. Please register a real account first.',
       requiresAccount: true
@@ -1429,7 +1756,7 @@ app.post('/api/user/buy-coins', verifyToken, async (req, res) => {
 });
 
 // Crypto Payment Initiation (Mock / Integration Point)
-app.post('/api/user/crypto-payment/initiate', verifyToken, async (req, res) => {
+app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, async (req, res) => {
   const { packageId, currency } = req.body;
   const pkg = COIN_PACKAGES[packageId || 'pack_10'];
   if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
@@ -1437,7 +1764,8 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, async (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
-  if (user.isGuest || (user.email && user.email.endsWith('@guest.casino'))) {
+  const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
+  if (!guestOk && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
     return res.status(403).json({ error: 'Guest accounts cannot purchase coins. Please register a real account first.', requiresAccount: true });
   }
 
@@ -1477,8 +1805,106 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, async (req, res) => {
     address: cryptoAddresses[currency] || cryptoAddresses.BTC,
     amount: cryptoAmounts[currency] || cryptoAmounts.BTC,
     usdAmount,
-    message: 'Send exact amount to the provided address. Coins will be credited after 1 confirmation.'
+    message: 'Send any amount to the address below. You will receive the selected package\'s GC + SC after 1 confirmation.'
   });
+});
+
+// -----------------------------------------------------------------------------
+// Crypto payment confirmation by txid (user-submitted)
+// In production this is normally driven by a blockchain webhook; this endpoint
+// lets the user paste their txid for manual confirmation. Solana is verified
+// against the RPC; BTC/ETH/LTC/USDT are sandbox-credited (test mode).
+// -----------------------------------------------------------------------------
+app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, async (req, res) => {
+  const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  if (!guestOk && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
+    return res.status(403).json({ error: 'Guest accounts cannot purchase coins.', requiresAccount: true });
+  }
+
+  const { paymentId, txid, amountSent } = req.body || {};
+  if (!paymentId) return res.status(400).json({ error: 'paymentId is required.' });
+  if (!txid) return res.status(400).json({ error: 'Transaction ID (txid) is required.' });
+
+  const payment = cryptoPayments.get(paymentId);
+  if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+  if (payment.userId !== user.id) return res.status(403).json({ error: 'Payment does not belong to this user.' });
+  if (payment.status === 'COMPLETED') {
+    return res.status(409).json({ error: 'Payment already credited.' });
+  }
+
+  try {
+    // Solana: verify on-chain that the expected lamports were sent to the merchant wallet.
+    if (payment.currency === 'SOL' && txid) {
+      let verified = false;
+      try {
+        const rpcRes = await fetch(SOLANA_RPC, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1,
+            method: 'getTransaction',
+            params: [txid, { encoding: 'json', commitment: 'confirmed' }]
+          })
+        });
+        const rpcData = await rpcRes.json();
+        const tx = rpcData?.result?.transaction;
+        const meta = rpcData?.result?.meta;
+        if (tx && meta && !meta.err) {
+          const accountKeys = tx.message?.accountKeys || [];
+          const toIdx = accountKeys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === PHANTOM_MERCHANT);
+          if (toIdx !== -1) {
+            const postBal = meta.postBalances?.[toIdx] ?? 0;
+            const preBal = meta.preBalances?.[toIdx] ?? 0;
+            if (postBal - preBal > 0) verified = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[Crypto Confirm] SOL RPC lookup failed:', e.message);
+      }
+      if (!verified) {
+        return res.status(400).json({ error: 'Solana transaction not found or does not credit the merchant wallet.', verified: false });
+      }
+    }
+    // BTC/ETH/LTC/USDT: sandbox trust the user-submitted txid (no explorer key configured).
+    // A real deployment would verify via a block-explorer API here.
+
+    // Credit the selected package
+    if (acquireLock(user.id, 'crypto-' + paymentId)) {
+      try {
+        user.gc_balance = round2((user.gc_balance || 0) + payment.gcAmount);
+        user.sc_unplayed = round2((user.sc_unplayed || 0) + payment.scAmount);
+        const txAmount = amountSent ? parseFloat(amountSent) : Number(payment.amount || 0);
+        const usd = txAmount > 0 ? txAmount * payment.usdAmount : payment.usdAmount;
+        logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''}`, payment.gcAmount, payment.scAmount, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null });
+        creditReferrerForDeposit(user, usd || payment.usdAmount || 0);
+        saveData();
+      } finally {
+        releaseLock(user.id, 'crypto-' + paymentId);
+      }
+    }
+
+    payment.status = 'COMPLETED';
+    payment.txid = txid;
+    cryptoPayments.set(paymentId, payment);
+
+    sendToUser(user.id, {
+      type: 'BALANCE_UPDATE',
+      balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
+      message: `Crypto deposit confirmed! +${payment.gcAmount} GC + ${payment.scAmount} SC credited.`
+    });
+
+    res.json({
+      success: true,
+      verified: payment.currency === 'SOL',
+      credited: { gc: payment.gcAmount, sc: payment.scAmount },
+      balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
+    });
+  } catch (err) {
+    console.error('[Crypto Confirm Error]:', err.message);
+    res.status(500).json({ error: 'Failed to confirm crypto payment.' });
+  }
 });
 
 app.post('/api/user/crypto-payment/webhook', express.json(), (req, res) => {
@@ -1505,13 +1931,14 @@ app.post('/api/user/crypto-payment/webhook', express.json(), (req, res) => {
 // Phantom (Solana) payment confirmation
 // Verifies the on-chain transfer matches the expected lamports, then credits.
 // -----------------------------------------------------------------------------
-const PHANTOM_MERCHANT = '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE';
+const PHANTOM_MERCHANT = process.env.MERCHANT_SOL || '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE';
 const SOLANA_RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
-app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, async (req, res) => {
+app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdiction, async (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
-  if (user.isGuest || (user.email && user.email.endsWith('@guest.casino'))) {
+  const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
+  if (!guestOk && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
     return res.status(403).json({ error: 'Guest accounts cannot purchase coins.', requiresAccount: true });
   }
 
@@ -1588,13 +2015,14 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, async (req, re
   }
 });
 
-app.post('/api/user/withdraw-sc', verifyToken, async (req, res) => {
+app.post('/api/user/withdraw-sc', verifyToken, enforceJurisdiction, async (req, res) => {
   const user = users.get(req.user.id);
   const host = req.headers.origin || `https://${req.headers.host}`;
 
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
-  if (!user.kyc || user.kyc.status !== 'VERIFIED') {
+  const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
+  if (!guestOk && (!user.kyc || user.kyc.status !== 'VERIFIED')) {
     return res.status(403).json({
       error: 'Identity verification (KYC) is required before redeeming Sweeps Coins for cash.',
       requiresKyc: true
@@ -2639,6 +3067,30 @@ app.use((err, req, res, next) => {
   console.error('[SERVER ERROR]', err);
   res.status(500).json({ error: 'Internal server error.' });
 });
+
+// -----------------------------------------------------------------------------
+// 8. HYBRID MULTI-PAGE ROUTES
+// Lightweight dedicated HTML per non-game route (shared shell + only that
+// page's view markup) so deep visits to /account, /bonus, etc. no longer
+// download the entire single-page index.html with every view baked in.
+// -----------------------------------------------------------------------------
+const VIEWS_DIR = path.join(__dirname, 'public', 'views');
+const pageHtmlCache = {};
+function renderPage(viewName) {
+  if (pageHtmlCache[viewName]) return pageHtmlCache[viewName];
+  const top = fs.readFileSync(path.join(VIEWS_DIR, 'partials', 'shelftop.html'), 'utf8');
+  const bottom = fs.readFileSync(path.join(VIEWS_DIR, 'partials', 'pagebottom.html'), 'utf8');
+  const content = fs.readFileSync(path.join(VIEWS_DIR, 'pages', viewName + '.html'), 'utf8');
+  const html = top + content + bottom;
+  pageHtmlCache[viewName] = html;
+  return html;
+}
+
+app.get('/account', (req, res) => res.type('html').send(renderPage('account')));
+app.get('/account/*', (req, res) => res.type('html').send(renderPage('account')));
+app.get('/bonus', (req, res) => res.type('html').send(renderPage('bonus')));
+app.get('/challenges', (req, res) => res.type('html').send(renderPage('challenges')));
+app.get('/rakeback', (req, res) => res.type('html').send(renderPage('rakeback')));
 
 // SPA fallback: serve index.html for all non-API routes
 app.get('*', (req, res) => {
