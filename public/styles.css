@@ -461,7 +461,8 @@ body.dark-theme::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100px;
+  min-width: 56px;
+  max-width: 140px;
 }
 
 .wallet-selector[data-currency="SC"] .wallet-balance-value {
@@ -5564,7 +5565,8 @@ opacity: 0.5;
   }
   .wallet-balance-value {
     font-size: 0.72rem;
-    max-width: 70px;
+    min-width: 50px;
+    max-width: 90px;
   }
   .user-profile-badge .avatar-circle {
     width: 34px;
@@ -9296,10 +9298,11 @@ opacity: 0.5;
 
 /* Stripe mount container */
 #stripe-checkout-container {
-  min-height: 220px;
+  min-height: 340px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  width: 100%;
 }
 
 /* Processing overlay animation */

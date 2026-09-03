@@ -442,7 +442,7 @@ module.exports = {
       [userId, createdAt, createdAt, createdAt]
     );
 
-    scheduleSave();
+    persistSync();
     return userId;
   },
 

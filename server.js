@@ -1137,8 +1137,8 @@ app.post('/api/auth/register', async (req, res) => {
       username,
       email,
       password: hashedPassword,
-      gcBalance: 2500,
-      scBalance: 0
+      gcBalance: 10000,
+      scBalance: 10
     });
 
     await db.updateUser(userId, {

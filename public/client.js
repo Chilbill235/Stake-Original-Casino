@@ -173,7 +173,10 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
         } finally {
           state.authRecoveryInFlight = false;
         }
-        throw new Error('Session expired. Re-authenticated.');
+        const expired = new Error('Session expired. Re-authenticated.');
+        expired.code = 'AUTH_EXPIRED';
+        expired.status = 401;
+        throw expired;
       }
     }
 
@@ -194,6 +197,9 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
   } catch (err) {
     if (err.geoRestricted) {
       showGeoRestrictionModal(err);
+    }
+    if (!err.status && !err.code) {
+      err.code = 'NETWORK_ERROR';
     }
     throw err;
   }
@@ -244,9 +250,17 @@ async function initSession() {
       showGeoRestrictionModal(err);
       return;
     }
-    console.warn('[Auth failure]: Token invalid, falling back to guest.', err.message);
-    localStorage.removeItem('casino_token');
-    await continueAsGuest();
+    // Explicit auth/user rejection -> fall back to a guest.
+    if (err && (err.status === 401 || err.status === 403 || err.status === 404)) {
+      console.warn('[Auth failure]: Token rejected (HTTP ' + err.status + '), falling back to guest.', err.message);
+      localStorage.removeItem('casino_token');
+      localStorage.removeItem('casino_username');
+      await continueAsGuest();
+      return;
+    }
+    // Transient/network error (e.g. the server is restarting) -> KEEP the token so
+    // a logged-in real account is not silently demoted to a guest account.
+    console.warn('[Auth]: Transient /api/user/me error, keeping session token:', (err && err.message) || err);
     return;
   }
 
@@ -473,9 +487,11 @@ function renderGameResultFeed() {
 
 function formatCoins(value) {
   const num = Number(value || 0);
-  const parts = num.toFixed(2).split('.');
-  const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return parts[1] ? intPart + '.' + parts[1] : intPart;
+  const comma = (n) => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  if (num >= 1e9) return comma((num / 1e9).toFixed(2)) + 'B';
+  if (num >= 1e6) return comma((num / 1e6).toFixed(2)) + 'M';
+  if (num >= 1e3) return comma((num / 1e3).toFixed(2)) + 'K';
+  return comma(num.toFixed(2));
 }
 
 function mergeBalances(newBalances) {
@@ -907,6 +923,19 @@ async function loadStripeCheckout(packageId) {
       }
     });
     state.activeCheckoutInstance.mount(checkoutEl);
+
+    // The Embedded Checkout has initialized — reveal the card panel it was mounted
+    // into. Do NOT clear #stripe-checkout-container here (hideProcessingPanel()
+    // would wipe the form we just mounted); just swap the panels and stop the
+    // "preparing payment gateway" overlay so the card screen is actually visible.
+    stopProgress();
+    setCheckoutStep(2);
+    const procPanel = document.getElementById('payment-processing');
+    if (procPanel) procPanel.classList.add('hidden');
+    const cardPanel = document.getElementById('payment-card');
+    if (cardPanel) cardPanel.classList.remove('hidden');
+    const loadingState = document.getElementById('checkout-loading-state');
+    if (loadingState) loadingState.classList.add('hidden');
   } catch (err) {
     stopProgress();
     hideProcessingPanel();
@@ -4541,7 +4570,7 @@ async function submitRegister() {
 }
 
 async function continueAsGuest() {
-  if (state.profile && state.profile.isGuest) {
+  if (state.profile && state.profile.isGuest && localStorage.getItem('casino_token')) {
     return;
   }
   try {
@@ -4585,8 +4614,13 @@ async function initSessionFromToken() {
       showGeoRestrictionModal(err);
       return;
     }
-    console.warn('[initSessionFromToken]: Auth failure, clearing token.', err.message);
-    localStorage.removeItem('casino_token');
+    if (err && (err.status === 401 || err.status === 403 || err.status === 404)) {
+      console.warn('[initSessionFromToken]: Token rejected (HTTP ' + err.status + '), clearing.', err.message);
+      localStorage.removeItem('casino_token');
+      localStorage.removeItem('casino_username');
+    } else {
+      console.warn('[initSessionFromToken]: Transient error, keeping token:', (err && err.message) || err);
+    }
   }
   updateWalletUI();
   setupGlobalEventListeners();
