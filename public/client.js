@@ -3209,6 +3209,7 @@ async function refreshAccountPage(page = 'overview') {
     state.profile = data;
     state.balances = mergeBalances(data.balances);
     updateWalletUI();
+    updateUserProfileBadge();
   } catch (err) {
     console.warn('[Account] Could not refresh profile:', err.message);
   }
@@ -4615,7 +4616,24 @@ function reapplyCurrentRoute() {
   handleRouteChange();
 }
 
+function updateSidebarUserCard() {
+  const p = state.profile || {};
+  const vipText = (p.vip && p.vip.tier) || 'Bronze';
+  const username = p.username || localStorage.getItem('casino_username') || 'Guest';
+  const isGuest = !!(p.isGuest || (p.email && p.email.endsWith('@guest.casino')));
+  const nameEl = document.getElementById('sidebar-username');
+  const cardEl = document.querySelector('.sidebar-user-card');
+  if (nameEl) nameEl.textContent = username;
+  if (cardEl) {
+    const tierEl = cardEl.querySelector('.user-tier');
+    const avatarEl = cardEl.querySelector('.avatar-emoji');
+    if (tierEl) tierEl.textContent = (vipText || 'Bronze') + ' VIP' + (isGuest ? ' · Guest' : '');
+    if (avatarEl) avatarEl.textContent = (username && username !== 'Guest') ? username.charAt(0).toUpperCase() : '👤';
+  }
+}
+
 function updateUserProfileBadge() {
+  updateSidebarUserCard();
   const badge = document.getElementById('user-badge');
   if (!badge) return;
   const username = state.profile?.username || localStorage.getItem('casino_username') || 'Guest';
