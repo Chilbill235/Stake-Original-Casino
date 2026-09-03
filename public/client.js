@@ -946,19 +946,27 @@ function selectCrypto(currency) {
 }
 
 // Build a scannable crypto payment URI for the QR code.
-function buildCryptoUri(currency, address) {
+function buildCryptoUri(currency, address, amount) {
   const msg = encodeURIComponent('Casino Deposit');
   switch (currency) {
-    case 'BTC':  return 'bitcoin:' + address + '?message=' + msg;
+    case 'BTC':
+      return 'bitcoin:' + address + '?message=' + msg + (amount ? '&amount=' + encodeURIComponent(amount) : '');
     case 'ETH':
-    case 'USDT': return 'ethereum:' + address + '?message=' + msg;
-    case 'LTC':  return 'litecoin:' + address + '?message=' + msg;
-    case 'SOL':  return 'solana:' + address + '?message=' + msg;
-    default:     return address;
+    case 'BASE':
+    case 'POLYGON':
+      return 'ethereum:' + address + '?value=' + (amount ? Math.round(parseFloat(amount) * 1e18) : 0) + '&message=' + msg;
+    case 'USDT':
+      return 'ethereum:' + address + '?message=' + msg;
+    case 'USDC':
+    case 'SOL':
+      return 'solana:' + address + '?message=' + msg + (amount ? '&amount=' + encodeURIComponent(amount) : '');
+    default:
+      return address;
   }
 }
+// Generate a QR code for a deposit URI/address LOCALLY (server-side svg).
 function qrUrl(data) {
-  return 'https://api.qrserver.com/v1/api/?size=220x220&margin=2&data=' + encodeURIComponent(data);
+  return '/api/crypto/qr?data=' + encodeURIComponent(data);
 }
 
 async function initiateCryptoPayment(currency) {
@@ -999,7 +1007,7 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
   const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
   const address = res.address || '';
   const amount = res.amount || '';
-  const uri = buildCryptoUri(cryptoType, address);
+  const uri = buildCryptoUri(cryptoType, address, amount);
   state.activeCryptoPaymentId = res.paymentId || state.activeCryptoPaymentId;
 
   const details = document.getElementById('crypto-payment-details');
@@ -1011,7 +1019,7 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
       '<!-- QR + Address -->' +
       '<div class="crypto-qr-block">' +
       '  <div class="crypto-qr-wrap">' +
-      '    <img class="crypto-qr-img" src="' + qrUrl(uri) + '" alt="Scan to pay ' + cryptoType + '" />' +
+'  <img class="crypto-qr-img" src="' + qrUrl(uri) + '" alt="Scan to pay ' + cryptoType + '" onerror="this.onerror=null;this.classList.add(\'hidden\')" />' +
       '    <div class="crypto-qr-fallback">📱</div>' +
       '  </div>' +
       '  <p class="crypto-qr-caption">Scan the QR code with your wallet to pay, or send manually to the address below.</p>' +
@@ -1029,7 +1037,7 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
       '  <label>Send to this address</label>' +
       '  <div class="crypto-address-row">' +
       '    <code class="crypto-address-code">' + escapeHTML(address) + '</code>' +
-      '    <button class="btn-copy" onclick="copyCryptoAddressHandler(\'' + escapeHTML(address).replace(/'/g, '&#39;') + '\')">Copy</button>' +
+      '    <button class="btn-copy" onclick="copyCryptoAddressHandler(\'' + escapeHTML(address).replace(/'/g, '&#39;') + '\', this)">Copy</button>' +
       '  </div>' +
       '</div>' +
 
@@ -1117,23 +1125,48 @@ function showCryptoDepositSuccess(pkg, verified) {
   setTimeout(() => { mergeBalances({ sc: (state.balances.sc||0) }); updateWalletUI(); }, 500);
 }
 
-function copyCryptoAddressHandler(address) {
-  navigator.clipboard.writeText(address).then(() => {
-    playSound('click');
-    alert('Address copied to clipboard!');
-  }).catch(() => {
-    alert('Address: ' + address);
+function copyToClipboard(text) {
+  return new Promise((resolve) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => resolve(true)).catch(fallback);
+    } else {
+      fallback();
+    }
+    function fallback() {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = (window.scrollY || 0) + 'px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try { document.execCommand('copy'); resolve(true); }
+      catch (e) { resolve(false); }
+      document.body.removeChild(ta);
+    }
   });
+}
+
+async function copyCryptoAddressHandler(address, btn) {
+  try { await copyToClipboard(address); } catch (e) {}
+  try { playSound('click'); } catch (e) {}
+  if (btn) {
+    const prev = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1400);
+  }
 }
 
 // Legacy wrappers kept so the static markup Copy buttons never throw.
 function copyCryptoAddress() {
   const el = document.getElementById('crypto-address');
-  if (el && el.textContent) copyCryptoAddressHandler(el.textContent);
+  if (el && el.textContent) copyCryptoAddressHandler(el.textContent, el);
 }
 function copyCryptoAmount() {
   const el = document.getElementById('crypto-amount');
-  if (el && el.textContent) navigator.clipboard.writeText(el.textContent).then(() => { playSound('click'); alert('Amount copied!'); }).catch(() => {});
+  if (el && el.textContent) copyToClipboard(el.textContent).catch(() => {});
 }
 
 /**
@@ -3167,18 +3200,6 @@ function syncProfileDropdownHeader() {
   }
 }
 
-function navigateToAccountFromMenu(page) {
-  closeProfileDropdown();
-  if (!state.profile) {
-    openAuthModal();
-    return;
-  }
-  playSound('click');
-  const path = page.startsWith('transactions/') ? '/account/' + page : '/account/' + page;
-  history.pushState(null, '', path);
-  handleRouteChange();
-}
-
 async function refreshAccountPage(page = 'overview') {
   setActiveAccountLink(page);
   const container = document.getElementById('view-account');
@@ -3235,6 +3256,16 @@ function setActiveSidebarLink(path) {
     const isMatch = route === '/' ? path === '/' : path === route || path.startsWith(route + '/');
     item.classList.toggle('active', isMatch);
   });
+}
+
+// Open/close the off-canvas left navigation on mobile (toggle button + overlay).
+function toggleMainSidebar() {
+  const sb = document.getElementById('main-sidebar');
+  if (!sb) return;
+  sb.classList.toggle('open');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (overlay) overlay.classList.toggle('open');
+  document.body.style.overflow = sb.classList.contains('open') ? 'hidden' : '';
 }
 
 function renderAccountPage(page = 'overview') {
@@ -3562,11 +3593,35 @@ async function startKycVerification() {
 }
 
 function showGuestVerificationAnimation() {
-  const container = document.getElementById('guest-verification-container');
-  if (!container) return;
-  container.classList.remove('hidden');
-  container.innerHTML = '<div class="verification-animation"><div class="verification-step">✓</div><div class="verification-text">Identity Verified</div><div class="verification-subtext">Sandbox KYC auto-completed</div></div>';
-  setTimeout(() => container.classList.add('hidden'), 3000);
+  // Reuse the shared modal-backdrop style: fixed, inset:0, dimmed +
+  // backdrop-filter blur over the whole page, flexbox-centered. This makes the
+  // "Identity Verified" popup land in the middle of the screen with a blurred
+  // background on every page (not just the lobby) and auto-dismisses cleanly.
+  let existing = document.getElementById('kyc-identity-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'kyc-identity-overlay';
+  overlay.className = 'modal-backdrop';
+  overlay.innerHTML =
+    '<div class="modal-box identity-verify-box">' +
+      '<div class="identity-verify-content" style="text-align:center;">' +
+        '<div class="verification-step" style="margin:0 auto 16px;width:56px;height:56px;font-size:28px;">✓</div>' +
+        '<div class="verification-text" style="font-size:1.4rem;">Identity Verified</div>' +
+        '<div class="verification-subtext" style="margin-left:0;">Your identity has been successfully verified.</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  // Hold the success, then fade out ("load out") and remove from the DOM.
+  const DISPLAY_MS = 2200;
+  const FADE_MS = 400;
+  setTimeout(() => {
+    overlay.style.transition = 'opacity ' + FADE_MS + 'ms ease, transform ' + FADE_MS + 'ms ease';
+    overlay.style.opacity = '0';
+    overlay.style.transform = 'scale(0.97)';
+    setTimeout(() => overlay.remove(), FADE_MS);
+  }, DISPLAY_MS);
 }
 
 async function loadAccountTransactions(sub = 'deposits') {

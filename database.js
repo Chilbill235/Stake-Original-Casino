@@ -493,6 +493,21 @@ module.exports = {
     return results;
   },
 
+  getTransactionById: async (id) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM transactions WHERE id = ?');
+    stmt.bind([id]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  updateTransactionStatus: async (id, status) => {
+    const database = await getDb();
+    database.run('UPDATE transactions SET status = ? WHERE id = ?', [status, id]);
+    scheduleSave();
+  },
+
   getSeedPair: async (userId) => {
     const database = await getDb();
     const stmt = database.prepare('SELECT * FROM provably_fair_seeds WHERE user_id = ?');

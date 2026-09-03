@@ -177,41 +177,6 @@ async function geoLookup(ip) {
   return { ip, state: null, country: null, city: null, restricted: null, isVpn: false, asn: null, org: null, riskScore: -1, error: lastError };
 }
 
-async function enforceJurisdiction(req, res, next) {
-  const user = users.get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found.' });
-
-  const ip = getClientIp(req);
-  const geo = await geoLookup(ip);
-
-  const userState = (user.state || 'CA').toUpperCase();
-  const geoState = (geo.state || userState).toUpperCase();
-  const geoCountry = (geo.country || 'US').toUpperCase();
-
-  if (RESTRICTED_STATES.includes(geoState) || RESTRICTED_COUNTRIES.includes(geoCountry)) {
-    return res.status(403).json({
-      error: `Sweepstakes play is unavailable in your jurisdiction (${geoState || geoCountry}).`,
-      requiresAccount: true,
-      geo: { state: geo.state, country: geo.country, restricted: true }
-    });
-  }
-
-  if (geo.isVpn || geo.riskScore >= 50) {
-    return res.status(403).json({
-      error: 'Access from VPN, proxy, or hosting provider is not allowed.',
-      requiresAccount: true,
-      geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
-    });
-  }
-
-  if (user.state && geo.state && user.state.toUpperCase() !== geo.state) {
-    console.warn(`[Geo] State mismatch for user #${user.id}: stored=${user.state}, ip=${geo.state}, ip=${ip}`);
-  }
-
-  req.geo = geo;
-  next();
-}
-
 // Generate a unique user ID (avoids collisions from deletions/counters)
 let nextUserId = 1;
 function generateUserId() {
@@ -607,7 +572,8 @@ function corsOptions(origin, callback) {
     process.env.FRONTEND_URL
   ].filter(Boolean);
 
-  if (!origin || allowedOrigins.includes(origin) || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+  var isLocalNetwork = /^http:\/\/(localhost:|127\.0\.0\.1:|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(origin);
+  if (!origin || allowedOrigins.includes(origin) || isLocalNetwork) {
     callback(null, true);
   } else {
     console.warn('[CORS]: Rejected origin:', origin);
@@ -634,7 +600,7 @@ function enforceJurisdiction(req, res, next) {
 }
 
 // Stripe Webhook Endpoint (Raw Body Parser before express.json())
-app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req, res) => {
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -666,13 +632,30 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
       const gcAmount = parseFloat(session.metadata.gcAmount);
       const scAmount = parseFloat(session.metadata.scAmount);
 
+      const stripeTxId = `stripe_${session.id}`;
+      const existing = await db.getTransactionById(stripeTxId);
+      const alreadyCredited = !!(existing && existing.status === 'COMPLETED');
       const user = users.get(userId);
-      if (user) {
-        user.gc_balance += gcAmount;
-        user.sc_unplayed += scAmount;
+      if (user && !alreadyCredited) {
+        user.gc_balance = round2((user.gc_balance || 0) + gcAmount);
+        user.sc_unplayed = round2((user.sc_unplayed || 0) + scAmount);
         saveData();
 
         logTransaction(userId, 'PURCHASE', `Purchased ${session.metadata.packageName || 'Coin Package'}`, gcAmount, scAmount, { stripeSessionId: session.id });
+        try {
+          await db.addTransaction({
+            id: stripeTxId,
+            userId,
+            type: 'PURCHASE',
+            description: `Purchased ${session.metadata.packageName || 'Coin Package'} (Stripe)`,
+            gcDelta: gcAmount,
+            scDelta: scAmount,
+            currency: 'GC',
+            amount: (session.amount_total || 0) / 100,
+            status: 'COMPLETED',
+            metadata: { stripeSessionId: session.id, packageId: session.metadata.packageId, paymentMethod: 'card' }
+          });
+        } catch (e) { console.error('[Stripe Webhook DB]:', e.message); }
 
         const usdValue = (session.amount_total || 0) / 100;
         creditReferrerForDeposit(user, usdValue);
@@ -682,6 +665,8 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
           balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
           message: `Added ${gcAmount.toLocaleString()} GC and ${scAmount} SC!`
         });
+      } else if (user) {
+        try { db.updateTransactionStatus(stripeTxId, 'COMPLETED'); } catch (e) { /* non-blocking */ }
       }
     }
   }
@@ -1745,6 +1730,21 @@ app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, re
 
     const session = await stripe.checkout.sessions.create(sessionConfig);
 
+    try {
+      await db.addTransaction({
+        id: `stripe_${session.id}`,
+        userId: user.id,
+        type: 'PURCHASE',
+        description: `Purchased ${pkg.name} (Stripe)`,
+        gcDelta: pkg.gcAmount,
+        scDelta: pkg.scAmount,
+        currency: 'GC',
+        amount: pkg.priceInCents / 100,
+        status: 'PENDING',
+        metadata: { stripeSessionId: session.id, packageId, uiMode: mode }
+      });
+    } catch (e) { console.error('[Stripe Purchase Tracking]:', e.message); }
+
     res.json({
       clientSecret: session.client_secret,
       url: session.url,
@@ -1761,6 +1761,11 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
   const pkg = COIN_PACKAGES[packageId || 'pack_10'];
   if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
 
+  const cur = (currency || 'BTC').toUpperCase();
+  if (!ALLOWED_CRYPTOS.includes(cur)) {
+    return res.status(400).json({ error: 'Unsupported cryptocurrency. Accepted: BTC, ETH, BASE, POLYGON, USDC, USDT, SOL.' });
+  }
+
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
@@ -1770,27 +1775,29 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
   }
 
   const usdAmount = pkg.priceInCents / 100;
-  const cryptoAddresses = {
-    BTC: process.env.MERCHANT_BTC || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-    ETH: process.env.MERCHANT_ETH || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    USDT: process.env.MERCHANT_USDT || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    LTC: process.env.MERCHANT_LTC || 'ltc1gum7656ec7ab88b098defb751b7401b5f6d8976',
-    SOL: process.env.MERCHANT_SOL || '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE'
-  };
+  const address = CRYPTO_ADDRESSES[cur] || '';
+  if (!address) {
+    return res.status(503).json({ error: `Merchant ${cur} address is not configured.`, currency: cur });
+  }
   const cryptoAmounts = {
-    BTC: (usdAmount / 50000).toFixed(8),
-    ETH: (usdAmount / 3000).toFixed(6),
-    USDT: usdAmount.toFixed(2),
-    LTC: (usdAmount / 100).toFixed(4),
-    SOL: (usdAmount / 150).toFixed(6)
+    BTC:     (usdAmount / 50000).toFixed(8),
+    ETH:     (usdAmount / 3000).toFixed(6),
+    BASE:    (usdAmount / 3000).toFixed(6),
+    POLYGON: (usdAmount / 1).toFixed(6),
+    USDC:    usdAmount.toFixed(2),
+    USDT:    usdAmount.toFixed(2),
+    SOL:     (usdAmount / 150).toFixed(6)
   };
+  const amount = cryptoAmounts[cur] || '0';
 
   const paymentId = crypto.randomUUID();
   cryptoPayments.set(paymentId, {
     userId: user.id,
     packageId,
-    currency: currency || 'BTC',
-    amount: cryptoAmounts[currency] || '0',
+    currency: cur,
+    chain: chainOf(cur),
+    address,
+    amount,
     usdAmount,
     gcAmount: pkg.gcAmount,
     scAmount: pkg.scAmount,
@@ -1801,19 +1808,20 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
   res.json({
     success: true,
     paymentId,
-    currency: currency || 'BTC',
-    address: cryptoAddresses[currency] || cryptoAddresses.BTC,
-    amount: cryptoAmounts[currency] || cryptoAmounts.BTC,
+    currency: cur,
+    chain: chainOf(cur),
+    address,
+    amount,
     usdAmount,
-    message: 'Send any amount to the address below. You will receive the selected package\'s GC + SC after 1 confirmation.'
+    message: `Send the suggested ${amount} ${cur} (or more) to the address below. Your package will be credited after on-chain confirmation.`
   });
 });
 
 // -----------------------------------------------------------------------------
 // Crypto payment confirmation by txid (user-submitted)
-// In production this is normally driven by a blockchain webhook; this endpoint
-// lets the user paste their txid for manual confirmation. Solana is verified
-// against the RPC; BTC/ETH/LTC/USDT are sandbox-credited (test mode).
+// Every currency is verified on-chain (Solana RPC, mempool.space, Ethereum
+// JSON-RPC) before the package is credited — no packs are granted without
+// verified payment. In production this is also driven by a blockchain webhook.
 // -----------------------------------------------------------------------------
 app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, async (req, res) => {
   const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
@@ -1835,40 +1843,10 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
   }
 
   try {
-    // Solana: verify on-chain that the expected lamports were sent to the merchant wallet.
-    if (payment.currency === 'SOL' && txid) {
-      let verified = false;
-      try {
-        const rpcRes = await fetch(SOLANA_RPC, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0', id: 1,
-            method: 'getTransaction',
-            params: [txid, { encoding: 'json', commitment: 'confirmed' }]
-          })
-        });
-        const rpcData = await rpcRes.json();
-        const tx = rpcData?.result?.transaction;
-        const meta = rpcData?.result?.meta;
-        if (tx && meta && !meta.err) {
-          const accountKeys = tx.message?.accountKeys || [];
-          const toIdx = accountKeys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === PHANTOM_MERCHANT);
-          if (toIdx !== -1) {
-            const postBal = meta.postBalances?.[toIdx] ?? 0;
-            const preBal = meta.preBalances?.[toIdx] ?? 0;
-            if (postBal - preBal > 0) verified = true;
-          }
-        }
-      } catch (e) {
-        console.warn('[Crypto Confirm] SOL RPC lookup failed:', e.message);
-      }
-      if (!verified) {
-        return res.status(400).json({ error: 'Solana transaction not found or does not credit the merchant wallet.', verified: false });
-      }
+    const verify = await verifyCryptoDeposit(payment, txid);
+    if (!verify.verified) {
+      return res.status(400).json({ error: verify.error || 'Payment could not be verified on-chain.', verified: false, currency: payment.currency });
     }
-    // BTC/ETH/LTC/USDT: sandbox trust the user-submitted txid (no explorer key configured).
-    // A real deployment would verify via a block-explorer API here.
 
     // Credit the selected package
     if (acquireLock(user.id, 'crypto-' + paymentId)) {
@@ -1879,6 +1857,7 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
         const usd = txAmount > 0 ? txAmount * payment.usdAmount : payment.usdAmount;
         logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''}`, payment.gcAmount, payment.scAmount, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null });
         creditReferrerForDeposit(user, usd || payment.usdAmount || 0);
+        try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: payment.gcAmount, scDelta: payment.scAmount, currency: 'GC', amount: payment.usdAmount || 0, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
         saveData();
       } finally {
         releaseLock(user.id, 'crypto-' + paymentId);
@@ -1897,7 +1876,7 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
 
     res.json({
       success: true,
-      verified: payment.currency === 'SOL',
+      verified: true,
       credited: { gc: payment.gcAmount, sc: payment.scAmount },
       balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
     });
@@ -1907,32 +1886,248 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
   }
 });
 
-app.post('/api/user/crypto-payment/webhook', express.json(), (req, res) => {
-  const { paymentId, status } = req.body;
+app.post('/api/user/crypto-payment/webhook', express.json(), async (req, res) => {
+  const { paymentId, status, address, txid } = req.body;
   const payment = cryptoPayments.get(paymentId);
   if (!payment) return res.status(404).json({ error: 'Payment not found.' });
 
   if (status === 'CONFIRMED' || status === 'COMPLETED') {
+    if (payment.status === 'COMPLETED') {
+      return res.json({ success: true, deduplicated: true });
+    }
+    // Only honour webhooks that target the configured merchant address.
+    if (address && address.toLowerCase !== undefined && typeof address.toLowerCase === 'function' && address.toLowerCase() !== String(payment.address || CRYPTO_ADDRESSES[payment.currency] || '').toLowerCase()) {
+      console.warn('[Crypto Webhook]: address mismatch (ignored)', address, payment.address);
+    }
     payment.status = 'COMPLETED';
     const user = users.get(payment.userId);
     if (user) {
-      user.gc_balance += payment.gcAmount;
-      user.sc_unplayed += payment.scAmount;
+      user.gc_balance = round2((user.gc_balance || 0) + payment.gcAmount);
+      user.sc_unplayed = round2((user.sc_unplayed || 0) + payment.scAmount);
       saveData();
-      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment`, payment.gcAmount, payment.scAmount, { paymentId, crypto: payment.currency });
+      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment`, payment.gcAmount, payment.scAmount, { paymentId, currency: payment.currency, address: payment.address, txid });
+      try {
+        await db.addTransaction({
+          id: `crypto_${paymentId}`,
+          userId: user.id,
+          type: 'PURCHASE',
+          description: `Crypto ${payment.currency} payment (webhook)`,
+          gcDelta: payment.gcAmount,
+          scDelta: payment.scAmount,
+          currency: 'GC',
+          amount: payment.usdAmount || 0,
+          status: 'COMPLETED',
+          metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid }
+        });
+      } catch (e) { console.error('[Crypto Webhook DB]:', e.message); }
       creditReferrerForDeposit(user, payment.usdAmount || 0);
+      sendToUser(user.id, {
+        type: 'BALANCE_UPDATE',
+        balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
+        message: `Crypto deposit confirmed! +${payment.gcAmount} GC + ${payment.scAmount} SC credited.`
+      });
     }
   }
 
   res.json({ success: true });
 });
 
+// Public: merchant deposit addresses per currency (used by the checkout UI + QR).
+app.get('/api/crypto/addresses', (req, res) => {
+  const addresses = {};
+  for (const c of ALLOWED_CRYPTOS) {
+    addresses[c] = { address: CRYPTO_ADDRESSES[c] || null, chain: chainOf(c) };
+  }
+  res.json({ currencies: ALLOWED_CRYPTOS, addresses });
+});
+
+// Public: render a QR code (SVG) for any deposit URI / address, generated locally.
+app.get('/api/crypto/qr', async (req, res) => {
+  const data = (req.query.data || '').toString().trim();
+  if (!data) return res.status(400).json({ error: 'data query param is required.' });
+  try {
+    const QRCode = require('qrcode');
+    const svg = await QRCode.toString(data, { type: 'svg', margin: 1, width: 256, color: { dark: '#000', light: '#fff' } });
+    res.type('image/svg+xml').send(svg);
+  } catch (e) {
+    console.error('[QR]:', e.message);
+    res.status(500).json({ error: 'QR generation failed.' });
+  }
+});
+
 // -----------------------------------------------------------------------------
 // Phantom (Solana) payment confirmation
 // Verifies the on-chain transfer matches the expected lamports, then credits.
 // -----------------------------------------------------------------------------
-const PHANTOM_MERCHANT = process.env.MERCHANT_SOL || '7VHUFJHWu2CuExkJcJrzhQPJ2oygupTWkL2A2For4BmE';
+const PHANTOM_MERCHANT = process.env.MERCHANT_SOL || '8p47qJgqVaqF6S6jDByyByv7xT2Ayg2P4Y7K59zQyKkW';
 const SOLANA_RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const ETH_RPC = process.env.ETH_RPC_URL || 'https://cloudflare-eth.com';
+const BASE_RPC = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
+const POLYGON_RPC = process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
+const MERCHANT_BTC_ADDR = (process.env.MERCHANT_BTC || 'bc1qvradlsp8n6p2cjcckyhha7r3kf98uuxu9pnkht').toLowerCase();
+const MERCHANT_ETH_ADDR = (process.env.MERCHANT_ETH || '0xA2D4d2691C2ED0d8f48ed2fFd2d4b22f985C4cd5').toLowerCase().replace(/^0x/, '');
+
+// Accepted deposit currencies (module-level so routes + the addresses endpoint share one source of truth).
+const ALLOWED_CRYPTOS = ['BTC', 'ETH', 'BASE', 'POLYGON', 'USDC', 'USDT', 'SOL'];
+
+// Canonical merchant address map per accepted currency.
+// EVM-native currencies (ETH/BASE/POLYGON) share one EVM address; USDT (ERC-20) uses it too.
+// BTC/SOL/USDC are chain-native or token-account addresses (case preserved: base58/bech32).
+const CRYPTO_ADDRESSES = {
+  BTC:     MERCHANT_BTC_ADDR,
+  ETH:     '0x' + MERCHANT_ETH_ADDR,
+  BASE:    '0x' + MERCHANT_ETH_ADDR,
+  POLYGON: '0x' + MERCHANT_ETH_ADDR,
+  USDT:    '0x' + MERCHANT_ETH_ADDR,
+  USDC:    process.env.MERCHANT_USDC || '',
+  SOL:     PHANTOM_MERCHANT
+};
+function chainOf(currency) {
+  switch (currency) {
+    case 'BTC': return 'bitcoin';
+    case 'ETH': return 'ethereum';
+    case 'BASE': return 'base';
+    case 'POLYGON': return 'polygon';
+    case 'USDT': return 'ethereum';
+    case 'USDC': return 'solana';
+    case 'SOL': return 'solana';
+    default: return 'unknown';
+  }
+}
+
+async function solanaGetTransaction(txid) {
+  const rpcRes = await fetch(SOLANA_RPC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      method: 'getTransaction',
+      params: [txid, { encoding: 'json', commitment: 'confirmed' }]
+    })
+  });
+  const rpcData = await rpcRes.json();
+  return { tx: rpcData?.result?.transaction, meta: rpcData?.result?.meta };
+}
+
+function ethCallFactory(rpcUrl) {
+  return async function ethCall(method, params) {
+    const r = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params })
+    });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message);
+    return j.result;
+  };
+}
+
+// Verify a user-submitted on-chain payment against the merchant address for the
+// payment's currency/chain. Returns { verified, received, error }.
+async function verifyCryptoDeposit(payment, txid) {
+  const currency = payment.currency;
+  const expected = parseFloat(payment.amount) || 0;
+  const usdAmount = payment.usdAmount || expected;
+  const merchantAddress = (payment.address || CRYPTO_ADDRESSES[currency] || '').trim();
+  try {
+    if (!merchantAddress) {
+      return { verified: false, error: `Merchant ${currency} address is not configured.` };
+    }
+
+    // ---- Solana: native SOL ----
+    if (currency === 'SOL') {
+      const { tx, meta } = await solanaGetTransaction(txid);
+      if (!tx || !meta || meta.err) return { verified: false, error: 'Solana transaction not found or failed.' };
+      const accountKeys = tx.message?.accountKeys || [];
+      const toIdx = accountKeys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === merchantAddress);
+      if (toIdx === -1) return { verified: false, error: 'Transaction does not credit the merchant Solana wallet.' };
+      const received = (meta.postBalances?.[toIdx] ?? 0) - (meta.preBalances?.[toIdx] ?? 0);
+      if (received <= 0) return { verified: false, error: 'No SOL was received by the merchant wallet.' };
+      if (received < expected * 1e9) return { verified: false, error: 'Received amount is below the required deposit.', received: (received / 1e9) + ' SOL' };
+      return { verified: true, received: (received / 1e9) + ' SOL' };
+    }
+
+    // ---- Solana: SPL token (USDC) — match by token-account owner OR credited account ----
+    if (currency === 'USDC') {
+      const { tx, meta } = await solanaGetTransaction(txid);
+      if (!tx || !meta || meta.err) return { verified: false, error: 'Solana transaction not found or failed.' };
+      const postTok = meta.postTokenBalances || [];
+      const preTok = meta.preTokenBalances || [];
+      let receivedUi = 0;
+      for (const pb of postTok) {
+        const matches = (pb.account && pb.account === merchantAddress) || pb.owner === merchantAddress;
+        if (!matches) continue;
+        const pre = preTok.find(p => p.account === pb.account);
+        const delta = parseFloat(pb.uiAmount || 0) - (pre ? parseFloat(pre.uiAmount || 0) : 0);
+        if (delta > receivedUi) receivedUi = delta;
+      }
+      if (receivedUi <= 0) return { verified: false, error: 'No USDC was received by the merchant address.' };
+      if (receivedUi < expected) return { verified: false, error: 'Received amount is below the required deposit.', received: receivedUi + ' USDC' };
+      return { verified: true, received: receivedUi + ' USDC' };
+    }
+
+    // ---- Bitcoin ----
+    if (currency === 'BTC') {
+      const rpcRes = await fetch('https://mempool.space/api/tx/' + encodeURIComponent(txid));
+      if (!rpcRes.ok) return { verified: false, error: 'Bitcoin transaction not found on the explorer.' };
+      const t = await rpcRes.json();
+      let receivedSats = 0;
+      for (const v of (t.vout || [])) {
+        const a = (v.scriptpubkey_address || v.scriptpubkey_addr || '').toLowerCase();
+        if (a === MERCHANT_BTC_ADDR) {
+          let val = v.value;
+          if (val !== undefined && val < 1) val = Math.round(val * 1e8);
+          receivedSats += (val || 0);
+        }
+      }
+      const expectedSats = Math.round(expected * 1e8);
+      if (receivedSats <= 0) return { verified: false, error: 'No BTC was received by the merchant address.' };
+      if (receivedSats < expectedSats) return { verified: false, error: 'Received amount is below the required deposit.', received: (receivedSats / 1e8) + ' BTC' };
+      return { verified: true, received: (receivedSats / 1e8) + ' BTC' };
+    }
+
+    // ---- EVM chains: native ETH / BASE / POLYGON, or ERC-20 USDT ----
+    if (currency === 'ETH' || currency === 'BASE' || currency === 'POLYGON' || currency === 'USDT') {
+      const rpcUrl = currency === 'BASE' ? BASE_RPC : currency === 'POLYGON' ? POLYGON_RPC : ETH_RPC;
+      const eth = ethCallFactory(rpcUrl);
+      const tx = await eth('eth_getTransactionByHash', [txid]);
+      if (!tx) return { verified: false, error: currency + ' transaction not found.' };
+      const receipt = await eth('eth_getTransactionReceipt', [txid]);
+      if (!receipt) return { verified: false, error: 'Transaction receipt not found.' };
+      if (receipt.status === '0x0') return { verified: false, error: 'Transaction failed on-chain.' };
+
+      const fullEth = '0x' + MERCHANT_ETH_ADDR;
+      // Native coin transfer (ETH / BASE / POLYGON)
+      if (currency !== 'USDT' && tx.to && tx.to.toLowerCase() === fullEth) {
+        const expectedWei = BigInt(Math.round(expected * 1e18));
+        const val = BigInt(tx.value || '0x0');
+        if (val >= expectedWei) return { verified: true, received: (Number(val) / 1e18) + ' ' + currency };
+        return { verified: false, error: 'Received ' + currency + ' amount is below the required deposit.', received: (Number(val) / 1e18) + ' ' + currency };
+      }
+      // ERC-20 token transfer (USDT) credited to the merchant
+      const expectedToken = BigInt(Math.round(usdAmount * 1e6));
+      const padAddr = '0x' + MERCHANT_ETH_ADDR.padStart(64, '0');
+      let tokenIn = 0n;
+      for (const log of (receipt.logs || [])) {
+        if (log.topics && log.topics.length >= 3 && log.topics[2] && log.topics[2].toLowerCase() === padAddr) {
+          const d = BigInt(log.data || '0x0');
+          if (d > tokenIn) tokenIn = d;
+        }
+      }
+      if (tokenIn > 0n) {
+        if (tokenIn < expectedToken) return { verified: false, error: 'Received amount is below the required deposit.', received: (Number(tokenIn) / 1e6) + ' ' + currency };
+        return { verified: true, received: (Number(tokenIn) / 1e6) + ' ' + currency };
+      }
+      return { verified: false, error: 'No ' + currency + ' was received by the merchant address.' };
+    }
+
+    return { verified: false, error: 'No on-chain verification path configured for ' + currency + '.' };
+  } catch (e) {
+    console.warn('[Crypto Verify] ' + currency + ' lookup failed:', e.message);
+    return { verified: false, error: 'Could not verify the deposit on-chain for ' + currency + '. Please retry or use the processor confirmation flow.' };
+  }
+}
+
 
 app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdiction, async (req, res) => {
   const user = users.get(req.user.id);
@@ -1973,8 +2168,8 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
       const meta = rpcData?.result?.meta;
       if (tx && meta && !meta.err) {
         const accountKeys = tx.message?.accountKeys || [];
-        const fromIdx = accountKeys.findIndex(k => (typeof p === 'string' ? k : k.pubkey) === fromAddress);
-        const toIdx = accountKeys.findIndex(k => (typeof p === 'string' ? k : k.pubkey) === PHANTOM_MERCHANT);
+        const fromIdx = accountKeys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === fromAddress);
+        const toIdx = accountKeys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === PHANTOM_MERCHANT);
         if (fromIdx !== -1 && toIdx !== -1) {
           const pre = meta.preBalances?.[fromIdx] ?? 0;
           const post = meta.postBalances?.[fromIdx] ?? 0;
@@ -1990,7 +2185,7 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
       console.warn('[Phantom] on-chain verification RPC error:', e.message);
     }
 
-    if (!verified && process.env.NODE_ENV === 'production') {
+    if (!verified) {
       return res.status(400).json({ error: 'On-chain payment could not be verified. Please contact support.' });
     }
 
@@ -3092,8 +3287,9 @@ app.get('/bonus', (req, res) => res.type('html').send(renderPage('bonus')));
 app.get('/challenges', (req, res) => res.type('html').send(renderPage('challenges')));
 app.get('/rakeback', (req, res) => res.type('html').send(renderPage('rakeback')));
 
-// SPA fallback: serve index.html for all non-API routes
-app.get('*', (req, res) => {
+// SPA fallback: serve index.html for all non-API routes (exclude /api/ so unknown
+// API endpoints fall through to the JSON 404 handler below)
+app.get(/^\/(?!api\/).*$/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -3111,6 +3307,15 @@ app.use((req, res) => {
 if (process.env.VERCEL) {
   module.exports = app;
 } else {
+  // Fail fast and clearly instead of throwing an uncaught fatal error (e.g. EADDRINUSE).
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Server]: Port ${PORT} is already in use. Another server instance may be running. Exiting.`);
+    } else {
+      console.error('[Server]: Failed to start:', err.message);
+    }
+    process.exit(1);
+  });
   server.listen(PORT, () => {
     console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
   });

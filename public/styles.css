@@ -99,6 +99,25 @@
   --rarity-rare: #3b82f6;
   --rarity-epic: #a855f7;
   --rarity-legendary: #f59e0b;
+
+  /* Compatibility aliases (UI components reference these legacy tokens) */
+  --bg-primary: var(--bg-darker);
+  --bg-secondary: var(--bg-dark);
+  --bg-tertiary: var(--bg-card);
+  --bg-glass: var(--glass-bg);
+  --border-default: var(--border-color);
+  --border-strong: var(--border-hover);
+  --border-subtle: var(--glass-border);
+  --gradient-button: var(--gradient-primary);
+  --shadow-glow: 0 0 20px var(--accent-green-glow);
+  --accent-pink: #ec4899;
+  --accent-red-light: #ff6b8b;
+  --content-max-width: 1200px;
+  --space-sm: 4px;
+  --space-md: 8px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 40px;
 }
 
 /* ==========================================================================
@@ -193,7 +212,7 @@ body.dark-theme::before {
   z-index: 1000;
   width: 100%;
   gap: 8px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .navbar::after {
@@ -615,10 +634,10 @@ opacity: 0.5;
   top: calc(100% + 12px);
   right: 0;
   min-width: 260px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--glass-bg, rgba(10, 22, 40, 0.92));
+  border: 1px solid var(--glass-border, #243542);
   border-radius: 14px;
-  box-shadow: var(--shadow-xl);
+  box-shadow: var(--shadow-xl, 0 4px 24px rgba(0, 255, 65, 0.18));
   z-index: 1100;
   overflow: hidden;
   backdrop-filter: blur(20px);
@@ -9525,4 +9544,94 @@ opacity: 0.5;
 .crypto-phantom-inline { text-align: center; margin-top: 6px; }
 .crypto-success-state .reward-num { font-size: 1.2rem; }
 .crypto-payment-loading { text-align: center; padding: 32px 12px; }
+
+/* ==========================================================================
+   RESPONSIVE / MOBILE-FIRST — checkout, coin store, crypto panel, layout
+   ========================================================================== */
+@media (max-width: 768px) {
+  .modal-backdrop {
+    align-items: flex-start;
+    padding: 12px;
+    padding-top: 16px;
+    overflow-y: auto;
+  }
+
+  .modal-box,
+  .store-modal,
+  .redeem-modal,
+  .auth-modal,
+  .pf-modal {
+    max-width: 100% !important;
+    width: 100% !important;
+    max-height: calc(100dvh - 24px) !important;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .modal-box { padding: 16px; }
+  .checkout-section,
+  .store-modal { max-height: calc(100dvh - 24px); }
+
+  .checkout-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .checkout-summary-panel {
+    position: sticky;
+    top: 0;
+    order: -1;
+    padding-bottom: 12px;
+  }
+
+  .crypto-options {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px;
+  }
+  .crypto-options .crypto-btn { font-size: 0.78rem; padding: 10px 6px; }
+
+  .crypto-qr-img {
+    max-width: 180px;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 6px;
+    background: #fff;
+  }
+
+  .package-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .featured-scroll { grid-template-columns: 1fr; }
+
+  .games-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .game-card-icon-wrapper { width: 44px; height: 44px; font-size: 1.5rem; }
+
+  .hero-section { padding: 20px 14px; min-height: 130px; grid-template-columns: 1fr; text-align: center; }
+  .hero-visual { position: relative; height: 110px; }
+  .hero-title { font-size: 1.6rem; }
+
+  .content-stage { padding: 16px 12px 80px; }
+  .sidebar { position: fixed; top: 0; left: 0; bottom: 0; height: 100dvh; max-height: 100dvh; z-index: 1100; margin: 0; transform: translateX(-100%); transition: transform 0.3s ease; max-width: 280px; width: 280px; }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 1050; }
+  .main-layout .sidebar.open ~ .sidebar-overlay { display: block; }
+  .sidebar-toggle-btn { display: inline-flex; }
+
+  .bets-sidebar { display: none; }
+  .game-result-feed-container { display: none; }
+}
+
+/* Touch targets for checkout + crypto + nav buttons (mobile-friendly). */
+.crypto-btn { min-height: 48px; }
+.payment-method-btn { min-height: 44px; }
+.btn-checkout,
+.btn-hero-spin,
+.btn-hero-secondary { min-height: 44px; }
 

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#05070a">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Stake Originals">
   <meta name="description" content="Provably fair social casino with original games, daily rewards, and sweepstakes prizes.">
@@ -22,7 +23,7 @@
   <!-- TOP NAVIGATION BAR -->
   <header class="navbar">
     <div class="navbar-left">
-      <button class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle Sidebar">
+      <button class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle Sidebar" onclick="toggleMainSidebar()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
       </button>
       <div class="brand" onclick="showLobby()">
@@ -246,7 +247,7 @@
         </div>
       </div>
     </aside>
-    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleMainSidebar()"></div>
 
     <!-- CENTER CONTENT STAGE -->
     <main class="content-stage">
@@ -883,15 +884,25 @@
                   <span class="crypto-name">Ethereum</span>
                   <span class="crypto-symbol">ETH</span>
                 </button>
+                <button class="crypto-btn" onclick="selectCrypto('BASE')">
+                  <span class="crypto-icon">🔷</span>
+                  <span class="crypto-name">Base</span>
+                  <span class="crypto-symbol">BASE</span>
+                </button>
+                <button class="crypto-btn" onclick="selectCrypto('POLYGON')">
+                  <span class="crypto-icon">⬟</span>
+                  <span class="crypto-name">Polygon</span>
+                  <span class="crypto-symbol">POLYGON</span>
+                </button>
                 <button class="crypto-btn" onclick="selectCrypto('USDT')">
                   <span class="crypto-icon">₮</span>
                   <span class="crypto-name">Tether</span>
                   <span class="crypto-symbol">USDT</span>
                 </button>
-                <button class="crypto-btn" onclick="selectCrypto('LTC')">
-                  <span class="crypto-icon">Ł</span>
-                  <span class="crypto-name">Litecoin</span>
-                  <span class="crypto-symbol">LTC</span>
+                <button class="crypto-btn" onclick="selectCrypto('USDC')">
+                  <span class="crypto-icon">$</span>
+                  <span class="crypto-name">USD Coin</span>
+                  <span class="crypto-symbol">USDC</span>
                 </button>
                 <button class="crypto-btn" onclick="selectCrypto('SOL')">
                   <span class="crypto-icon">◎</span>
