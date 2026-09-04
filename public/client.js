@@ -168,14 +168,11 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
         state.authRecoveryInFlight = true;
         localStorage.removeItem('casino_token');
         localStorage.removeItem('casino_username');
-        try {
-          await initSession();
-        } finally {
-          state.authRecoveryInFlight = false;
-        }
-        const expired = new Error('Session expired. Re-authenticated.');
+        openAuthModal();
+        const expired = new Error('Session expired. Please log in again.');
         expired.code = 'AUTH_EXPIRED';
         expired.status = 401;
+        state.authRecoveryInFlight = false;
         throw expired;
       }
     }
@@ -224,7 +221,7 @@ async function detectGeoLocation() {
   }
 }
 
-async function initSession() {
+async function initSession(autoGuest = true) {
   const ageConfirmed = localStorage.getItem('casino_age_confirmed') === 'true';
   if (!ageConfirmed) {
     document.getElementById('modal-agegate')?.classList.remove('hidden');
@@ -236,7 +233,11 @@ async function initSession() {
   let token = localStorage.getItem('casino_token');
 
   if (!token) {
-    await continueAsGuest();
+    if (autoGuest) {
+      await continueAsGuest();
+    } else {
+      openAuthModal();
+    }
     return;
   }
 
@@ -250,16 +251,20 @@ async function initSession() {
       showGeoRestrictionModal(err);
       return;
     }
-    // Explicit auth/user rejection -> fall back to a guest.
     if (err && (err.status === 401 || err.status === 403 || err.status === 404)) {
-      console.warn('[Auth failure]: Token rejected (HTTP ' + err.status + '), falling back to guest.', err.message);
-      localStorage.removeItem('casino_token');
-      localStorage.removeItem('casino_username');
-      await continueAsGuest();
+      if (autoGuest) {
+        console.warn('[Auth failure]: Token rejected (HTTP ' + err.status + '), falling back to guest.', err.message);
+        localStorage.removeItem('casino_token');
+        localStorage.removeItem('casino_username');
+        await continueAsGuest();
+      } else {
+        console.warn('[Auth failure]: Token rejected (HTTP ' + err.status + '), clearing.', err.message);
+        localStorage.removeItem('casino_token');
+        localStorage.removeItem('casino_username');
+        openAuthModal();
+      }
       return;
     }
-    // Transient/network error (e.g. the server is restarting) -> KEEP the token so
-    // a logged-in real account is not silently demoted to a guest account.
     console.warn('[Auth]: Transient /api/user/me error, keeping session token:', (err && err.message) || err);
     return;
   }
@@ -750,11 +755,51 @@ function setCheckoutStep(step) {
   });
 }
 
+// --- Smooth panel transition helpers ---
+var PANEL_TRANSITION_MS = 250;
+
+function _showPanel(panel) {
+  if (!panel) return;
+  if (!panel.classList.contains('hidden') && !panel.classList.contains('exiting')) {
+    return;
+  }
+  panel.classList.remove('hidden', 'exiting');
+  panel.style.opacity = '0';
+  panel.offsetHeight;
+  panel.style.opacity = '1';
+  setTimeout(function () {
+    panel.style.opacity = '';
+  }, PANEL_TRANSITION_MS);
+}
+
+function _hidePanel(panel, callback) {
+  if (!panel) { if (callback) callback(); return; }
+  if (panel.classList.contains('hidden')) { if (callback) callback(); return; }
+  panel.style.opacity = '';
+  panel.classList.remove('hidden');
+  panel.classList.add('exiting');
+  var done = false;
+  var finish = function () {
+    if (done) return;
+    done = true;
+    panel.classList.add('hidden');
+    panel.classList.remove('exiting');
+    panel.removeEventListener('transitionend', onEnd);
+    if (callback) callback();
+  };
+  var onEnd = function (e) {
+    if (e.propertyName !== 'opacity') return;
+    finish();
+  };
+  panel.addEventListener('transitionend', onEnd);
+  setTimeout(finish, PANEL_TRANSITION_MS + 100);
+}
+
 function hideProcessingPanel() {
   const panel = document.getElementById('payment-processing');
   const cardPanel = document.getElementById('payment-card');
-  if (panel) panel.classList.add('hidden');
-  if (cardPanel) cardPanel.classList.remove('hidden');
+  if (panel) { panel.classList.add('hidden'); panel.classList.remove('exiting'); panel.style.opacity = ''; }
+  if (cardPanel) { cardPanel.classList.remove('hidden', 'exiting'); cardPanel.style.opacity = ''; }
   const loadingState = document.getElementById('checkout-loading-state');
   if (loadingState) loadingState.classList.add('hidden');
   const container = document.getElementById('stripe-checkout-container');
@@ -765,8 +810,8 @@ function showProcessingPanel() {
   const panel = document.getElementById('payment-processing');
   const cardPanel = document.getElementById('payment-card');
   const successSection = document.getElementById('checkout-success');
-  if (panel) panel.classList.remove('hidden');
-  if (cardPanel) cardPanel.classList.add('hidden');
+  if (panel) { panel.classList.remove('hidden'); _showPanel(panel); }
+  if (cardPanel) { cardPanel.classList.add('hidden'); cardPanel.classList.remove('exiting'); cardPanel.style.opacity = ''; }
   if (successSection) successSection.classList.add('hidden');
   const fill = document.getElementById('progress-bar-fill');
   if (fill) fill.style.width = '0%';
@@ -808,16 +853,25 @@ function hideCheckoutSections() {
 
 function resetStoreModal() {
   state.lastPackageId = null;
+  state.selectedPaymentMethod = null;
   setCheckoutStep(1);
   hideProcessingPanel();
-  const pkgList = document.getElementById('package-selection');
-  const summary = document.getElementById('package-summary');
-  const checkoutSection = document.getElementById('checkout-section');
-  const successSection = document.getElementById('checkout-success');
+  var pkgList = document.getElementById('package-selection');
+  var summary = document.getElementById('package-summary');
+  var checkoutSection = document.getElementById('checkout-section');
+  var successSection = document.getElementById('checkout-success');
+  var cardPanel = document.getElementById('payment-card');
+  var cryptoPanel = document.getElementById('payment-crypto');
+  var procPanel = document.getElementById('payment-processing');
   if (pkgList) pkgList.classList.remove('hidden');
   if (summary) summary.classList.add('hidden');
   if (checkoutSection) checkoutSection.classList.add('hidden');
   if (successSection) successSection.classList.add('hidden');
+  if (cardPanel) { cardPanel.classList.remove('hidden', 'exiting'); cardPanel.style.opacity = ''; }
+  if (cryptoPanel) cryptoPanel.classList.add('hidden');
+  if (procPanel) procPanel.classList.add('hidden');
+  document.querySelectorAll('.payment-method-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelector('.payment-method-btn[data-method="card"]')?.classList.add('active');
   document.querySelectorAll('.package-card').forEach(c => c.classList.remove('selected'));
   if (state.activeCheckoutInstance) {
     try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
@@ -858,7 +912,6 @@ async function proceedToCheckout() {
   if (checkoutSection) checkoutSection.classList.remove('hidden');
 
   updateCheckoutSummary(packageId);
-  state.selectedPaymentMethod = 'card';
   selectPaymentMethod('card');
 
   try {
@@ -930,12 +983,13 @@ async function loadStripeCheckout(packageId) {
     // "preparing payment gateway" overlay so the card screen is actually visible.
     stopProgress();
     setCheckoutStep(2);
-    const procPanel = document.getElementById('payment-processing');
-    if (procPanel) procPanel.classList.add('hidden');
-    const cardPanel = document.getElementById('payment-card');
-    if (cardPanel) cardPanel.classList.remove('hidden');
-    const loadingState = document.getElementById('checkout-loading-state');
+    var procPanel = document.getElementById('payment-processing');
+    var cardPanel = document.getElementById('payment-card');
+    var loadingState = document.getElementById('checkout-loading-state');
     if (loadingState) loadingState.classList.add('hidden');
+    _hidePanel(procPanel, function () {
+      _showPanel(cardPanel);
+    });
   } catch (err) {
     stopProgress();
     hideProcessingPanel();
@@ -944,21 +998,40 @@ async function loadStripeCheckout(packageId) {
 }
 
 function selectPaymentMethod(method) {
+  if (state.selectedPaymentMethod === method) return;
+
+  const oldMethod = state.selectedPaymentMethod;
   state.selectedPaymentMethod = method;
+
   document.querySelectorAll('.payment-method-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.method === method);
   });
-  document.querySelectorAll('.payment-panel').forEach(panel => panel.classList.add('hidden'));
+
+  const cardPanel = document.getElementById('payment-card');
+  const cryptoPanel = document.getElementById('payment-crypto');
+  if (!cardPanel || !cryptoPanel) return;
+
+  // Destroy any existing Stripe checkout instance and clear the container
   if (state.activeCheckoutInstance) {
     try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
     state.activeCheckoutInstance = null;
   }
   const container = document.getElementById('stripe-checkout-container');
   if (container) container.innerHTML = '';
-  const cardPanel = document.getElementById('payment-card');
-  const cryptoPanel = document.getElementById('payment-crypto');
-  if (method === 'card' && cardPanel) cardPanel.classList.remove('hidden');
-  if (method === 'crypto' && cryptoPanel) cryptoPanel.classList.remove('hidden');
+
+  const oldPanel = oldMethod === 'card' ? cardPanel : cryptoPanel;
+  const newPanel = method === 'card' ? cardPanel : cryptoPanel;
+
+  if (!oldMethod) {
+    // First selection — just show the new panel
+    _showPanel(newPanel);
+    return;
+  }
+
+  // Animate: fade out old panel, then fade in new panel
+  _hidePanel(oldPanel, function () {
+    _showPanel(newPanel);
+  });
 }
 
 function selectCrypto(currency) {
@@ -1282,20 +1355,22 @@ async function payWithPhantom() {
 
 function backToPackages() {
   playSound('click');
-  const pkgList = document.getElementById('package-selection');
-  const summary = document.getElementById('package-summary');
-  const checkoutSection = document.getElementById('checkout-section');
+  var pkgList = document.getElementById('package-selection');
+  var summary = document.getElementById('package-summary');
+  var checkoutSection = document.getElementById('checkout-section');
+  var successSection = document.getElementById('checkout-success');
+  var procPanel = document.getElementById('payment-processing');
   if (checkoutSection) checkoutSection.classList.add('hidden');
+  if (successSection) successSection.classList.add('hidden');
+  if (procPanel) procPanel.classList.add('hidden');
   if (pkgList) pkgList.classList.remove('hidden');
   if (state.lastPackageId && summary) summary.classList.remove('hidden');
   if (state.activeCheckoutInstance) {
     try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
     state.activeCheckoutInstance = null;
   }
-  const container = document.getElementById('stripe-checkout-container');
-  if (container) {
-    container.innerHTML = '';
-  }
+  var container = document.getElementById('stripe-checkout-container');
+  if (container) container.innerHTML = '';
 }
 
 function showPackageList() {
@@ -4570,8 +4645,13 @@ async function submitRegister() {
 }
 
 async function continueAsGuest() {
-  if (state.profile && state.profile.isGuest && localStorage.getItem('casino_token')) {
+  const existingToken = localStorage.getItem('casino_token');
+  if (existingToken && state.profile && state.profile.isGuest) {
     return;
+  }
+  if (existingToken) {
+    localStorage.removeItem('casino_token');
+    localStorage.removeItem('casino_username');
   }
   try {
     const refCode = new URLSearchParams(window.location.search).get('ref');
@@ -4593,6 +4673,8 @@ async function continueAsGuest() {
       return;
     }
     console.warn('[Guest Fallback]:', err.message);
+    openAuthModal();
+    return;
   }
   closeAuthModal();
   await initSessionFromToken();
@@ -4618,6 +4700,8 @@ async function initSessionFromToken() {
       console.warn('[initSessionFromToken]: Token rejected (HTTP ' + err.status + '), clearing.', err.message);
       localStorage.removeItem('casino_token');
       localStorage.removeItem('casino_username');
+      openAuthModal();
+      return;
     } else {
       console.warn('[initSessionFromToken]: Transient error, keeping token:', (err && err.message) || err);
     }

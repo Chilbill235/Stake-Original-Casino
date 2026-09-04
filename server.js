@@ -10,6 +10,7 @@ const fs = require('fs');
 const cors = require('cors');
 
 const db = require('./database');
+const { verifyToken } = require('./middleware/auth');
 
 // -----------------------------------------------------------------------------
 // 1. CONFIGURATION & CONSTANTS
@@ -93,6 +94,10 @@ const COIN_PACKAGES = {
   'pack_50': { name: '55,000 GC + 55 Free SC', priceInCents: 4999, gcAmount: 55000, scAmount: 55 },
   'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 9999, gcAmount: 100000, scAmount: 105 }
 };
+
+function isGuestUser(user) {
+  return !!(user.isGuest || (user.email && user.email.endsWith('@guest.casino')));
+}
 
 // -----------------------------------------------------------------------------
 // 2. IN-MEMORY DATA STORES
@@ -814,18 +819,6 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
   res.json({ success: true, message: 'Password reset successfully.' });
 });
-
-function verifyToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Authentication token required.' });
-
-  jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid or expired session token.' });
-    req.user = user;
-    next();
-  });
-}
 
 // -----------------------------------------------------------------------------
 // 7. WEBSOCKET SERVER & HEARTBEAT
@@ -1687,7 +1680,7 @@ app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, re
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const guestPaymentsAllowed = process.env.ALLOW_GUEST_PAYMENTS === 'true';
-  if (!guestPaymentsAllowed && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
+  if (!guestPaymentsAllowed && isGuestUser(user)) {
     return res.status(403).json({
       error: 'Guest accounts cannot purchase coins. Please register a real account first.',
       requiresAccount: true
@@ -1770,7 +1763,7 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
-  if (!guestOk && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
+  if (!guestOk && isGuestUser(user)) {
     return res.status(403).json({ error: 'Guest accounts cannot purchase coins. Please register a real account first.', requiresAccount: true });
   }
 
@@ -1827,7 +1820,7 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
   const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
-  if (!guestOk && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
+  if (!guestOk && isGuestUser(user)) {
     return res.status(403).json({ error: 'Guest accounts cannot purchase coins.', requiresAccount: true });
   }
 
@@ -2133,7 +2126,7 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
-  if (!guestOk && (user.isGuest || (user.email && user.email.endsWith('@guest.casino')))) {
+  if (!guestOk && isGuestUser(user)) {
     return res.status(403).json({ error: 'Guest accounts cannot purchase coins.', requiresAccount: true });
   }
 

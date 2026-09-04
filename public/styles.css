@@ -2858,7 +2858,7 @@ opacity: 0.5;
 
   .package-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
     margin-bottom: 24px;
   }
@@ -2895,7 +2895,8 @@ opacity: 0.5;
 
 .package-card.selected {
   border-color: var(--accent-green);
-  box-shadow: 0 0 0 2px var(--accent-green), var(--shadow-lg), 0 0 20px var(--accent-green-glow);
+  box-shadow: 0 0 0 2px var(--accent-green), var(--shadow-lg), 0 0 24px var(--accent-green-glow);
+  animation: pulse-glow 2.5s ease-in-out 2;
 }
 
 .package-card.featured {
@@ -2980,9 +2981,9 @@ opacity: 0.5;
 
 .btn-select-package {
   width: 100%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
+  background: var(--gradient-primary);
+  border: none;
+  color: #000;
   padding: 10px;
   border-radius: var(--radius-sm);
   font-weight: 700;
@@ -2992,23 +2993,19 @@ opacity: 0.5;
 }
 
 .btn-select-package:hover {
-  background: var(--accent-green);
-  color: #000;
-  border-color: var(--accent-green);
+  filter: brightness(1.1);
+  transform: translateY(-1px);
 }
 
 .btn-select-featured {
-  background: var(--gradient-gold);
+  background: var(--gradient-primary);
   color: #000;
   border: none;
 }
 
 .btn-select-featured:hover {
-  background: var(--gradient-gold);
-  color: #000;
-  border-color: transparent;
-  transform: scale(1.02);
-  box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
+  filter: brightness(1.1);
+  transform: scale(1.03);
 }
 
 .package-badge {
@@ -6239,758 +6236,6 @@ opacity: 0.5;
 }
 
 /* ==========================================================================
-   13. PACKAGE CARD (CONTINUED)
-   ========================================================================== */
-.package-price {
-  font-size: 1.2rem;
-  font-weight: 800;
-  color: var(--text-primary);
-}
-
-.package-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-.package-coins {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.coin-icon {
-  font-size: 1.3rem;
-}
-
-.coin-amount {
-  font-size: 1rem;
-  font-weight: 800;
-  color: var(--text-primary);
-}
-
-.coin-label {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.package-bonus {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: rgba(16, 185, 129, 0.08);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(16, 185, 129, 0.2);
-}
-
-.bonus-icon {
-  font-size: 0.9rem;
-}
-
-.bonus-text {
-  font-size: 0.75rem;
-  color: var(--accent-green);
-  font-weight: 700;
-}
-
-.btn-select-package {
-  width: 100%;
-  padding: 8px 16px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  font-weight: 700;
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: var(--transition-fast);
-}
-
-.btn-select-package:hover {
-  background: var(--accent-green);
-  color: #000;
-  border-color: var(--accent-green);
-}
-
-.btn-select-featured {
-  background: var(--gradient-gold);
-  color: #000;
-  border: none;
-}
-
-.btn-select-featured:hover {
-  background: var(--gradient-gold);
-  color: #000;
-  border-color: transparent;
-}
-
-.package-badge {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: var(--accent-red);
-  color: #fff;
-  font-size: 0.6rem;
-  font-weight: 800;
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  letter-spacing: 0.3px;
-  z-index: 1;
-}
-
-.package-badge.best-value {
-  background: var(--gradient-gold);
-  color: #000;
-}
-
-/* Order Summary */
-.order-summary {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  padding: var(--space-xl);
-  margin-top: var(--space-xl);
-}
-
-.summary-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--space-lg);
-}
-
-.summary-header h4 {
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.btn-change {
-  background: transparent;
-  border: 1px solid var(--border-default);
-  color: var(--text-secondary);
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition-fast);
-}
-
-.btn-change:hover {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border-color: var(--accent-green);
-}
-
-.summary-items {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: var(--space-lg);
-}
-
-.summary-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.summary-label {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.summary-value {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.gc-val {
-  color: var(--accent-gold);
-}
-
-.sc-val {
-  color: var(--accent-green);
-}
-
-.summary-total {
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 10px;
-  margin-top: 4px;
-}
-
-.summary-total .summary-label {
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-.summary-total .summary-value {
-  font-size: 1.1rem;
-  color: var(--accent-green);
-}
-
-.summary-security {
-  display: flex;
-  gap: var(--space-lg);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-lg);
-}
-
-.security-item {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-.btn-checkout {
-  width: 100%;
-  padding: 12px;
-  background: var(--gradient-button);
-  color: #000;
-  border: none;
-  border-radius: var(--radius-md);
-  font-weight: 800;
-  font-size: 0.95rem;
-  cursor: pointer;
-  transition: var(--transition-fast);
-}
-
-.btn-checkout:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-glow);
-}
-
-/* Checkout Section */
-/* Premium Checkout Layout */
-.checkout-section {
-  margin-top: 20px;
-  border-top: 1px solid var(--glass-border);
-  padding-top: 20px;
-}
-
-.checkout-layout {
-  display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 24px;
-  align-items: start;
-}
-
-.checkout-summary-panel {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  position: sticky;
-  top: 20px;
-}
-
-.checkout-summary-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.checkout-summary-header h3 {
-  font-size: 1.1rem;
-  font-weight: 800;
-  margin: 0;
-}
-
-.checkout-package-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  margin-bottom: 20px;
-}
-
-.checkout-package-icon {
-  font-size: 2rem;
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
-}
-
-.checkout-package-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.checkout-package-name {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: var(--text-primary);
-  margin-bottom: 2px;
-}
-
-.checkout-package-desc {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.checkout-package-price {
-  font-weight: 800;
-  font-size: 1.1rem;
-  color: var(--accent-green);
-  font-variant-numeric: tabular-nums;
-}
-
-.checkout-summary-details {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.checkout-summary-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
-
-.checkout-summary-row span:last-child {
-  font-weight: 700;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.checkout-summary-total {
-  padding-top: 12px;
-  border-top: 1px solid var(--border-default);
-  margin-top: 4px;
-  font-size: 1rem;
-  color: var(--text-primary);
-}
-
-.checkout-summary-total span:first-child {
-  font-weight: 700;
-}
-
-.checkout-trust-badges {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.trust-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-.trust-icon {
-  font-size: 1rem;
-}
-
-/* Payment Panel */
-.checkout-payment-panel {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-}
-
-.checkout-payment-header {
-  margin-bottom: 20px;
-}
-
-.checkout-payment-header h3 {
-  font-size: 1.1rem;
-  font-weight: 800;
-  margin: 0;
-}
-
-.checkout-methods {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.payment-method-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 20px 16px;
-  background: var(--bg-tertiary);
-  border: 2px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: var(--transition-normal);
-  position: relative;
-}
-
-.payment-method-btn:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-}
-
-.payment-method-btn.active {
-  border-color: var(--accent-green);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
-}
-
-.payment-method-icon {
-  font-size: 2rem;
-}
-
-.payment-method-name {
-  font-weight: 700;
-  font-size: 0.9rem;
-}
-
-.payment-method-badge {
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  background: var(--accent-green);
-  color: #000;
-}
-
-.payment-method-badge.crypto-badge {
-  background: var(--accent-gold);
-  color: #000;
-}
-
-/* Payment Panels */
-.payment-panel {
-  animation: fadeIn 0.3s ease-out;
-}
-
-.crypto-options {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.crypto-btn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 16px;
-  background: var(--bg-tertiary);
-  border: 2px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: var(--transition-normal);
-}
-
-.crypto-btn:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-}
-
-.crypto-icon {
-  font-size: 1.5rem;
-  width: 32px;
-  text-align: center;
-}
-
-.crypto-name {
-  font-weight: 700;
-  font-size: 0.85rem;
-}
-
-.crypto-symbol {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-.crypto-details {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  animation: fadeIn 0.3s ease-out;
-}
-
-.crypto-qr-placeholder {
-  text-align: center;
-  padding: 24px;
-  background: var(--bg-card);
-  border-radius: var(--radius-md);
-  border: 1px dashed var(--border-default);
-  margin-bottom: 20px;
-}
-
-.crypto-qr-icon {
-  font-size: 3rem;
-  margin-bottom: 8px;
-}
-
-.crypto-qr-placeholder p {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  margin: 0;
-}
-
-.crypto-address-box,
-.crypto-amount-box {
-  margin-bottom: 16px;
-}
-
-.crypto-address-box label,
-.crypto-amount-box label {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-
-.crypto-address-row,
-.crypto-amount-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.crypto-address-row code,
-.crypto-amount-row span {
-  flex: 1;
-  padding: 12px 16px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  font-size: 0.85rem;
-  color: var(--text-primary);
-  font-family: 'SF Mono', Monaco, monospace;
-  word-break: break-all;
-}
-
-.btn-copy {
-  padding: 10px 16px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: var(--transition-fast);
-  white-space: nowrap;
-}
-
-.btn-copy:hover {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  border-color: var(--accent-green);
-}
-
-.crypto-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 16px;
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: var(--radius-md);
-  margin-bottom: 20px;
-}
-
-.crypto-notice .notice-icon {
-  font-size: 1.1rem;
-  flex-shrink: 0;
-}
-
-.crypto-notice span {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  line-height: 1.4;
-}
-
-.btn-crypto-pay {
-  width: 100%;
-  padding: 14px 24px;
-  background: linear-gradient(135deg, var(--accent-gold), #ff8b20);
-  border: none;
-  border-radius: var(--radius-md);
-  color: #000;
-  font-size: 0.95rem;
-  font-weight: 800;
-  cursor: pointer;
-  transition: var(--transition-normal);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.btn-crypto-pay:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(255, 215, 0, 0.3);
-}
-
-/* Phantom (Solana) wallet button */
-.crypto-phantom-block {
-  margin: 16px 0;
-  padding: 14px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(154,124,247,0.08), rgba(20,241,149,0.08));
-  border: 1px solid rgba(154,124,247,0.3);
-}
-
-.btn-phantom-pay {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 14px 20px;
-  background: linear-gradient(135deg, #ab9ff2 0%, #14f195 100%);
-  color: #1a0d33;
-  border: none;
-  border-radius: 999px;
-  font-weight: 900;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 6px 20px rgba(154,124,247,0.35);
-}
-
-.btn-phantom-pay:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 28px rgba(154,124,247,0.5);
-}
-
-.btn-phantom-pay .phantom-icon {
-  font-size: 1.2rem;
-}
-
-.phantom-hint {
-  margin: 10px 0 0;
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-  text-align: center;
-  line-height: 1.4;
-}
-
-/* Checkout Loading */
-.checkout-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-}
-
-.checkout-spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid var(--glass-border);
-  border-top-color: var(--accent-green);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.checkout-loading-text {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 4px;
-}
-
-.checkout-loading-sub {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-/* Success Section */
-.checkout-success {
-  text-align: center;
-  padding: 40px 20px;
-  animation: fadeIn 0.4s ease-out;
-}
-
-.success-title {
-  color: var(--accent-green);
-  font-weight: 800;
-  margin-bottom: 6px;
-  font-size: 1.4rem;
-}
-
-.success-subtext {
-  color: var(--text-secondary);
-  font-size: 0.95rem;
-  margin-top: 8px;
-}
-
-.success-details {
-  margin-top: 20px;
-  padding: 20px;
-  background: var(--bg-darker);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--glass-border);
-  display: inline-block;
-  min-width: 280px;
-}
-
-/* Responsive Checkout */
-@media (max-width: 900px) {
-  .checkout-layout {
-    grid-template-columns: 1fr;
-    gap: 20px;
-  }
-
-  .checkout-summary-panel {
-    position: static;
-    padding: 20px;
-  }
-
-  .checkout-payment-panel {
-    padding: 20px;
-  }
-
-  .checkout-methods {
-    flex-direction: column;
-  }
-
-  .payment-method-btn {
-    padding: 16px 12px;
-  }
-
-  .crypto-options {
-    grid-template-columns: 1fr;
-  }
-
-  .crypto-details {
-    padding: 20px;
-  }
-}
-
-/* ==========================================================================
    14. ACCOUNT CONTENT (cards / lists / KYC / transactions)
    ========================================================================== */
 .account-page {
@@ -9246,11 +8491,16 @@ opacity: 0.5;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
-.checkout-payment-header h3 { margin: 0 0 16px; font-size: 1.05rem; }
+.checkout-payment-header h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.checkout-payment-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
+}
 .checkout-methods {
   display: flex;
   gap: 12px;
-  flex-direction: column;
+  flex-direction: row;
   margin-bottom: 18px;
 }
 .payment-method-btn {
@@ -9279,6 +8529,10 @@ opacity: 0.5;
   box-shadow: 0 0 16px rgba(0,231,1,0.25);
 }
 .payment-method-btn .payment-method-icon { font-size: 1.1rem; }
+.payment-method-btn .payment-method-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
 .payment-method-badge {
   margin-left: auto;
   font-size: 0.7rem;
@@ -9292,9 +8546,29 @@ opacity: 0.5;
   background: linear-gradient(135deg, #00ff41, #00b4ff);
   color: #001a0a;
 }
-.payment-panel { display: none; }
-.payment-panel:not(.hidden) { display: block; }
-.payment-panel + .payment-panel { margin-top: 12px; }
+.payment-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  opacity: 1;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.checkout-payment-panel {
+  position: relative;
+  min-height: 360px;
+}
+.payment-panel:not(.hidden) {
+  display: block;
+}
+.payment-panel.hidden {
+  display: none;
+}
+.payment-panel.exiting {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
 
 /* Stripe mount container */
 #stripe-checkout-container {
@@ -9443,7 +8717,7 @@ opacity: 0.5;
   .checkout-stepper .checkout-step { font-size: 0.7rem; gap: 4px; }
   .checkout-stepper .step-num { width: 22px; height: 22px; font-size: 0.7rem; }
   .checkout-stepper .checkout-step .step-label { display: none; }
-  .checkout-methods { flex-direction: row; }
+  .checkout-methods { flex-direction: column; }
   .payment-method-btn { font-size: 0.85rem; padding: 12px; }
   .processing-illustration { width: 100px; height: 100px; }
   .processing-title { font-size: 1rem; }
@@ -9453,6 +8727,231 @@ opacity: 0.5;
 /* ===========================================================
    CRYPTO DEPOSIT PAGE — QR + address + txid confirm
    =========================================================== */
+
+/* Crypto currency selection */
+.crypto-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.crypto-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-normal);
+}
+
+.crypto-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.crypto-btn.active {
+  border-color: var(--accent-green);
+  background: rgba(0, 231, 1, 0.05);
+  box-shadow: 0 0 16px rgba(0, 231, 1, 0.25);
+}
+
+.crypto-icon {
+  font-size: 1.5rem;
+  width: 32px;
+  text-align: center;
+}
+
+.crypto-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.crypto-symbol {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Crypto payment details panel */
+.crypto-details {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.crypto-qr-placeholder {
+  text-align: center;
+  padding: 24px;
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-default);
+  margin-bottom: 20px;
+}
+
+.crypto-qr-icon {
+  font-size: 3rem;
+  margin-bottom: 8px;
+}
+
+.crypto-qr-placeholder p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Copy button (used in dynamic crypto confirmation) */
+.btn-copy {
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-copy:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--accent-green);
+}
+
+/* Crypto notice */
+.crypto-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-md);
+  margin-bottom: 20px;
+}
+
+.crypto-notice .notice-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.crypto-notice span {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Phantom (Solana) wallet button */
+.crypto-phantom-block {
+  margin: 16px 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(154,124,247,0.08), rgba(20,241,149,0.08));
+  border: 1px solid rgba(154,124,247,0.3);
+}
+
+.btn-phantom-pay {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #ab9ff2 0%, #14f195 100%);
+  color: #1a0d33;
+  border: none;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 6px 20px rgba(154,124,247,0.35);
+}
+
+.btn-phantom-pay:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(154,124,247,0.5);
+}
+
+.btn-phantom-pay .phantom-icon {
+  font-size: 1.2rem;
+}
+
+.phantom-hint {
+  margin: 10px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* Checkout loading overlay */
+.checkout-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+}
+
+.checkout-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid var(--glass-border);
+  border-top-color: var(--accent-green);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+.checkout-loading-text {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.checkout-loading-sub {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Checkout success section */
+.checkout-success {
+  text-align: center;
+  padding: 40px 20px;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.success-title {
+  color: var(--accent-green);
+  font-weight: 800;
+  margin-bottom: 6px;
+  font-size: 1.4rem;
+}
+
+.success-subtext {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  margin-top: 8px;
+}
+
+.success-details {
+  margin-top: 20px;
+  padding: 20px;
+  background: var(--bg-darker);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border);
+  display: inline-block;
+  min-width: 280px;
+}
+
 .crypto-confirm-flow {
   display: flex;
   flex-direction: column;
