@@ -17,6 +17,7 @@ const { verifyToken } = require('./middleware/auth');
 // -----------------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const PERSONA_WEBHOOK_SECRET = process.env.PERSONA_WEBHOOK_SECRET;

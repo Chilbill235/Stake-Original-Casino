@@ -28,6 +28,22 @@ const state = {
 };
 window.__CASINO_CURRENCY = state.currency;
 
+try {
+  if (!Object.getOwnPropertyDescriptor(window, 'ethereum')) {
+    Object.defineProperty(window, 'ethereum', { configurable: true, writable: true, value: undefined });
+  }
+} catch (e) {
+  console.warn('[Client]: Could not ensure window.ethereum is configurable:', e.message);
+}
+
+window.addEventListener('error', (event) => {
+  const msg = event.message || '';
+  if (msg.includes('Cannot redefine property: ethereum')) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}, true);
+
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
 // ==========================================================================
@@ -161,7 +177,7 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       }
     }
 
-    if (res.status === 401 && !state.authRecoveryInFlight) {
+    if ((res.status === 401 || (res.status === 403 && (data.error === 'Session token expired.' || data.error === 'Invalid session token.'))) && !state.authRecoveryInFlight) {
       const isAuthEndpoint = endpoint.startsWith('/api/auth/');
       const hasToken = !!localStorage.getItem('casino_token');
       if (!isAuthEndpoint && hasToken) {
@@ -171,7 +187,7 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
         openAuthModal();
         const expired = new Error('Session expired. Please log in again.');
         expired.code = 'AUTH_EXPIRED';
-        expired.status = 401;
+        expired.status = res.status;
         state.authRecoveryInFlight = false;
         throw expired;
       }
@@ -266,7 +282,6 @@ async function initSession(autoGuest = true) {
       return;
     }
     console.warn('[Auth]: Transient /api/user/me error, keeping session token:', (err && err.message) || err);
-    return;
   }
 
   await fetchFairSeed();
@@ -4572,17 +4587,17 @@ function showGeoRestrictionModal(err) {
   }
   modal.classList.remove('hidden');
 }
-
 function confirmAge() {
   const checkbox = document.getElementById('age-confirm');
   if (!checkbox || !checkbox.checked) {
     return alert('You must confirm you are 18 or older to enter.');
   }
+
   localStorage.setItem('casino_age_confirmed', 'true');
   const ag = document.getElementById('modal-agegate');
   if (ag) ag.classList.add('hidden');
   playSound('win');
-  openAuthModal();
+  initSession();
 }
 
 function openAuthModal() {

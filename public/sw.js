@@ -48,7 +48,11 @@ self.addEventListener('fetch', (event) => {
       const networkFetch = fetch(event.request).then((response) => {
         if (response && response.status === 200) {
           const clone = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+          caches.open(CACHE).then((cache) => {
+            if (event.request.protocol === 'http:' || event.request.protocol === 'https:') {
+              cache.put(event.request, clone);
+            }
+          });
         }
         return response;
       }).catch(() => cached);
