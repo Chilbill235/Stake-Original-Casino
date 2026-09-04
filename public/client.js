@@ -825,6 +825,7 @@ function showProcessingPanel() {
 
 function closeStoreModal() {
   playSound('click');
+  stopCryptoPolling();
   const modal = document.getElementById('modal-store');
   if (modal) modal.classList.add('hidden');
 
@@ -1162,16 +1163,57 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
        '    <button class="btn btn-secondary-action" onclick="backToPackages()" style="min-width:110px;">Back</button>' +
        '    <button class="btn btn-primary" onclick="confirmCryptoPayment()" id="btn-confirm-crypto" style="min-width:150px;">Confirm Payment</button>' +
        '  </div>' +
-       (cryptoType === 'SOL' ?
-         '  <div class="crypto-phantom-inline">' +
-         '    <button class="btn-phantom-pay" onclick="payWithPhantom()">' +
-         '      <span class="phantom-icon">👻</span> <span>Pay with Phantom (Solana)</span>' +
-         '    </button>' +
-         '    <p class="phantom-hint">Phantom detected? Sign & send directly — your coins credit instantly after on-chain verification.</p>' +
-         '  </div>' : '') +
-       '</div>' +
-       '</div>';
-}
+        (cryptoType === 'SOL' ?
+          '  <div class="crypto-phantom-inline">' +
+          '    <button class="btn-phantom-pay" onclick="payWithPhantom()">' +
+          '      <span class="phantom-icon">👻</span> <span>Pay with Phantom (Solana)</span>' +
+          '    </button>' +
+          '    <p class="phantom-hint">Phantom detected? Sign & send directly — your coins credit instantly after on-chain verification.</p>' +
+          '  </div>' : '') +
+        '  <div class="crypto-status-row" id="crypto-status-row">' +
+        '    <span class="crypto-status-text">Waiting for on-chain confirmation…</span>' +
+        '  </div>' +
+        '</div>' +
+        '</div>';
+
+   state.cryptoPollingTimer = null;
+   startCryptoPolling(cryptoType);
+ }
+
+var CRYPTO_POLL_INTERVAL_MS = 8000;
+
+async function startCryptoPolling(cryptoType) {
+   if (!state.activeCryptoPaymentId) return;
+   stopCryptoPolling();
+   state.cryptoPollingTimer = setInterval(async () => {
+     try {
+       const res = await apiRequest('/api/user/crypto-payment/status/' + state.activeCryptoPaymentId);
+       const statusRow = document.getElementById('crypto-status-row');
+       if (res.status === 'COMPLETED' || res.status === 'CONFIRMED') {
+         stopCryptoPolling();
+         const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
+         if (res.balances) {
+           state.balances = mergeBalances(res.balances);
+           updateWalletUI();
+         }
+         showCryptoDepositSuccess(pkg, true);
+       } else if (statusRow) {
+         const elapsed = Math.floor((Date.now() - (state.cryptoInitTime || Date.now())) / 1000);
+         statusRow.innerHTML = '<span class="crypto-status-text">Pending on-chain confirmation… (' + elapsed + 's elapsed)</span>';
+       }
+     } catch (err) {
+       console.warn('[Crypto Poll]:', err.message || err);
+     }
+   }, CRYPTO_POLL_INTERVAL_MS);
+   state.cryptoInitTime = Date.now();
+ }
+
+function stopCryptoPolling() {
+   if (state.cryptoPollingTimer) {
+     clearInterval(state.cryptoPollingTimer);
+     state.cryptoPollingTimer = null;
+   }
+ }
 
 async function confirmCryptoPayment() {
   const txidEl = document.getElementById('crypto-txid');
@@ -1196,6 +1238,7 @@ async function confirmCryptoPayment() {
         updateWalletUI();
       }
       showCryptoDepositSuccess(pkg, res.verified);
+       stopCryptoPolling();
     } else {
       throw new Error(res.error || 'Payment could not be confirmed.');
     }
@@ -1210,21 +1253,39 @@ function showCryptoDepositSuccess(pkg, verified) {
   if (!details) return;
   details.classList.remove('hidden');
   details.innerHTML =
-    '<div class="crypto-success-state" style="text-align:center;padding:30px;">' +
-    '<div style="font-size:3rem;margin-bottom:12px;">🎉</div>' +
-    '<h4 style="color:var(--accent-green);font-weight:800;margin-bottom:8px;">Deposit Confirmed!</h4>' +
-    '<p style="color:var(--text-secondary);margin-bottom:20px;font-size:0.9rem;">' +
+    '<div class="crypto-success-state">' +
+    '<div class="crypto-success-check">' +
+    '<div class="crypto-success-checkmark">✓</div>' +
+    '<div class="crypto-confetti" id="crypto-confetti"></div>' +
+    '</div>' +
+    '<h4 class="crypto-success-title">Deposit Confirmed!</h4>' +
+    '<p class="crypto-success-sub">' +
     (verified ? 'On-chain verification passed. ' : 'Your transaction is being processed. ') +
     'Your coins have been credited instantly.' +
     '</p>' +
-    '<div style="display:flex;gap:16px;justify-content:center;margin-bottom:20px;">' +
-    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-green);font-size:1.2rem;">' + pkg.gc + '</div><div style="font-size:0.7rem;color:var(--text-muted);">Gold Coins</div></div>' +
-    '<div style="text-align:center;"><div style="font-weight:700;color:var(--accent-gold);font-size:1.2rem;">+' + pkg.sc + ' SC</div><div style="font-size:0.7rem;color:var(--text-muted);">Sweeps Coins</div></div>' +
+    '<div class="crypto-success-rewards">' +
+    '<div class="crypto-success-reward"><span class="crypto-success-num gc">' + pkg.gc + '</span><span class="crypto-success-cap">Gold Coins</span></div>' +
+    '<div class="crypto-success-reward"><span class="crypto-success-num sc">+' + pkg.sc + ' SC</span><span class="crypto-success-cap">Sweeps Coins</span></div>' +
     '</div>' +
     '<button class="btn btn-primary" onclick="closeStoreModal()" style="min-width:150px;">Done</button>' +
     '</div>';
   playSound('win');
+  animateCryptoConfetti();
   setTimeout(() => { mergeBalances({ sc: (state.balances.sc||0) }); updateWalletUI(); }, 500);
+}
+
+function animateCryptoConfetti() {
+  const container = document.getElementById('crypto-confetti');
+  if (!container) return;
+  container.innerHTML = '';
+  for (let i = 0; i < 20; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.style.left = (Math.random() * 100 - 10) + '%';
+    piece.style.animationDelay = (Math.random() * 0.5) + 's';
+    piece.style.background = Math.random() > 0.5 ? 'var(--accent-gold)' : 'var(--accent-green)';
+    container.appendChild(piece);
+  }
 }
 
 function copyToClipboard(text) {
@@ -1355,6 +1416,7 @@ async function payWithPhantom() {
 
 function backToPackages() {
   playSound('click');
+  stopCryptoPolling();
   var pkgList = document.getElementById('package-selection');
   var summary = document.getElementById('package-summary');
   var checkoutSection = document.getElementById('checkout-section');
@@ -1453,10 +1515,10 @@ function showCheckoutSuccess(gc, sc) {
       '<div class="summary-row"><span class="summary-label">Sweeps Coins Added</span><span class="summary-value sc-val">+' + sc + '</span></div>';
   }
 
-  setTimeout(() => {
-    initSessionFromToken();
-    setTimeout(() => closeStoreModal(), 2000);
-  }, 1500);
+   setTimeout(() => {
+     initSessionFromToken();
+     setTimeout(() => closeStoreModal(), 3000);
+   }, 100);
 }
 
 async function loadStripeSdk() {
@@ -1534,13 +1596,14 @@ function openRedeemModal() {
       return;
     }
   }
-  if ((state.balances.sc_unplayed || 0) < 50) {
+  const redeemable = (state.balances.sc_played || 0);
+  if (redeemable < 50) {
     alert('You need at least 50.00 SC (redeemable) to request a withdrawal. Keep playing!');
     return;
   }
   playSound('click');
 
-  const availBal = document.getElementById('redeem-available-bal');
+     const availBal = document.getElementById('redeem-available-bal');
   const wageredBal = document.getElementById('redeem-wagered-bal');
   if (availBal) availBal.textContent = formatCoins(state.balances.sc_unplayed || 0) + ' SC';
   if (wageredBal) wageredBal.textContent = formatCoins(state.balances.sc_played || 0) + ' SC';
@@ -1571,8 +1634,8 @@ async function submitRedeem() {
     return alert('Minimum redemption limit is 50.00 Sweeps Coins (SC).');
   }
 
-  if (amount > (state.balances.sc_unplayed || 0)) {
-    return alert(`Insufficient unplayed SC balance. You have ${formatCoins(state.balances.sc_unplayed || 0)} SC available for redemption.`);
+  if (amount > (state.balances.sc_played || 0)) {
+    return alert(`Insufficient redeemable SC balance. You have ${formatCoins(state.balances.sc_played || 0)} SC eligible for redemption. (Unplayed SC must be wagered 1x first).`);
   }
 
   playSound('click');

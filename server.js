@@ -103,8 +103,21 @@ function isGuestUser(user) {
 // 2. IN-MEMORY DATA STORES
 // -----------------------------------------------------------------------------
 const users = new Map();
-const processedEvents = new Set();
 const transactions = new Map();
+const processedEvents = new Set();
+const processedEventsTimestamps = new Map();
+
+// Clean up old processed event IDs every 10 minutes (keep last 1 hour)
+setInterval(() => {
+  const cutoff = Date.now() - 3600000;
+  for (const [id, ts] of processedEventsTimestamps.entries()) {
+    if (ts < cutoff) {
+      processedEventsTimestamps.delete(id);
+      processedEvents.delete(id);
+    }
+  }
+}, 600000);
+
 const activeSessions = new Map();
 const userSeeds = new Map();
 const amoeRegistry = new Map();
@@ -231,10 +244,11 @@ async function loadData() {
         totalWageredGC: u.total_wagered_gc,
         totalWageredSC: u.total_wagered_sc,
         rakebackAccruedSC: u.rakeback_accrued_sc,
-        isGuest: u.email && u.email.endsWith('@guest.casino'),
+        passwordResetToken: u.password_reset_token || null,
+        passwordResetExpiry: u.password_reset_expiry || 0,
         bonus: {
           lastClaimAt: 0,
-          claimStreak: u.daily_streak,
+          claimStreak: u.daily_streak || 0,
           dailyClaimed: false,
           challenges: [],
           challengeDate: '',
@@ -257,6 +271,46 @@ async function loadData() {
       };
       users.set(u.id, userData);
       transactions.set(u.id, []);
+
+      const bs = await db.getBonusState(u.id);
+      if (bs) {
+        userData.bonus.lastClaimAt = bs.last_claim_at;
+        userData.bonus.claimStreak = bs.claim_streak;
+        userData.bonus.dailyClaimed = !!bs.daily_claimed;
+        userData.bonus.challengeDate = bs.challenge_date || '';
+        try { userData.bonus.challenges = JSON.parse(bs.challenges || '[]'); } catch (e) { userData.bonus.challenges = []; }
+        userData.bonus.rakeback.lastDailyAt = bs.rakeback_last_daily;
+        userData.bonus.rakeback.lastWeeklyAt = bs.rakeback_last_weekly;
+        userData.bonus.rakeback.lastMonthlyAt = bs.rakeback_last_monthly;
+        userData.bonus.rakeback.dailyPool = bs.rakeback_daily_pool;
+        userData.bonus.rakeback.weeklyPool = bs.rakeback_weekly_pool;
+        userData.bonus.rakeback.monthlyPool = bs.rakeback_monthly_pool;
+      }
+
+      const tel = await db.getTelemetry(u.id);
+      if (tel) {
+        userData.bonus.telemetry.scWagered = tel.sc_wagered;
+        userData.bonus.telemetry.gcWagered = tel.gc_wagered;
+        userData.bonus.telemetry.rounds = tel.rounds;
+        userData.bonus.telemetry.roundsWon = tel.rounds_won;
+        try { userData.bonus.telemetry.gamesPlayed = JSON.parse(tel.games_played || '[]'); } catch (e) { userData.bonus.telemetry.gamesPlayed = []; }
+        userData.bonus.telemetry.dailyLossSC = tel.daily_loss_sc;
+        userData.bonus.telemetry.dailyWagerSC = tel.daily_wager_sc;
+        userData.bonus.telemetry.dailyWinSC = tel.daily_win_sc;
+        userData.bonus.telemetry.weeklyLossSC = tel.weekly_loss_sc;
+        userData.bonus.telemetry.weeklyWagerSC = tel.weekly_wager_sc;
+        userData.bonus.telemetry.weeklyWinSC = tel.weekly_win_sc;
+        userData.bonus.telemetry.monthlyLossSC = tel.monthly_loss_sc;
+        userData.bonus.telemetry.monthlyWagerSC = tel.monthly_wager_sc;
+        userData.bonus.telemetry.monthlyWinSC = tel.monthly_win_sc;
+        userData.bonus.telemetry.diceOver90 = tel.dice_over90;
+        userData.bonus.telemetry.crashCashout2x = tel.crash_cashout2x;
+        userData.bonus.telemetry.blackjackHands = tel.blackjack_hands;
+        try { userData.bonus.telemetry.history = JSON.parse(tel.history || '[]'); } catch (e) { userData.bonus.telemetry.history = []; }
+        userData.bonus.telemetry.lastDailyReset = tel.last_daily_reset;
+        userData.bonus.telemetry.lastWeeklyReset = tel.last_weekly_reset;
+        userData.bonus.telemetry.lastMonthlyReset = tel.last_monthly_reset;
+      }
     }
     console.log('[Persistence]: Loaded ' + users.size + ' users from database.');
   } catch (e) {
@@ -292,9 +346,16 @@ async function saveData() {
       geo_country: user.geoCountry,
       geo_city: user.geoCity,
       geo_is_vpn: user.geoIsVpn ? 1 : 0,
-      geo_risk_score: user.geoRiskScore || 0,
-       registered_at: user.registeredAt || user.createdAt || null
-      });
+       geo_risk_score: user.geoRiskScore || 0,
+       registered_at: user.registeredAt || user.createdAt || null,
+        password_reset_token: user.passwordResetToken || null,
+        password_reset_expiry: user.passwordResetExpiry || 0
+        });
+
+      if (user.bonus) {
+        await db.saveBonusState(user.id, user.bonus);
+        await db.saveTelemetry(user.id, user.bonus.telemetry);
+      }
     }
   } catch (e) {
     console.error('[Persistence]: Failed to save data:', e.message);
@@ -624,6 +685,7 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
     return res.json({ received: true, deduplicated: true });
   }
   processedEvents.add(event.id);
+  processedEventsTimestamps.set(event.id, Date.now());
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
@@ -812,7 +874,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
     return res.status(400).json({ error: 'Invalid or expired reset token.' });
   }
 
-  user.password = await bcrypt.hash(newPassword, 10);
+   user.password = await bcrypt.hash(newPassword, 12);
   user.passwordResetToken = null;
   user.passwordResetExpiry = null;
   saveData();
@@ -1016,7 +1078,7 @@ app.post('/api/auth/guest', async (req, res) => {
     users.set(userId, newUser);
     transactions.set(userId, []);
 
-     const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
+     const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({
       token,
       user: {
@@ -1270,6 +1332,67 @@ app.post('/api/auth/login', async (req, res) => {
           registeredAt: dbUser.registered_at,
           isGuest: dbUser.email && dbUser.email.endsWith('@guest.casino')
         };
+        
+        const bs = await db.getBonusState(dbUser.id);
+        const tel = await db.getTelemetry(dbUser.id);
+        foundUser.bonus = {
+          lastClaimAt: bs?.last_claim_at || 0,
+          claimStreak: bs?.claim_streak || 0,
+          dailyClaimed: !!bs?.daily_claimed,
+          challenges: [],
+          challengeDate: bs?.challenge_date || '',
+          telemetry: {
+            scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+            gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+            weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+            monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+            diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+            history: [],
+            lastDailyReset: Date.now(), lastWeeklyReset: Date.now(), lastMonthlyReset: Date.now()
+          },
+          rakeback: {
+            lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+            dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+          }
+        };
+        if (bs) {
+          foundUser.bonus.lastClaimAt = bs.last_claim_at;
+          foundUser.bonus.claimStreak = bs.claim_streak;
+          foundUser.bonus.dailyClaimed = !!bs.daily_claimed;
+          foundUser.bonus.challengeDate = bs.challenge_date || '';
+          try { foundUser.bonus.challenges = JSON.parse(bs.challenges || '[]'); } catch (e) { foundUser.bonus.challenges = []; }
+          if (foundUser.bonus.rakeback) {
+            foundUser.bonus.rakeback.lastDailyAt = bs.rakeback_last_daily;
+            foundUser.bonus.rakeback.lastWeeklyAt = bs.rakeback_last_weekly;
+            foundUser.bonus.rakeback.lastMonthlyAt = bs.rakeback_last_monthly;
+            foundUser.bonus.rakeback.dailyPool = bs.rakeback_daily_pool;
+            foundUser.bonus.rakeback.weeklyPool = bs.rakeback_weekly_pool;
+            foundUser.bonus.rakeback.monthlyPool = bs.rakeback_monthly_pool;
+          }
+        }
+        if (tel) {
+          foundUser.bonus.telemetry.scWagered = tel.sc_wagered;
+          foundUser.bonus.telemetry.gcWagered = tel.gc_wagered;
+          foundUser.bonus.telemetry.rounds = tel.rounds;
+          foundUser.bonus.telemetry.roundsWon = tel.rounds_won;
+          try { foundUser.bonus.telemetry.gamesPlayed = JSON.parse(tel.games_played || '[]'); } catch (e) { foundUser.bonus.telemetry.gamesPlayed = []; }
+          foundUser.bonus.telemetry.dailyLossSC = tel.daily_loss_sc;
+          foundUser.bonus.telemetry.dailyWagerSC = tel.daily_wager_sc;
+          foundUser.bonus.telemetry.dailyWinSC = tel.daily_win_sc;
+          foundUser.bonus.telemetry.weeklyLossSC = tel.weekly_loss_sc;
+          foundUser.bonus.telemetry.weeklyWagerSC = tel.weekly_wager_sc;
+          foundUser.bonus.telemetry.weeklyWinSC = tel.weekly_win_sc;
+          foundUser.bonus.telemetry.monthlyLossSC = tel.monthly_loss_sc;
+          foundUser.bonus.telemetry.monthlyWagerSC = tel.monthly_wager_sc;
+          foundUser.bonus.telemetry.monthlyWinSC = tel.monthly_win_sc;
+          foundUser.bonus.telemetry.diceOver90 = tel.dice_over90;
+          foundUser.bonus.telemetry.crashCashout2x = tel.crash_cashout2x;
+          foundUser.bonus.telemetry.blackjackHands = tel.blackjack_hands;
+          try { foundUser.bonus.telemetry.history = JSON.parse(tel.history || '[]'); } catch (e) { foundUser.bonus.telemetry.history = []; }
+          foundUser.bonus.telemetry.lastDailyReset = tel.last_daily_reset;
+          foundUser.bonus.telemetry.lastWeeklyReset = tel.last_weekly_reset;
+          foundUser.bonus.telemetry.lastMonthlyReset = tel.last_monthly_reset;
+        }
         users.set(dbUser.id, foundUser);
         transactions.set(dbUser.id, []);
       }
@@ -1429,7 +1552,7 @@ app.get('/api/session-status', (req, res) => {
   }
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     const user = users.get(decoded.id);
     if (!user) {
       return res.json({ authenticated: false });
@@ -1705,12 +1828,14 @@ app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, re
         quantity: 1,
       }],
       mode: 'payment',
-      metadata: {
-        userId: req.user.id.toString(),
-        packageName: pkg.name,
-        gcAmount: pkg.gcAmount.toString(),
-        scAmount: pkg.scAmount.toString()
-      }
+        metadata: {
+         userId: req.user.id.toString(),
+         packageId: packageId || '',
+         packageName: pkg.name,
+         gcAmount: pkg.gcAmount.toString(),
+         scAmount: pkg.scAmount.toString(),
+         uiMode: mode
+       }
     };
 
     if (mode === 'embedded_page') {
@@ -1807,6 +1932,27 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
     amount,
     usdAmount,
     message: `Send the suggested ${amount} ${cur} (or more) to the address below. Your package will be credited after on-chain confirmation.`
+   });
+});
+
+// Crypto payment status polling endpoint — lets the client auto-detect
+// when a deposit has been confirmed without the user re-pasting a txid.
+app.get('/api/user/crypto-payment/status/:paymentId', verifyToken, enforceJurisdiction, (req, res) => {
+  const payment = cryptoPayments.get(req.params.paymentId);
+  if (!payment) return res.status(404).json({ error: 'Payment not found.' });
+  if (payment.userId !== req.user.id) return res.status(403).json({ error: 'Payment does not belong to this user.' });
+  res.json({
+    paymentId: req.params.paymentId,
+    status: payment.status,
+    currency: payment.currency,
+    chain: payment.chain,
+    address: payment.address,
+    amount: payment.amount,
+    usdAmount: payment.usdAmount,
+    txid: payment.txid || null,
+    packageId: payment.packageId,
+    gcAmount: payment.gcAmount,
+    scAmount: payment.scAmount
   });
 });
 
@@ -1884,14 +2030,15 @@ app.post('/api/user/crypto-payment/webhook', express.json(), async (req, res) =>
   const payment = cryptoPayments.get(paymentId);
   if (!payment) return res.status(404).json({ error: 'Payment not found.' });
 
-  if (status === 'CONFIRMED' || status === 'COMPLETED') {
-    if (payment.status === 'COMPLETED') {
-      return res.json({ success: true, deduplicated: true });
-    }
-    // Only honour webhooks that target the configured merchant address.
-    if (address && address.toLowerCase !== undefined && typeof address.toLowerCase === 'function' && address.toLowerCase() !== String(payment.address || CRYPTO_ADDRESSES[payment.currency] || '').toLowerCase()) {
-      console.warn('[Crypto Webhook]: address mismatch (ignored)', address, payment.address);
-    }
+   if (status === 'CONFIRMED' || status === 'COMPLETED') {
+     if (payment.status === 'COMPLETED') {
+       return res.json({ success: true, deduplicated: true });
+     }
+     // Only honour webhooks that target the configured merchant address.
+     if (typeof address !== 'string' || address.toLowerCase() !== String(payment.address || CRYPTO_ADDRESSES[payment.currency] || '').toLowerCase()) {
+       console.warn('[Crypto Webhook]: address mismatch (ignored)', address, payment.address);
+       return res.status(400).json({ error: 'Address mismatch.' });
+     }
     payment.status = 'COMPLETED';
     const user = users.get(payment.userId);
     if (user) {

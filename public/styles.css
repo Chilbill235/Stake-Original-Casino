@@ -14,6 +14,9 @@
   --border-color: #2a4a6b;
   --border-hover: #3d6a94;
   --border-glow: rgba(0, 231, 1, 0.3);
+  --border-default: #2a4a6b;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: #00ff41;
   
   /* Premium Accent Colors */
   --accent-green: #00ff41;
@@ -2222,7 +2225,7 @@ opacity: 0.5;
   gap: 24px;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .game-display {
@@ -2231,12 +2234,13 @@ opacity: 0.5;
   border-radius: var(--radius-xl);
   padding: 24px;
   min-height: 350px;
-  height: calc(100dvh - var(--navbar-height) - 220px);
+  height: 100%;
+  max-height: calc(100dvh - var(--navbar-height) - 220px);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
   width: 100%;
   box-sizing: border-box;
 }
@@ -5517,7 +5521,7 @@ opacity: 0.5;
     height: 24px;
   }
   .feed-tab-btn { font-size: 0.75rem; padding: 6px 10px; }
-  .game-display { padding: 16px; min-height: auto; height: calc(100dvh - var(--navbar-height) - 220px); }
+  .game-display { padding: 16px; min-height: auto; height: auto; max-height: calc(100dvh - var(--navbar-height) - 200px); }
   .bet-bar { flex-direction: column; gap: 10px; }
   .bet-input-wrapper { width: 100%; }
   .btn-play { width: 100%; }
@@ -5534,6 +5538,16 @@ opacity: 0.5;
   .slot-reel { width: 70px; height: 90px; }
   .reel-symbol { height: 90px; font-size: 2.3rem; }
   .featured-scroll { grid-template-columns: repeat(2, 1fr); }
+  .keno-grid { grid-template-columns: repeat(5, 1fr); }
+  .keno-num { padding: 8px 2px; font-size: 0.75rem; }
+  .keno-header { flex-direction: column; gap: 8px; }
+  .keno-count { font-size: 0.75rem; }
+  .keno-payout-table { padding: 10px; }
+  .tower-board { max-width: 100%; }
+  .tower-floor-row { gap: 6px; }
+  .tower-tile { padding: 6px 4px; font-size: 0.8rem; }
+  .tower-multiplier { font-size: 1rem; }
+  .plinko-board { max-width: 100%; height: 280px; padding: 6px; }
 }
 
 @media (max-width: 600px) {
@@ -5577,7 +5591,8 @@ opacity: 0.5;
   .game-display {
     padding: 10px;
     min-height: auto;
-    height: calc(100dvh - 54px - 200px);
+    height: auto;
+    max-height: calc(100dvh - 54px - 180px);
     border-radius: 0;
     border-left: none;
     border-right: none;
@@ -5623,7 +5638,10 @@ opacity: 0.5;
     .slot-reel { width: 60px; height: 80px; }
     .reel-symbol { height: 80px; font-size: 2rem; }
     .slot-machine-title { font-size: 0.9rem; }
-}
+    .keno-grid { grid-template-columns: repeat(4, 1fr); }
+    .keno-num { padding: 6px 2px; font-size: 0.65rem; }
+    .tower-tile { padding: 4px 2px; font-size: 0.7rem; }
+    .plinko-board { height: 240px; padding: 4px; }
 
 /* ==========================================================================
    13. SIDEBAR FEED & RESULTS

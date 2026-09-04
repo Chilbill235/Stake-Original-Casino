@@ -180,7 +180,8 @@ function ensureSchema() {
     'sc_unplayed', 'sc_played', 'stripe_account_id', 'kyc_status', 'kyc_tier',
     'kyc_inquiry_id', 'kyc_verified_at', 'kyc_rejection_reason',
     'last_daily_claim', 'daily_streak', 'ads_watched_today', 'last_ad_reset',
-    'state', 'created_at', 'vip_tier', 'total_wagered_gc', 'total_wagered_sc', 'rakeback_accrued_sc'
+    'state', 'created_at', 'vip_tier', 'total_wagered_gc', 'total_wagered_sc', 'rakeback_accrued_sc',
+    'password_reset_token', 'password_reset_expiry'
   ];
 
   for (const col of requiredColumns) {
@@ -204,7 +205,9 @@ function ensureSchema() {
           vip_tier: "TEXT DEFAULT 'Bronze'",
           total_wagered_gc: 'REAL DEFAULT 0',
           total_wagered_sc: 'REAL DEFAULT 0',
-          rakeback_accrued_sc: 'REAL DEFAULT 0'
+          rakeback_accrued_sc: 'REAL DEFAULT 0',
+          password_reset_token: 'TEXT',
+          password_reset_expiry: 'INTEGER DEFAULT 0'
         }[col];
         db.run(`ALTER TABLE users ADD COLUMN ${col} ${colDef}`);
       } catch (e) {
@@ -332,7 +335,7 @@ function ensureSchema() {
     db.run(`CREATE INDEX IF NOT EXISTS idx_affiliate_earnings_user ON affiliate_earnings(affiliate_user_id)`);
   }
 
-  const geoColumns = ['geo_ip', 'geo_country', 'geo_city', 'geo_is_vpn', 'geo_risk_score', 'registered_at'];
+  const geoColumns = ['geo_ip', 'geo_country', 'geo_city', 'geo_is_vpn', 'geo_risk_score', 'registered_at', 'password_reset_token', 'password_reset_expiry'];
   const existingCols = tableNames.includes('users')
     ? (() => {
         const stmt = db.prepare("PRAGMA table_info(users)");
@@ -673,5 +676,76 @@ module.exports = {
     }
     stmt.free();
     return results;
+  },
+
+  getBonusState: async (userId) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM bonus_state WHERE user_id = ?');
+    stmt.bind([userId]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  saveBonusState: async (userId, bonus) => {
+    const database = await getDb();
+    const b = bonus || {};
+    database.run(
+      `INSERT OR REPLACE INTO bonus_state
+       (user_id, last_claim_at, claim_streak, daily_claimed, challenge_date, challenges,
+        rakeback_last_daily, rakeback_last_weekly, rakeback_last_monthly,
+        rakeback_daily_pool, rakeback_weekly_pool, rakeback_monthly_pool)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        b.lastClaimAt || 0,
+        b.claimStreak || 0,
+        b.dailyClaimed ? 1 : 0,
+        b.challengeDate || '',
+        JSON.stringify(b.challenges || []),
+        b.rakeback?.lastDailyAt || 0,
+        b.rakeback?.lastWeeklyAt || 0,
+        b.rakeback?.lastMonthlyAt || 0,
+        b.rakeback?.dailyPool || 0,
+        b.rakeback?.weeklyPool || 0,
+        b.rakeback?.monthlyPool || 0
+      ]
+    );
+    scheduleSave();
+  },
+
+  getTelemetry: async (userId) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM telemetry WHERE user_id = ?');
+    stmt.bind([userId]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+
+  saveTelemetry: async (userId, tel) => {
+    const database = await getDb();
+    database.run(
+      `INSERT OR REPLACE INTO telemetry
+       (user_id, sc_wagered, gc_wagered, rounds, rounds_won, games_played,
+        daily_loss_sc, daily_wager_sc, daily_win_sc,
+        weekly_loss_sc, weekly_wager_sc, weekly_win_sc,
+        monthly_loss_sc, monthly_wager_sc, monthly_win_sc,
+        dice_over90, crash_cashout2x, blackjack_hands, history,
+        last_daily_reset, last_weekly_reset, last_monthly_reset)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        tel.scWagered || 0, tel.gcWagered || 0, tel.rounds || 0, tel.roundsWon || 0,
+        JSON.stringify(tel.gamesPlayed || []),
+        tel.dailyLossSC || 0, tel.dailyWagerSC || 0, tel.dailyWinSC || 0,
+        tel.weeklyLossSC || 0, tel.weeklyWagerSC || 0, tel.weeklyWinSC || 0,
+        tel.monthlyLossSC || 0, tel.monthlyWagerSC || 0, tel.monthlyWinSC || 0,
+        tel.diceOver90 || 0, tel.crashCashout2x || 0, tel.blackjackHands || 0,
+        JSON.stringify(tel.history || []),
+        tel.lastDailyReset || 0, tel.lastWeeklyReset || 0, tel.lastMonthlyReset || 0
+      ]
+    );
+    scheduleSave();
   }
 };
