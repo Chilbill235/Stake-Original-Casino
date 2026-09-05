@@ -12674,9 +12674,32 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .hero-section { padding: 18px 16px; }
   .game-card-title { font-size: 0.78rem; }
   .promo-card { padding: 14px; }
-  .profile-dropdown { min-width: 240px; right: -16px; }
+  /* Keep the profile dropdown on-screen: anchor to right edge of viewport
+     instead of pushing off-screen, and cap its width so it never overflows
+     on small phones. */
+  #user-badge-wrapper { position: static; }
+  .profile-dropdown {
+    position: fixed;
+    top: 64px;
+    right: 8px;
+    left: auto;
+    min-width: 0;
+    width: calc(100vw - 16px);
+    max-width: 320px;
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+  }
   .profile-dropdown-item { padding: 10px 12px; }
   .x-close { width: 32px; height: 32px; }
+  /* Wallet selector — shrink padding and ensure the dropdown panel stays
+     inside the viewport on narrow phones. */
+  .wallet-selector { padding: 4px 6px; }
+  .wallet-dropdown {
+    right: 8px;
+    left: auto;
+    width: calc(100vw - 16px);
+    max-width: 320px;
+  }
 }
 
 /* --- Reduced motion --- */

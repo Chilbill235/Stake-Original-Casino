@@ -1,16 +1,14 @@
 {
+
   "functions": {
+
     "server.js": {
+
       "includeFiles": "node_modules/sql.js/dist/**"
+
     }
-  },
-  "routes": [
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/server.js"
-    }
-  ]
-}
+
+  }
+
+} 
+
