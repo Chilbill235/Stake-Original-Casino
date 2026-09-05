@@ -141,6 +141,36 @@ html {
   padding: 0;
 }
 
+body {
+  overflow-x: hidden;
+  overflow-y: scroll;
+  margin: 0;
+  padding: 0;
+  max-width: 100vw;
+}
+
+/* Ensure all containers don't exceed viewport */
+.container, .main-layout, .content-stage {
+  max-width: 100%;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* Explicit width constraints for key layout elements */
+.bets-sidebar {
+  width: var(--bets-width);
+  max-width: var(--bets-width);
+  flex-shrink: 0;
+}
+
+.sidebar {
+  width: var(--sidebar-width);
+  max-width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  flex-shrink: 0;
+  overflow-x: hidden;
+}
+
 .hidden {
   display: none !important;
 }
@@ -153,7 +183,6 @@ body.dark-theme {
   min-height: 100vh;
   overflow-x: hidden;
   overflow-y: scroll;
-  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   line-height: 1.6;
@@ -234,8 +263,9 @@ body.dark-theme::before {
   top: 0;
   z-index: 1000;
   width: 100%;
+  max-width: 100vw;
   gap: 8px;
-  overflow: visible;
+  overflow-x: hidden;
 }
 
 .navbar::after {
@@ -791,12 +821,15 @@ opacity: 0.5;
   overflow: hidden;
   position: relative;
   width: 100%;
+  max-width: 100vw;
   height: calc(100dvh - var(--navbar-height));
 }
 
 .sidebar {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
+  max-width: var(--sidebar-width);
+  flex-shrink: 0;
   background: var(--glass-bg);
   backdrop-filter: blur(20px);
   border-right: 1px solid var(--glass-border);
@@ -805,6 +838,7 @@ opacity: 0.5;
   padding: 16px 12px;
   gap: 4px;
   overflow-y: auto;
+  overflow-x: hidden;
   transition: var(--transition-normal);
   z-index: 500;
 }
@@ -1028,11 +1062,13 @@ opacity: 0.5;
    5. CONTENT STAGE & LOBBY
    ========================================================================== */
 .content-stage {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 28px;
   background: var(--bg-darker);
   min-width: 0;
+  max-width: 100%;
   position: relative;
 }
 
@@ -2547,12 +2583,15 @@ opacity: 0.5;
 .bets-sidebar {
   width: var(--bets-width);
   min-width: var(--bets-width);
+  max-width: var(--bets-width);
+  flex-shrink: 0;
   background: var(--glass-bg);
   backdrop-filter: blur(20px);
   border-left: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
   transition: transform var(--transition-normal);
+  overflow-x: hidden;
 }
 
 /* When we're inside an active game view, hide the docked sidebar and surface
@@ -5454,7 +5493,8 @@ opacity: 0.5;
   box-shadow: var(--shadow-xl);
   z-index: 3000;
   animation: toastSlide 0.3s ease-out;
-  max-width: 400px;
+  max-width: calc(100vw - 48px);
+  width: 100%;
 }
 
 .toast.toast-error {

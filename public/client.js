@@ -1791,9 +1791,20 @@ function showGlobalFeed() {
 }
 
 function toggleGlobalFeed() {
+  const drawer = document.getElementById('global-bets-drawer');
   const sidebar = document.getElementById('global-bets-sidebar');
-  if (sidebar) {
-    sidebar.classList.toggle('hidden');
+  const fab = document.getElementById('global-bets-fab');
+  const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+
+  if (drawer) {
+    drawer.classList.toggle('open');
+  }
+  if (sidebar) sidebar.classList.toggle('hidden');
+  if (fab && sidebar && sidebar.classList.contains('hidden')) {
+    fab.classList.toggle('hidden');
+  }
+  if (lobbyBetsBtn && sidebar && !sidebar.classList.contains('hidden')) {
+    lobbyBetsBtn.classList.add('hidden');
   }
 }
 
@@ -1845,6 +1856,10 @@ async function launchGame(gameId) {
   document.querySelector('.main-layout')?.classList.add('is-game');
   const betsSidebar = document.getElementById('global-bets-sidebar');
   if (betsSidebar) betsSidebar.classList.add('hidden');
+  const sidebar = document.getElementById('main-sidebar');
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  const sidebarOverlay = document.getElementById('sidebar-overlay');
+  if (sidebarOverlay) sidebarOverlay.classList.remove('active');
   // Show FAB during game for mobile toggling
   const betsFab = document.getElementById('global-bets-fab');
   if (betsFab) betsFab.classList.remove('hidden');
@@ -3481,7 +3496,7 @@ function toggleMainSidebar() {
   if (!sb) return;
   sb.classList.toggle('mobile-open');
   const overlay = document.getElementById('sidebar-overlay');
-  if (overlay) overlay.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('active');
   document.body.style.overflow = sb.classList.contains('mobile-open') ? 'hidden' : '';
 }
 
