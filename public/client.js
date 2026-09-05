@@ -251,7 +251,8 @@ async function initSession(autoGuest = true) {
   // Capture referral code from URL on first visit (store in localStorage)
   const urlCode = new URLSearchParams(window.location.search).get('ref');
   if (urlCode) {
-    localStorage.setItem('casino_referral', urlCode.toUpperCase());
+    const codeUpper = urlCode.toUpperCase();
+    localStorage.setItem('casino_referral', codeUpper);
     // Clean the URL without reloading
     if (history.replaceState) {
       const clean = new URL(window.location);
@@ -259,18 +260,32 @@ async function initSession(autoGuest = true) {
       history.replaceState({}, document.title, clean.pathname + clean.search);
     }
     // Send click tracking
-    fetch('/api/affiliate/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: urlCode }) }).catch(() => {});
+    fetch('/api/affiliate/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: codeUpper }) }).catch(() => {});
+    // Show the visitor a one-time welcome modal so they know the referral
+    // landed. We use sessionStorage so navigating to a deep link after the
+    // welcome doesn't re-pop the modal.
+    let welcomed = false;
+    try { welcomed = sessionStorage.getItem('casino_referral_welcomed_' + codeUpper) === '1'; } catch (e) {}
+    if (!welcomed) {
+      // Defer so it doesn't clash with age-gate / geo modals.
+      setTimeout(() => showReferralWelcome(codeUpper), 600);
+    }
   }
 
   let token = localStorage.getItem('casino_token');
 
   if (!token) {
     if (autoGuest) {
+      // continueAsGuest() handles its own token creation, profile setup,
+      // wallet update, listener wiring, AND calls reapplyCurrentRoute() so
+      // any deep-linked page (e.g. /account/wallet) re-renders with the
+      // populated session data.
       await continueAsGuest();
+      return;
     } else {
       openAuthModal();
+      return;
     }
-    return;
   }
 
   try {
@@ -3443,12 +3458,12 @@ function syncProfileDropdownHeader() {
   if (tierEl) tierEl.textContent = (vipText || 'Bronze') + ' VIP' + (isGuest ? ' · Guest (Test Mode)' : '');
   if (avatarEl) avatarEl.textContent = (username || 'G').charAt(0).toUpperCase();
 
-  // Withdraw button is visible to:
-  //   - Real (non-guest) users — production flow
-  //   - Guest accounts — for testing only (every other screen still blocks it server-side)
+  // Withdraw button is always visible from the dropdown.
+  // openRedeemModal() handles its own guest / KYC gating (test-mode bypass when
+  // ALLOW_GUEST_PAYMENTS=true), so the menu item just needs to surface the action.
   const withdrawBtn = document.getElementById('profile-dropdown-withdraw');
   if (withdrawBtn) {
-    withdrawBtn.style.display = isGuest ? 'flex' : 'flex';
+    withdrawBtn.style.display = 'flex';
   }
 }
 
@@ -3670,6 +3685,8 @@ function renderAccountPage(page = 'overview') {
         </div>
       </div>`;
   } else if (page === 'kyc') {
+    const lastChecked = state.kycLastChecked ? new Date(state.kycLastChecked).toLocaleTimeString() : null;
+    const isPolling = kyc.status === 'PENDING' && !!state.diditSessionId;
     html = `
       <div class="account-hero">
         <div class="account-avatar">🛡️</div>
@@ -3681,8 +3698,8 @@ function renderAccountPage(page = 'overview') {
       <div class="account-details-grid">
         <div class="account-card">
           <h3 class="account-card-title">Verification Status</h3>
-          <div class="kyc-status-badge ${kycClass}">${escapeHTML(kycStatusText)}</div>
-          ${kyc.rejectionReason ? `<div class="kyc-rejection">${escapeHTML(kyc.rejectionReason)}</div>` : ''}
+          <div class="kyc-status-badge ${kycClass}" id="kyc-status-badge">${escapeHTML(kycStatusText)}</div>
+          ${kyc.rejectionReason ? `<div class="kyc-rejection" id="kyc-rejection-reason">${escapeHTML(kyc.rejectionReason)}</div>` : '<div class="kyc-rejection" id="kyc-rejection-reason" style="display:none;"></div>'}
           <div class="kyc-tier-info">
             <span>Verification Tier</span>
             <span class="tier-value">Tier ${kyc.tier} of 2</span>
@@ -3692,6 +3709,14 @@ function renderAccountPage(page = 'overview') {
             ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button>' : ''}
             ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
           </div>
+          ${isPolling ? `
+            <div class="kyc-poll-row">
+              <div class="kyc-poll-info">
+                <span class="kyc-poll-dot"></span>
+                <span>Auto-refreshing every 30s${lastChecked ? ' &middot; last checked ' + escapeHTML(lastChecked) : ''}</span>
+              </div>
+              <button type="button" class="btn-secondary-action" onclick="pollKycStatus(true)">Check now</button>
+            </div>` : ''}
         </div>
         <div class="account-card">
           <h3 class="account-card-title">Why Verify?</h3>
@@ -3699,10 +3724,12 @@ function renderAccountPage(page = 'overview') {
             <div class="account-detail-item"><span class="detail-label">Tier 1</span><span class="detail-value">Email & basic info</span></div>
             <div class="account-detail-item"><span class="detail-label">Tier 2</span><span class="detail-value">Government ID document</span></div>
             <div class="account-detail-item"><span class="detail-label">Required to</span><span class="detail-value">Redeem Sweeps Coins for cash</span></div>
-            <div class="account-detail-item"><span class="detail-label">Provider</span><span class="detail-value">Persona (secure)</span></div>
+            <div class="account-detail-item"><span class="detail-label">Provider</span><span class="detail-value">Didit (secure)</span></div>
           </div>
         </div>
       </div>`;
+    // Start the 30s polling loop when we land on a pending KYC page.
+    startKycPolling();
   } else if (page === 'transactions') {
     const sub = state.accountTxSub || 'deposits';
     html = `
@@ -3920,10 +3947,120 @@ async function startKycVerification() {
       window.open(data.verificationUrl, '_blank', 'noopener,noreferrer,width=520,height=700');
     } else if (data.personaConfig) {
       alert('KYC verification flow would open here. Status: ' + data.kycStatus + '. Sandbox mode: use /api/user/kyc/verify-sandbox to mark verified.');
+    } else if (data.sandbox) {
+      // Local sandbox: simulate the KYC provider callback so the operator can
+      // see the full flow without the upstream service. The server's
+      // /api/user/kyc/verify-sandbox endpoint flips the user's KYC status.
+      const proceed = confirm(
+        'KYC provider is unreachable in this environment.\n\n' +
+        'Run a local sandbox verification now? (You will be marked verified locally so the rest of the flow can be tested.)\n\n' +
+        (data.message ? '\nServer said: ' + data.message : '')
+      );
+      if (proceed) {
+        try {
+          await apiRequest('/api/user/kyc/verify-sandbox', 'POST');
+          showKycCallbackResult('Approved');
+        } catch (e) {
+          alert('Sandbox verify failed: ' + (e.message || e));
+        }
+      }
     }
   } catch (err) {
     alert(err.message || 'Could not start KYC verification.');
   }
+}
+
+// 30-second KYC status poll. The server's GET /api/user/kyc/status endpoint
+// re-fetches the Didit decision if a session is in flight, so this loop keeps
+// the user up to date without waiting for the webhook to land. The interval
+// is stored on state so we never accidentally stack more than one poll at a
+// time even on rapid re-renders.
+function startKycPolling() {
+  if (state.kycPollInterval) return;
+  const tick = () => { pollKycStatus(false).catch(() => {}); };
+  state.kycPollInterval = setInterval(tick, 30000);
+  // Fire one immediately so the user doesn't have to wait 30s on first visit.
+  tick();
+}
+
+function stopKycPolling() {
+  if (state.kycPollInterval) {
+    clearInterval(state.kycPollInterval);
+    state.kycPollInterval = null;
+  }
+}
+
+async function pollKycStatus(manual) {
+  try {
+    const data = await apiRequest('/api/user/kyc/status');
+    state.diditSessionId = data.diditSessionId || null;
+    state.kycLastChecked = Date.now();
+    const prior = state.profile && state.profile.kyc && state.profile.kyc.status;
+    const next = data.kyc || { status: 'UNVERIFIED', tier: 0 };
+    if (!state.profile) state.profile = {};
+    state.profile.kyc = next;
+    // If status changed away from PENDING, stop polling — the user is done.
+    if (next.status !== 'PENDING') {
+      stopKycPolling();
+      if (manual && next.status === 'VERIFIED') {
+        showKycCallbackResult('Approved');
+      } else if (manual && next.status === 'REJECTED') {
+        showKycCallbackResult('Declined');
+      }
+    }
+    // Update only the bits that changed so we don't tear down the whole page.
+    if (prior !== next.status) {
+      const page = (window.location.pathname || '').replace('/account/', '') || 'overview';
+      if (page === 'kyc') {
+        refreshAccountPage('kyc');
+      } else {
+        updateUserProfileBadge();
+      }
+    } else if (manual) {
+      // Status unchanged but user asked for a manual refresh — show a small
+      // confirmation so they know the call succeeded.
+      try { playSound('click'); } catch (e) {}
+    }
+    return data;
+  } catch (err) {
+    if (manual) {
+      console.warn('[KYC poll]:', err.message);
+    }
+    return null;
+  }
+}
+
+function showKycCallbackResult(status) {
+  const messages = {
+    Approved: { title: 'Identity Verified!', subtitle: 'Your identity has been successfully verified.', icon: '✓' },
+    Declined: { title: 'Verification Incomplete', subtitle: 'Your identity verification was not approved. Please review your documents and try again.', icon: '!' },
+    'In Review': { title: 'Under Review', subtitle: 'Your identity verification is being reviewed. We will notify you once it is complete.', icon: '⏳' }
+  };
+  const msg = messages[status] || { title: 'Verification Update', subtitle: 'Verification status: ' + status, icon: 'ℹ' };
+
+  closeAllModals();
+  let overlay = document.getElementById('kyc-identity-overlay');
+  if (overlay) overlay.remove();
+
+  overlay = document.createElement('div');
+  overlay.id = 'kyc-identity-overlay';
+  overlay.className = 'modal-backdrop';
+  overlay.innerHTML =
+    '<div class="modal-box identity-verify-box">' +
+      '<div class="identity-verify-content" style="text-align:center;">' +
+        '<div class="verification-step" style="margin:0 auto 16px;width:56px;height:56px;font-size:28px;">' + msg.icon + '</div>' +
+        '<div class="verification-text" style="font-size:1.4rem;">' + escapeHTML(msg.title) + '</div>' +
+        '<div class="verification-subtext" style="margin-left:0;">' + escapeHTML(msg.subtitle) + '</div>' +
+        '<button type="button" class="btn-kyc-action" style="margin-top:20px" onclick="closeKycCallbackOverlay()">Continue</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function closeKycCallbackOverlay() {
+  const overlay = document.getElementById('kyc-identity-overlay');
+  if (overlay) overlay.remove();
+  window.location.hash = '#/account/kyc';
 }
 
 function showGuestVerificationAnimation() {
@@ -3956,6 +4093,45 @@ function showGuestVerificationAnimation() {
     overlay.style.transform = 'scale(0.97)';
     setTimeout(() => overlay.remove(), FADE_MS);
   }, DISPLAY_MS);
+}
+
+// Shown when a new visitor arrives via ?ref=CODE. Uses the shared modal shell
+// so it renders correctly on every page and reuses the modalPop keyframe.
+function showReferralWelcome(code) {
+  if (!code) return;
+  let existing = document.getElementById('referral-welcome-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'referral-welcome-overlay';
+  overlay.className = 'modal-backdrop';
+  overlay.innerHTML =
+    '<div class="modal-box identity-verify-box" style="max-width:420px;">' +
+      '<div class="identity-verify-content" style="text-align:center;">' +
+        '<div class="verification-step" style="margin:0 auto 14px;width:56px;height:56px;font-size:28px;background:linear-gradient(135deg,var(--accent-gold),var(--accent-orange));color:#0a0e1a;">🎁</div>' +
+        '<div class="verification-text" style="font-size:1.35rem;">You were invited!</div>' +
+        '<div class="verification-subtext" style="margin-left:0;">' +
+          'You arrived via referral code <strong style="color:var(--accent-gold);">' + escapeHTML(code) + '</strong>.<br>' +
+          'Sign up with this account to keep your friend\'s referral active and unlock your welcome bonus.' +
+        '</div>' +
+        '<div style="display:flex;gap:10px;justify-content:center;margin-top:20px;flex-wrap:wrap;">' +
+          '<button type="button" class="btn-kyc-action" style="background:linear-gradient(135deg,var(--accent-green),var(--accent-cyan));color:#0a0e1a;" onclick="dismissReferralWelcome(true)">Got it</button>' +
+          '<button type="button" class="btn-kyc-action" style="background:transparent;border:1px solid var(--border-default);color:var(--text-primary);" onclick="dismissReferralWelcome(false)">Dismiss</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  // Track dismissal so we don't pop again on every route change.
+  try { sessionStorage.setItem('casino_referral_welcomed_' + code, '1'); } catch (e) {}
+}
+
+function dismissReferralWelcome(ack) {
+  const overlay = document.getElementById('referral-welcome-overlay');
+  if (overlay) overlay.remove();
+  if (ack) {
+    try { sessionStorage.setItem('casino_referral_ack', '1'); } catch (e) {}
+  }
 }
 
 async function loadAccountTransactions(sub = 'deposits') {
@@ -4661,14 +4837,22 @@ function formatCountdown(ms) {
 function pad2(n) { return n < 10 ? '0' + n : n; }
 
 function startCountdown(elemId, ms, fallback) {
-  let remaining = ms;
   const el = document.getElementById(elemId);
   if (!el) return;
+  // If a previous interval is attached to this element (re-renders stack them),
+  // clear it before starting a new one to avoid the "countdown ticks faster
+  // every page visit" bug.
+  if (el._countdownInterval) {
+    clearInterval(el._countdownInterval);
+    el._countdownInterval = null;
+  }
+  let remaining = ms;
   el.textContent = formatCountdown(remaining);
-  const interval = setInterval(() => {
+  el._countdownInterval = setInterval(() => {
     remaining -= 1000;
     if (remaining <= 0) {
-      clearInterval(interval);
+      clearInterval(el._countdownInterval);
+      el._countdownInterval = null;
       el.textContent = formatCountdown(0);
       el.innerHTML = '<span style="color:#00e701;font-weight:700;">READY!</span>';
     } else {
@@ -4956,16 +5140,18 @@ async function initSessionFromToken() {
   updateUserProfileBadge();
 }
 
-// One-shot re-render of the initial route after the session loads, so deep-linked
-// pages (e.g. /account/wallet) render with populated profile/balances instead of
-// a blank shell. Skips game views (already rendered at module load).
+// Re-render the current route. Called after session loads (token login OR
+// continueAsGuest) so deep-linked pages like /account/wallet get the full
+// post-session render with populated state.profile / state.balances.
 function reapplyCurrentRoute() {
-  if (state.bootRouted) return;
-  state.bootRouted = true;
   const path = window.location.pathname;
   const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
   const gameId = path.startsWith('/') ? path.slice(1) : path;
-  if (gameIds.includes(gameId)) return;
+  if (gameIds.includes(gameId)) {
+    // Game views: just ensure the right game is mounted.
+    if (state.currentGame !== gameId) launchGame(gameId);
+    return;
+  }
   handleRouteChange();
 }
 
@@ -5180,6 +5366,34 @@ function handleRouteChange() {
   state.currentGame = null;
   closeGlobalFeed();
 
+  if (path === '/account/kyc-callback') {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('verificationSessionId');
+    const status = params.get('status');
+    window.history.replaceState({}, document.title, '/account/kyc');
+    // The Didit-provided status is treated as a UI hint only — the source of
+    // truth is the server, which re-fetches the canonical decision via the
+    // Didit v3 /decision/ endpoint and updates our local kyc row. We show the
+    // overlay immediately so the user gets feedback, but the poll below will
+    // reconcile anything the URL lied about.
+    if (sessionId && status) {
+      showKycCallbackResult(status);
+    }
+    // Always route to the KYC page and kick off a poll so the verified/rejected
+    // state sticks even if the webhook hasn't landed yet.
+    if (path !== '/account/kyc') {
+      window.history.replaceState({}, document.title, '/account/kyc');
+    }
+    hideAllViews();
+    document.getElementById('view-account')?.classList.remove('hidden');
+    setActiveAccountLink('kyc');
+    refreshAccountPage('kyc');
+    // Force an immediate server-side check; the overlay stays open until the
+    // poll confirms the change.
+    pollKycStatus(true).catch(() => {});
+    return;
+  }
+
   if (path === '/account' || path.startsWith('/account/')) {
     hideAllViews();
     document.getElementById('view-account')?.classList.remove('hidden');
@@ -5207,6 +5421,7 @@ function handleRouteChange() {
       state.accountTxSub = state.accountTxSub || 'deposits';
     }
     setActiveAccountLink(page);
+    if (page !== 'kyc') stopKycPolling();
     refreshAccountPage(page);
     return;
   }
@@ -5244,21 +5459,32 @@ window.addEventListener('hashchange', () => {
   }
 });
 
-const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
-const initialPath = window.location.pathname.slice(1);
-const initialHash = window.location.hash.slice(1);
-
-if (initialPath && gameIds.includes(initialPath)) {
-  window.addEventListener('load', () => {
-    if (state.currentGame !== initialPath) launchGame(initialPath);
-  });
-} else if (initialHash && gameIds.includes(initialHash)) {
-  window.addEventListener('load', () => {
-    if (state.currentGame !== initialHash) launchGame(initialHash);
-  });
-} else {
-  handleRouteChange();
-}
+// Initial route bootstrap: deferred to DOMContentLoaded so it runs AFTER
+// the document is parsed but BEFORE the first paint. This avoids a race where
+// handleRouteChange() fires before #account-content etc. exist, and keeps the
+// bootRouted flag consistent so reapplyCurrentRoute() can safely re-render
+// the deep-linked route after the session finishes loading.
+window.addEventListener('DOMContentLoaded', () => {
+  // Run the very first route resolution. setTimeout(0) yields to the browser so
+  // it can lay out the page; we need a populated state before we render any
+  // account/game view. If we don't have a token, initSession() will route to
+  // continueAsGuest() and call reapplyCurrentRoute() once the guest token
+  // arrives — that second pass replaces the placeholder content.
+  const initialPath = window.location.pathname.slice(1);
+  const initialHash = window.location.hash.slice(1);
+  const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
+  if (initialPath && gameIds.includes(initialPath)) {
+    window.addEventListener('load', () => {
+      if (state.currentGame !== initialPath) launchGame(initialPath);
+    });
+  } else if (initialHash && gameIds.includes(initialHash)) {
+    window.addEventListener('load', () => {
+      if (state.currentGame !== initialHash) launchGame(initialHash);
+    });
+  } else {
+    handleRouteChange();
+  }
+});
 
 // ==========================================================================
 // 14. WALLET CONNECT (Phantom / Solana)

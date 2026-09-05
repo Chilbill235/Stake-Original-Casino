@@ -16,6 +16,8 @@ const { verifyToken } = require('./middleware/auth');
 // 1. CONFIGURATION & CONSTANTS
 // -----------------------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const FRONTEND_BASE = process.env.FRONTEND_BASE || process.env.FRONTEND_URL || null;
 const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -27,6 +29,170 @@ const DIDIT_WEBHOOK_SECRET = process.env.DIDIT_WEBHOOK_SECRET;
 const DIDIT_API_BASE = 'https://verification.didit.me/v3';
 const HOUSE_EDGE = 0.13; // 13% House Edge (86% RTP)
 const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user (0.13 * 0.05 = 0.0065 = 0.65%)
+
+// Resolve the public-facing base URL for the casino. Used to build absolute
+// callback/redirect URLs that the KYC provider (Didit) and affiliate share
+// links need. Order of precedence:
+//   1) FRONTEND_BASE / FRONTEND_URL env var (recommended in production)
+//   2) The Origin header from the incoming request
+//   3) Construct from req.headers.host with a scheme that matches the server:
+//      production = https, dev = http (so callback URLs work without TLS).
+function resolveFrontendBase(req) {
+  if (FRONTEND_BASE) return FRONTEND_BASE.replace(/\/$/, '');
+  if (req && req.headers && req.headers.origin) return req.headers.origin.replace(/\/$/, '');
+  const host = (req && req.headers && req.headers.host) || `localhost:${PORT}`;
+  const scheme = IS_PRODUCTION ? 'https' : 'http';
+  return `${scheme}://${host}`;
+}
+
+// Didit v3 API helpers. Centralizes every call to the verification provider so
+// webhook + live-poll + start all share the same URL/header shape. Any future
+// Didit API tweak (new base, auth header, etc.) only needs to land here.
+const DIDIT_TIMEOUT_MS = 8000;
+const DIDIT_KNOWN_STATUSES = new Set([
+  'Not Started', 'In Progress', 'Approved', 'Declined', 'In Review',
+  'Resubmitted', 'Awaiting User', 'Abandoned', 'Expired', 'Kyc Expired'
+]);
+
+async function diditRequest(path, init = {}) {
+  if (!DIDIT_API_KEY) {
+    const err = new Error('Didit is not configured on this server.');
+    err.code = 'DIDIT_NOT_CONFIGURED';
+    throw err;
+  }
+  const url = path.startsWith('http') ? path : `${DIDIT_API_BASE}${path}`;
+  const headers = Object.assign(
+    { 'x-api-key': DIDIT_API_KEY, 'Accept': 'application/json' },
+    init.headers || {}
+  );
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), DIDIT_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, Object.assign({}, init, { headers, signal: ctl.signal }));
+    const text = await res.text();
+    let body = null;
+    if (text) {
+      try { body = JSON.parse(text); } catch (e) { body = { raw: text }; }
+    }
+    if (!res.ok) {
+      const err = new Error(`Didit API ${res.status} on ${path}`);
+      err.code = 'DIDIT_HTTP_ERROR';
+      err.status = res.status;
+      err.body = body;
+      throw err;
+    }
+    return body;
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      const err = new Error('Didit API request timed out');
+      err.code = 'DIDIT_TIMEOUT';
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function diditGetDecision(sessionId) {
+  if (!sessionId) return null;
+  return diditRequest(`/session/${encodeURIComponent(sessionId)}/decision/`, { method: 'GET' });
+}
+
+// Single source of truth for mapping a Didit decision onto our local user
+// record. Used by the webhook handler, the live-poll endpoint, and the
+// callback deep link. Notifies the user via WS if anything changes.
+function applyDiditDecision(user, status, decision) {
+  if (!user || !user.kyc) return null;
+  const prior = user.kyc.status;
+  let message = null;
+  let notify = false;
+
+  switch (status) {
+    case 'Approved':
+      user.kyc.status = 'VERIFIED';
+      user.kyc.tier = 2;
+      user.kyc.verifiedAt = new Date().toISOString();
+      user.kyc.rejectionReason = null;
+      user.diditSessionId = null;
+      message = 'Your identity has been successfully verified!';
+      notify = true;
+      break;
+    case 'Declined': {
+      user.kyc.status = 'REJECTED';
+      const warnCode = decision && decision.id_verifications && decision.id_verifications[0]
+        && decision.id_verifications[0].warnings && decision.id_verifications[0].warnings[0]
+        && decision.id_verifications[0].warnings[0].code;
+      const livenessCode = decision && decision.liveness_checks && decision.liveness_checks[0]
+        && decision.liveness_checks[0].warnings && decision.liveness_checks[0].warnings[0]
+        && decision.liveness_checks[0].warnings[0].code;
+      const faceCode = decision && decision.face_matches && decision.face_matches[0]
+        && decision.face_matches[0].warnings && decision.face_matches[0].warnings[0]
+        && decision.face_matches[0].warnings[0].code;
+      user.kyc.rejectionReason = warnCode || livenessCode || faceCode || 'Document verification failed.';
+      message = 'Identity verification failed. Please check your documents and retry.';
+      notify = true;
+      break;
+    }
+    case 'In Review':
+    case 'In Progress':
+    case 'Resubmitted':
+    case 'Awaiting User':
+      user.kyc.status = 'PENDING';
+      message = status === 'In Review'
+        ? 'Your identity verification is being reviewed.'
+        : status === 'Resubmitted'
+          ? 'Please redo the requested steps to finish verification.'
+          : 'Verification in progress.';
+      notify = prior !== 'PENDING';
+      break;
+    case 'Abandoned':
+    case 'Expired':
+    case 'Kyc Expired':
+      // Session is no longer useful — clear it so the user can start fresh.
+      user.kyc.status = 'UNVERIFIED';
+      user.diditSessionId = null;
+      user.kyc.rejectionReason = status === 'Abandoned'
+        ? 'Verification was abandoned. Please try again.'
+        : 'Your previous verification session expired. Please start a new one.';
+      message = 'Your previous verification session has expired.';
+      notify = true;
+      break;
+    default:
+      // Unknown status — don't change state, just record.
+      console.warn('[KYC]: Unknown Didit status', status);
+      return null;
+  }
+
+  saveData();
+
+  // Persist the new kyc fields to the DB synchronously so a server restart
+  // before the 30-second snapshot can't roll us back to a stale status.
+  try {
+    db.updateUser(user.id, {
+      kyc_status: user.kyc.status,
+      kyc_tier: user.kyc.tier || 0,
+      kyc_verified_at: user.kyc.verifiedAt || null,
+      kyc_rejection_reason: user.kyc.rejectionReason || null
+    });
+  } catch (e) {
+    console.warn('[KYC]: Failed to persist decision:', e.message);
+  }
+
+  if (notify && prior !== user.kyc.status) {
+    try {
+      sendToUser(user.id, {
+        type: 'KYC_STATUS_UPDATE',
+        kyc: user.kyc,
+        message
+      });
+    } catch (e) {
+      console.warn('[KYC]: WS notify failed:', e.message);
+    }
+  }
+
+  return user.kyc;
+}
 
 let stripe = null;
 if (STRIPE_SECRET_KEY) {
@@ -864,6 +1030,11 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
 });
 
 // Persona / Identity Verification Webhook Endpoint
+// Verifies HMAC-SHA256 (X-Signature-V2), enforces a 5-minute timestamp window,
+// applies idempotency on event_id, then dispatches to applyDiditDecision().
+const processedWebhookEvents = new Set();
+const MAX_PROCESSED_EVENTS = 5000;
+
 app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, res) => {
   if (DIDIT_WEBHOOK_SECRET) {
     const sig = req.headers['x-signature-v2'];
@@ -880,13 +1051,19 @@ app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, r
     }
 
     if (sig) {
-      const computedSig = crypto
-        .createHmac('sha256', DIDIT_WEBHOOK_SECRET)
-        .update(req.body)
-        .digest('hex');
-
-      if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(computedSig, 'hex'))) {
-        console.error('[KYC WEBHOOK]: Invalid signature');
+      try {
+        const computedSig = crypto
+          .createHmac('sha256', DIDIT_WEBHOOK_SECRET)
+          .update(req.body)
+          .digest('hex');
+        const a = Buffer.from(sig, 'hex');
+        const b = Buffer.from(computedSig, 'hex');
+        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+          console.error('[KYC WEBHOOK]: Invalid signature');
+          return res.status(401).json({ error: 'Invalid webhook signature.' });
+        }
+      } catch (e) {
+        console.error('[KYC WEBHOOK]: Signature compare error:', e.message);
         return res.status(401).json({ error: 'Invalid webhook signature.' });
       }
     } else {
@@ -901,7 +1078,25 @@ app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, r
     return res.status(400).json({ error: 'Malformed JSON body.' });
   }
 
-  const { webhook_type, status, session_id, vendor_data, decision } = event;
+  const { webhook_type, status, session_id, vendor_data, decision, event_id } = event;
+
+  // Idempotency: Didit reuses event_id on retries. Skip events we have
+  // already processed. Trims the set so it doesn't grow forever.
+  if (event_id) {
+    if (processedWebhookEvents.has(event_id)) {
+      return res.json({ success: true, idempotent: true });
+    }
+    processedWebhookEvents.add(event_id);
+    if (processedWebhookEvents.size > MAX_PROCESSED_EVENTS) {
+      const overflow = processedWebhookEvents.size - MAX_PROCESSED_EVENTS;
+      const iter = processedWebhookEvents.values();
+      for (let i = 0; i < overflow; i++) {
+        const v = iter.next().value;
+        if (v === undefined) break;
+        processedWebhookEvents.delete(v);
+      }
+    }
+  }
 
   const userId = parseInt(vendor_data, 10);
   if (isNaN(userId)) {
@@ -910,55 +1105,18 @@ app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, r
   }
 
   const user = users.get(userId);
-
-  if (user) {
-    if (status === 'Approved') {
-      user.kyc.status = 'VERIFIED';
-      user.kyc.tier = 2;
-      user.kyc.verifiedAt = new Date().toISOString();
-      user.kyc.rejectionReason = null;
-      user.diditSessionId = null;
-      saveData();
-
-      sendToUser(userId, {
-        type: 'KYC_STATUS_UPDATE',
-        kyc: user.kyc,
-        message: 'Your identity has been successfully verified!'
-      });
-    } else if (status === 'Declined') {
-      user.kyc.status = 'REJECTED';
-      user.kyc.rejectionReason = decision?.warnings?.[0]?.code || decision?.rejection_reason || 'Document verification failed.';
-      saveData();
-
-      sendToUser(userId, {
-        type: 'KYC_STATUS_UPDATE',
-        kyc: user.kyc,
-        message: 'Identity verification failed. Please check your documents and retry.'
-      });
-    } else if (status === 'In Review' || status === 'In Progress') {
-      user.kyc.status = 'PENDING';
-      saveData();
-
-      sendToUser(userId, {
-        type: 'KYC_STATUS_UPDATE',
-        kyc: user.kyc,
-        message: 'Your identity verification is being reviewed.'
-      });
-    } else if (status === 'Resubmitted' || status === 'Awaiting User') {
-      user.kyc.status = 'PENDING';
-      saveData();
-
-      sendToUser(userId, {
-        type: 'KYC_STATUS_UPDATE',
-        kyc: user.kyc,
-        message: 'Please complete your identity verification.'
-      });
-    }
-  } else {
+  if (!user) {
     console.warn('[KYC WEBHOOK]: User not found for vendor_data:', vendor_data);
+    return res.json({ success: true });
   }
 
-  res.json({ success: true });
+  if (session_id && user.diditSessionId && session_id !== user.diditSessionId) {
+    console.warn('[KYC WEBHOOK]: session_id mismatch', { got: session_id, expected: user.diditSessionId });
+  }
+
+  applyDiditDecision(user, status, decision);
+
+  res.json({ success: true, webhook_type: webhook_type || null });
 });
 
 app.use(express.json());
@@ -1181,7 +1339,7 @@ app.post('/api/auth/guest', async (req, res) => {
 
     if (req.body?.ref) {
       try {
-        const referrerAff = await db.getAffiliateByCode(String(req.body.ref).trim());
+        const referrerAff = await db.getAffiliateByCode(String(req.body.ref).trim().toUpperCase());
         if (referrerAff && referrerAff.user_id !== userId) {
           await db.setAffiliateReferredBy(userId, referrerAff.user_id);
         }
@@ -1392,7 +1550,7 @@ app.post('/api/auth/register', async (req, res) => {
     // Auto-attribute referral if a valid code is provided
     if (ref) {
       try {
-        const referrerAff = await db.getAffiliateByCode(String(ref).trim());
+        const referrerAff = await db.getAffiliateByCode(String(ref).trim().toUpperCase());
         if (referrerAff && referrerAff.user_id !== userId) {
           await db.setAffiliateReferredBy(userId, referrerAff.user_id);
         }
@@ -1840,8 +1998,7 @@ app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, async (req, re
     });
   }
 
-  const FRONTEND_URL = process.env.FRONTEND_URL || `https://${req.headers.host}`;
-  const callbackUrl = `${FRONTEND_URL.replace(/\/$/, '')}/account/kyc-callback`;
+  const callbackUrl = `${resolveFrontendBase(req)}/account/kyc-callback`;
 
   const diditPayload = {
     workflow_id: DIDIT_WORKFLOW_ID,
@@ -1861,30 +2018,24 @@ app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, async (req, re
   };
 
   try {
-    const response = await fetch(`${DIDIT_API_BASE}/session/`, {
+    const data = await diditRequest('/session/', {
       method: 'POST',
-      headers: {
-        'x-api-key': DIDIT_API_KEY,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(diditPayload)
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error('[KYC/DIDIT]: Failed to create session:', JSON.stringify(data));
-      user.kyc.status = 'PENDING';
-      saveData();
-      return res.status(500).json({ error: 'Failed to create KYC session.', details: data.detail || data });
-    }
-
     user.kyc.status = 'PENDING';
     user.diditSessionId = data.session_id;
-    await db.updateUser(user.id, {
-      kyc_status: 'PENDING',
-      didit_session_id: data.session_id
-    });
+    user.kyc.rejectionReason = null;
+    try {
+      await db.updateUser(user.id, {
+        kyc_status: 'PENDING',
+        kyc_rejection_reason: null,
+        didit_session_id: data.session_id
+      });
+    } catch (e) {
+      console.warn('[KYC/DIDIT]: Failed to persist session id:', e.message);
+    }
     saveData();
 
     res.json({
@@ -1892,13 +2043,27 @@ app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, async (req, re
       kycStatus: 'PENDING',
       verificationUrl: data.url,
       sessionId: data.session_id,
-      sessionToken: data.session_token
+      sessionToken: data.session_token,
+      callbackUrl
     });
   } catch (err) {
-    console.error('[KYC/DIDIT]: Error:', err.message);
+    console.error('[KYC/DIDIT]:', err.message, err.body || '');
     user.kyc.status = 'PENDING';
     saveData();
-    res.status(500).json({ error: 'Failed to create KYC session.', details: err.message });
+    if (!IS_PRODUCTION) {
+      return res.json({
+        success: true,
+        kycStatus: 'PENDING',
+        sandbox: true,
+        message: 'KYC provider unreachable; running in local sandbox mode.',
+        callbackUrl: `${resolveFrontendBase(req)}/account/kyc-callback`
+      });
+    }
+    const status = err && err.status ? err.status : 500;
+    res.status(status).json({
+      error: 'Failed to create KYC session.',
+      details: (err && err.body && (err.body.detail || err.body)) || err.message
+    });
   }
 });
 
@@ -1910,16 +2075,43 @@ app.post('/api/user/kyc/verify-sandbox', verifyToken, enforceJurisdiction, async
   const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
-  user.kyc.status = 'VERIFIED';
-  user.kyc.tier = 2;
-  user.kyc.verifiedAt = new Date().toISOString();
-  user.kyc.rejectionReason = null;
-  saveData();
+  applyDiditDecision(user, 'Approved', null);
 
   res.json({
     success: true,
     message: 'Sandbox Identity Verification Successful!',
     kyc: user.kyc
+  });
+});
+
+// Live status endpoint used by the client while Didit is in review. We trust
+// the stored kyc row as the source of truth, but if a session is in flight and
+// the provider is reachable we opportunistically re-fetch the decision so the
+// user sees fresh data without waiting for the webhook.
+app.get('/api/user/kyc/status', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  let live = null;
+  if (user.diditSessionId && DIDIT_API_KEY && (user.kyc.status === 'PENDING' || user.kyc.status === 'UNVERIFIED')) {
+    try {
+      const decision = await diditGetDecision(user.diditSessionId);
+      if (decision && DIDIT_KNOWN_STATUSES.has(decision.status)) {
+        const updated = applyDiditDecision(user, decision.status, decision);
+        if (updated) live = { status: decision.status, fetchedAt: Date.now() };
+      }
+    } catch (e) {
+      // Don't 500 the whole endpoint if Didit is rate-limiting or down — the
+      // client should just keep using its local kyc row.
+      console.warn('[KYC]: live poll failed:', e.message);
+    }
+  }
+
+  res.json({
+    kyc: user.kyc,
+    diditSessionId: user.diditSessionId || null,
+    live,
+    diditConfigured: !!DIDIT_API_KEY
   });
 });
 
@@ -3452,10 +3644,11 @@ app.post('/api/affiliate/click', express.json(), async (req, res) => {
   const { code } = req.body || {};
   if (!code) return res.status(400).json({ error: 'Referral code required.' });
   try {
-    const aff = await db.getAffiliateByCode(String(code).trim().toUpperCase());
+    const normalized = String(code).trim().toUpperCase();
+    const aff = await db.getAffiliateByCode(normalized);
     if (!aff) return res.status(404).json({ error: 'Invalid referral code.' });
-    const clicks = affClicks.get(code) || 0;
-    affClicks.set(code, clicks + 1);
+    const clicks = affClicks.get(normalized) || 0;
+    affClicks.set(normalized, clicks + 1);
     res.json({ success: true, clicks: clicks + 1 });
   } catch (e) {
     res.status(500).json({ error: 'Click tracking failed.' });
@@ -3484,8 +3677,7 @@ app.get('/api/affiliate/status', verifyToken, async (req, res) => {
     const earnings = await db.getAffiliateEarnings(user.id, 50);
     const totalEarnings = Object.values(totals).reduce((s, v) => s + Number(v || 0), 0);
 
-    const baseUrl = (req.headers.origin || `https://${req.headers.host}`).replace(/\/$/, '');
-    const referralLink = `${baseUrl}/?ref=${aff.referral_code}`;
+    const referralLink = `${resolveFrontendBase(req)}/?ref=${aff.referral_code}`;
 
      res.json({
        referralCode: aff.referral_code,
@@ -3523,7 +3715,7 @@ app.get('/api/affiliate/status', verifyToken, async (req, res) => {
 app.post('/api/affiliate/apply', verifyToken, async (req, res) => {
   const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
-  const code = String(req.body?.code || '').trim();
+  const code = String(req.body?.code || '').trim().toUpperCase();
   if (!code) return res.status(400).json({ error: 'Referral code is required.' });
 
   try {
@@ -3700,22 +3892,29 @@ function renderPage(viewName) {
   return html;
 }
 
+// 2. Main Page Routes
 app.get('/account', (req, res) => res.type('html').send(renderPage('account')));
-app.get('/account/*', (req, res) => res.type('html').send(renderPage('account')));
 app.get('/bonus', (req, res) => res.type('html').send(renderPage('bonus')));
 app.get('/challenges', (req, res) => res.type('html').send(renderPage('challenges')));
 app.get('/rakeback', (req, res) => res.type('html').send(renderPage('rakeback')));
 
-// SPA fallback: serve index.html for all non-API routes (exclude /api/ so unknown
-// API endpoints fall through to the JSON 404 handler below)
-app.get(/^\/(?!api\/).*$/, (req, res) => {
+// 3. Sub-route Wildcard (only if /account has internal SPA sub-routes like /account/settings)
+app.get('/account/*', (req, res, next) => {
+  // Pass to static or 404 handler if it looks like a file request
+  if (req.path.includes('.')) return next(); 
+  res.type('html').send(renderPage('account'));
+});
+
+// 4. Global SPA fallback
+app.get(/^\/(?!api\/).*$/, (req, res, next) => {
+  if (req.path.includes('.')) return next();
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// JSON 404 for any unknown API route (never leak an HTML stack page)
+// 5. 404 Handler for missing static files and API routes
 app.use((req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'Endpoint not found.' });
   }
-  res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.status(404).send('File not found');
 });

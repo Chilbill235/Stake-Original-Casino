@@ -76,6 +76,8 @@ function createSchema() {
   ensureColumn('referred_by', 'INTEGER');
   ensureColumn('is_guest', 'INTEGER DEFAULT 0');
   ensureColumn('didit_session_id', 'TEXT');
+  ensureColumn('password_reset_token', 'TEXT');
+  ensureColumn('password_reset_expiry', 'INTEGER DEFAULT 0');
 
 
   db.run(`CREATE TABLE IF NOT EXISTS provably_fair_seeds (
