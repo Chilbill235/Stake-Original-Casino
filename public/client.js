@@ -24,9 +24,10 @@ const state = {
   clientSeed: localStorage.getItem('casino_client_seed') || generateRandomSeed(),
   serverSeedHash: localStorage.getItem('casino_server_hash') || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   nonce: parseInt(localStorage.getItem('casino_nonce') || '0', 10),
-  sfxEnabled: true,
-   isEmbedded: window.self !== window.top
-};
+   sfxEnabled: true,
+   isEmbedded: window.self !== window.top,
+   settings: (() => { try { return JSON.parse(localStorage.getItem('casino_settings') || '{}'); } catch (e) { return {}; } })()
+ };
 window.__CASINO_CURRENCY = state.currency;
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
@@ -230,6 +231,20 @@ async function initSession(autoGuest = true) {
   }
 
   await detectGeoLocation();
+
+  // Capture referral code from URL on first visit (store in localStorage)
+  const urlCode = new URLSearchParams(window.location.search).get('ref');
+  if (urlCode) {
+    localStorage.setItem('casino_referral', urlCode.toUpperCase());
+    // Clean the URL without reloading
+    if (history.replaceState) {
+      const clean = new URL(window.location);
+      clean.searchParams.delete('ref');
+      history.replaceState({}, document.title, clean.pathname + clean.search);
+    }
+    // Send click tracking
+    fetch('/api/affiliate/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: urlCode }) }).catch(() => {});
+  }
 
   let token = localStorage.getItem('casino_token');
 
@@ -3464,10 +3479,10 @@ function setActiveSidebarLink(path) {
 function toggleMainSidebar() {
   const sb = document.getElementById('main-sidebar');
   if (!sb) return;
-  sb.classList.toggle('open');
+  sb.classList.toggle('mobile-open');
   const overlay = document.getElementById('sidebar-overlay');
   if (overlay) overlay.classList.toggle('open');
-  document.body.style.overflow = sb.classList.contains('open') ? 'hidden' : '';
+  document.body.style.overflow = sb.classList.contains('mobile-open') ? 'hidden' : '';
 }
 
 function renderAccountPage(page = 'overview') {
@@ -3707,7 +3722,8 @@ function renderAccountPage(page = 'overview') {
             <div class="reward-item"><span class="reward-label">From Deposits</span><span class="reward-value sc-val" id="aff-earnings-deposits">0.00 SC</span></div>
             <div class="reward-item"><span class="reward-label">From Wagers</span><span class="reward-value sc-val" id="aff-earnings-wagers">0.00 SC</span></div>
             <div class="reward-item"><span class="reward-label">Total Earned</span><span class="reward-value sc-val" id="aff-earnings-total">0.00 SC</span></div>
-            <div class="reward-item"><span class="reward-label">Referred Users</span><span class="reward-value" id="aff-referred-count">0</span></div>
+             <div class="reward-item"><span class="reward-label">Referred Users</span><span class="reward-value" id="aff-referred-count">0</span></div>
+             <div class="reward-item"><span class="reward-label">Link Clicks</span><span class="reward-value" id="aff-clicks-count">0</span></div>
           </div>
         </div>
 
@@ -3772,14 +3788,92 @@ function renderAccountPage(page = 'overview') {
           </div>
         </div>
       </div>`;
+  } else if (page === 'settings') {
+    const s = state.settings || {};
+    const vol = s.masterVolume !== undefined ? s.masterVolume : 0.7;
+    const sfx = s.sfxVolume !== undefined ? s.sfxVolume : 0.5;
+    const music = s.musicVolume !== undefined ? s.musicVolume : 0.3;
+    const themePref = s.theme || 'dark';
+    const autoCashout = s.autoCashoutThreshold || '0';
+    const defaultCurr = s.defaultCurrency || 'GC';
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">⚙️</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Settings</h1>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card">
+          <h3 class="account-card-title">Audio</h3>
+          <div class="setting-row"><label>Master Volume</label>
+            <input type="range" min="0" max="1" step="0.01" value="${vol}" onchange="saveSetting('masterVolume', this.value); playSound('chip')">
+            <span class="setting-value">${Math.round(vol*100)}%</span>
+          </div>
+          <div class="setting-row"><label>Sound Effects</label>
+            <input type="range" min="0" max="1" step="0.01" value="${sfx}" onchange="saveSetting('sfxVolume', this.value)">
+            <span class="setting-value">${Math.round(sfx*100)}%</span>
+          </div>
+          <div class="setting-row"><label>Background Music</label>
+            <input type="range" min="0" max="1" step="0.01" value="${music}" onchange="saveSetting('musicVolume', this.value)">
+            <span class="setting-value">${Math.round(music*100)}%</span>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Preferences</h3>
+          <div class="setting-row"><label>Theme</label>
+            <select onchange="saveSetting('theme', this.value); applyTheme(this.value)">
+              <option value="dark" ${themePref==='dark'?'selected':''}>Dark</option>
+              <option value="light" ${themePref==='light'?'selected':''}>Light</option>
+              <option value="auto" ${themePref==='auto'?'selected':''}>Auto (System)</option>
+            </select>
+          </div>
+          <div class="setting-row"><label>Default Currency</label>
+            <select onchange="saveSetting('defaultCurrency', this.value)">
+              <option value="GC" ${defaultCurr==='GC'?'selected':''}>Gold Coins (GC)</option>
+              <option value="SC" ${defaultCurr==='SC'?'selected':''}>Sweeps Coins (SC)</option>
+            </select>
+          </div>
+          <div class="setting-row"><label>Auto-Cashout (Crash/Dice)</label>
+            <input type="number" min="0" placeholder="0 = disabled" value="${autoCashout}" onchange="saveSetting('autoCashoutThreshold', this.value)">
+          </div>
+          <div class="setting-row"><label><input type="checkbox" onchange="toggleSetting('compactMode', this.checked)" ${s.compactMode?'checked':''}> Compact Mode</label></div>
+          <div class="setting-row"><label><input type="checkbox" onchange="toggleSetting('animations', this.checked)" ${s.animations!==false?'checked':''}> Enable Animations</label></div>
+          <div class="setting-row"><label><input type="checkbox" onchange="toggleSetting('soundOnHover', this.checked)" ${s.soundOnHover?'checked':''}> Sound on Hover</label></div>
+        </div>
+      </div>`;
   }
 
-  content.innerHTML = html;
+   content.innerHTML = html;
   if (page === 'transactions') {
     loadAccountTransactions(state.accountTxSub || 'deposits');
   }
   if (page === 'affiliates') {
     loadAffiliateData();
+  }
+}
+
+function saveSetting(key, value) {
+  state.settings = state.settings || {};
+  if (typeof value === 'string' && !isNaN(Number(value)) && ['masterVolume', 'sfxVolume', 'musicVolume'].includes(key)) {
+    value = parseFloat(value);
+  }
+  state.settings[key] = value;
+  try { localStorage.setItem('casino_settings', JSON.stringify(state.settings)); } catch (e) {}
+}
+
+function toggleSetting(key, checked) {
+  saveSetting(key, checked);
+}
+
+function applyTheme(pref) {
+  const body = document.body;
+  if (pref === 'light') {
+    body.classList.add('light-theme');
+    body.classList.remove('dark-theme');
+  } else {
+    body.classList.add('dark-theme');
+    body.classList.remove('light-theme');
   }
 }
 
@@ -3896,6 +3990,9 @@ async function loadAffiliateData() {
     if (wagEl) wagEl.textContent = formatCoins(data.totals.wagers) + ' SC';
     if (totEl) totEl.textContent = formatCoins(data.totals.total) + ' SC';
     if (refEl) refEl.textContent = data.referredCount;
+
+    const clicksEl = document.getElementById('aff-clicks-count');
+    if (clicksEl) clicksEl.textContent = data.clicks || 0;
 
     const rateDep = document.getElementById('aff-rate-deposit');
     const rateWag = document.getElementById('aff-rate-wager');
@@ -4723,7 +4820,7 @@ async function submitRegister() {
   }
 
    try {
-    const refCode = new URLSearchParams(window.location.search).get('ref');
+     const refCode = localStorage.getItem('casino_referral') || new URLSearchParams(window.location.search).get('ref');
     const data = await apiRequest('/api/auth/register', 'POST', { username, email, password, birthDate, state: userState, ref: refCode });
     localStorage.setItem('casino_token', data.token);
     state.profile = data.user || { id: null, username, email, isGuest: false };
@@ -4751,7 +4848,7 @@ async function continueAsGuest() {
     localStorage.removeItem('casino_username');
   }
   try {
-    const refCode = new URLSearchParams(window.location.search).get('ref');
+     const refCode = localStorage.getItem('casino_referral') || new URLSearchParams(window.location.search).get('ref');
     const data = await apiRequest('/api/auth/guest', 'POST', refCode ? { ref: refCode } : {});
     if (data.token) {
       localStorage.setItem('casino_token', data.token);
@@ -4936,6 +5033,17 @@ window.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
+  // Apply saved theme preference
+  const theme = (state.settings && state.settings.theme) || 'dark';
+  if (theme === 'light') {
+    document.body.classList.add('light-theme');
+    document.body.classList.remove('dark-theme');
+  } else if (theme === 'auto') {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+      document.body.classList.add('light-theme');
+      document.body.classList.remove('dark-theme');
+    }
+  }
   initSession();
 });
 ['click', 'touchstart', 'keydown'].forEach(evt => {
@@ -5049,9 +5157,11 @@ function handleRouteChange() {
       page = 'wallet';
     } else if (path === '/account/kyc') {
       page = 'kyc';
-    } else if (path === '/account/security') {
-      page = 'security';
-    } else if (path === '/account/transactions') {
+   } else if (path === '/account/security') {
+       page = 'security';
+     } else if (path === '/account/settings') {
+       page = 'settings';
+     } else if (path === '/account/transactions') {
       page = 'transactions';
       state.accountTxSub = state.accountTxSub || 'deposits';
     }

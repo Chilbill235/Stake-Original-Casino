@@ -1573,6 +1573,7 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
       registeredAt: user.registeredAt || null
     },
     isGuest: user.email && user.email.endsWith('@guest.casino'),
+    referredBy: user.referred_by || null,
     createdAt: user.createdAt,
     balances: { 
       gc: user.gc_balance, 
@@ -3259,6 +3260,34 @@ async function creditReferrerForWager(referredUser, scWagered) {
   }
 }
 
+const affClicks = new Map(); // referralCode -> clicks count (in-memory)
+
+app.post('/api/affiliate/click', express.json(), async (req, res) => {
+  const { code } = req.body || {};
+  if (!code) return res.status(400).json({ error: 'Referral code required.' });
+  try {
+    const aff = await db.getAffiliateByCode(String(code).trim().toUpperCase());
+    if (!aff) return res.status(404).json({ error: 'Invalid referral code.' });
+    const clicks = affClicks.get(code) || 0;
+    affClicks.set(code, clicks + 1);
+    res.json({ success: true, clicks: clicks + 1 });
+  } catch (e) {
+    res.status(500).json({ error: 'Click tracking failed.' });
+  }
+});
+
+app.get('/api/affiliate/clicks', verifyToken, async (req, res) => {
+  const user = users.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  try {
+    const aff = await ensureAffiliateRecord(user);
+    const clicks = affClicks.get(aff.referral_code) || 0;
+    res.json({ referralCode: aff.referral_code, clicks });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load click stats.' });
+  }
+});
+
 app.get('/api/affiliate/status', verifyToken, async (req, res) => {
   const user = users.get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -3272,10 +3301,11 @@ app.get('/api/affiliate/status', verifyToken, async (req, res) => {
     const baseUrl = (req.headers.origin || `https://${req.headers.host}`).replace(/\/$/, '');
     const referralLink = `${baseUrl}/?ref=${aff.referral_code}`;
 
-    res.json({
-      referralCode: aff.referral_code,
-      referralLink,
-      totals: {
+     res.json({
+       referralCode: aff.referral_code,
+       referralLink,
+       clicks: affClicks.get(aff.referral_code) || 0,
+       totals: {
         deposits: round2(totals.DEPOSIT || 0),
         wagers: round2(totals.WAGER || 0),
         total: round2(totalEarnings)
