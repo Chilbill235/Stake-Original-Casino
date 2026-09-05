@@ -2,7 +2,10 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-const dbPath = path.join(__dirname, 'casino.sqlite');
+// On Vercel / serverless, /var/task is read-only — use /tmp for persistence
+const isServerless = process.env.VERCEL === '1' || !!process.env.VERCEL;
+const SOURCE_DB_PATH = path.join(__dirname, 'casino.sqlite');
+const dbPath = isServerless ? '/tmp/casino.sqlite' : SOURCE_DB_PATH;
 let db = null;
 let saveScheduled = false;
 
@@ -12,6 +15,18 @@ const initPromise = (async () => {
     const filebuffer = fs.readFileSync(dbPath);
     db = new SQL.Database(filebuffer);
     ensureSchema();
+  } else if (isServerless && fs.existsSync(SOURCE_DB_PATH)) {
+    // Cold start on Vercel: copy the read-only /var/task DB to /tmp
+    try {
+      const filebuffer = fs.readFileSync(SOURCE_DB_PATH);
+      db = new SQL.Database(filebuffer);
+      ensureSchema();
+      persistSync();
+    } catch (e) {
+      console.error('[Persistence]: Failed to copy DB from source on serverless, starting fresh:', e.message);
+      db = new SQL.Database();
+      createSchema();
+    }
   } else {
     db = new SQL.Database();
     createSchema();

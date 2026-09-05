@@ -386,6 +386,7 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('unhandledRejection', (reason) => {
   console.error('[Server]: Unhandled Rejection:', reason instanceof Error ? reason.message : String(reason));
 });
+
 if (process.env.VERCEL) {
   process.on('uncaughtException', (err) => {
     console.error('[Server]: Uncaught Exception:', err.message);
@@ -485,10 +486,7 @@ if (process.env.VERCEL) {
 })();
 
 async function startServer() {
-  if (process.env.VERCEL) {
-    module.exports = app;
-    return;
-  }
+  if (process.env.VERCEL) return;
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`[Server]: Port ${PORT} is already in use. Another server instance may be running. Exiting.`);
@@ -664,6 +662,9 @@ function balancesOf(user) {
 // -----------------------------------------------------------------------------
 const app = express();
 const server = http.createServer(app);
+
+// Export app immediately for Vercel serverless discovery
+module.exports = app;
 
 function corsOptions(origin, callback) {
   const allowedOrigins = [

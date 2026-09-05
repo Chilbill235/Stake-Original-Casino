@@ -135,6 +135,10 @@
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
+  scrollbar-gutter: stable both-edges;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .hidden {
@@ -148,13 +152,26 @@ body.dark-theme {
   min-height: 100dvh;
   min-height: 100vh;
   overflow-x: hidden;
-  overflow-y: scroll;
-  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Prevent any element from causing horizontal scroll on PC */
+img, svg, video, canvas, iframe {
+  max-width: 100%;
+  height: auto;
+}
+table {
+  max-width: 100%;
+  width: 100%;
+  table-layout: fixed;
+}
+.containers-safe {
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* Animated Background */
