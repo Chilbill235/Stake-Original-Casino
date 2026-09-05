@@ -144,9 +144,11 @@ html {
 body {
   overflow-x: hidden;
   overflow-y: scroll;
+  scrollbar-gutter: stable;
   margin: 0;
   padding: 0;
   max-width: 100vw;
+  min-width: 0;
 }
 
 /* Ensure all containers don't exceed viewport */
@@ -199,6 +201,17 @@ table {
   max-width: 100%;
   width: 100%;
   table-layout: fixed;
+}
+
+/* Nuclear option: prevent ALL horizontal overflow */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.main-layout {
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 .containers-safe {
   max-width: 100%;
@@ -5726,6 +5739,9 @@ opacity: 0.5;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--glass-border);
   background: var(--glass-bg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bets-feed {
@@ -5740,6 +5756,10 @@ opacity: 0.5;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   font-size: 0.8rem;
   gap: 8px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .bet-row:hover {
@@ -5769,6 +5789,10 @@ opacity: 0.5;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .bet-mult {
@@ -5791,6 +5815,9 @@ opacity: 0.5;
   padding: 12px;
   border-bottom: 1px solid var(--glass-border);
   background: var(--glass-bg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .game-results-header h4 {
@@ -5813,10 +5840,15 @@ opacity: 0.5;
 .result-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   font-size: 0.8rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .result-row:hover {
