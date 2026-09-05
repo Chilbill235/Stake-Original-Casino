@@ -277,6 +277,59 @@ const users = new Map();
 const transactions = new Map();
 const processedEvents = new Set();
 const processedEventsTimestamps = new Map();
+// In-memory affiliate store. Used as a fallback when db.* is the memory
+// stub so affiliate status / clicks / applications still work end-to-end.
+// Keyed by user_id.
+const affiliates = new Map();
+// Index by referral code for fast lookups. Code is uppercased.
+const affiliatesByCode = new Map();
+
+// Memory-mode wrappers. In SQLite mode these just call db.*. In memory
+// mode they read/write the in-memory Maps above so the rest of the
+// codebase doesn't have to special-case the backend.
+async function getAffiliateRecord(userId) {
+  if (affiliates.has(userId)) return affiliates.get(userId);
+  const record = await db.getAffiliateByUserId(userId);
+  if (record) {
+    affiliates.set(userId, record);
+    if (record.referral_code) affiliatesByCode.set(String(record.referral_code).toUpperCase(), record);
+  }
+  return record;
+}
+
+async function getAffiliateByCodeRecord(code) {
+  const upper = String(code).trim().toUpperCase();
+  if (affiliatesByCode.has(upper)) return affiliatesByCode.get(upper);
+  const record = await db.getAffiliateByCode(upper);
+  if (record) {
+    affiliates.set(record.user_id, record);
+    affiliatesByCode.set(upper, record);
+  }
+  return record;
+}
+
+async function setAffiliateReferredByMemory(userId, referredBy) {
+  // Always write to db (no-op in memory mode). Also update the in-memory
+  // record so subsequent getAffiliateRecord calls return the fresh value.
+  await db.setAffiliateReferredBy(userId, referredBy);
+  const existing = affiliates.get(userId);
+  if (existing) {
+    existing.referred_by = referredBy;
+  } else {
+    const record = await db.getAffiliateByUserId(userId);
+    if (record) {
+      record.referred_by = referredBy;
+      affiliates.set(userId, record);
+      if (record.referral_code) {
+        affiliatesByCode.set(String(record.referral_code).toUpperCase(), record);
+      }
+    } else {
+      // Create a minimal record so the rest of the system can proceed.
+      const placeholder = { user_id: userId, referral_code: null, referred_by: referredBy, created_at: Date.now() };
+      affiliates.set(userId, placeholder);
+    }
+  }
+}
 
 // Helper: get user from memory Map, falling back to DB (handles serverless cold starts)
 async function getUserById(id) {
@@ -292,7 +345,7 @@ async function getUserById(id) {
         console.warn('[DB]: Failed to load bonus_state for user', dbUser.id, e.message);
       }
       try {
-        affiliateRecord = await db.getAffiliateByUserId(dbUser.id);
+        affiliateRecord = await getAffiliateRecord(dbUser.id);
       } catch (e) {
         console.warn('[DB]: Failed to load affiliate record for user', dbUser.id, e.message);
       }
@@ -1351,9 +1404,9 @@ app.post('/api/auth/guest', async (req, res) => {
 
     if (req.body?.ref) {
       try {
-        const referrerAff = await db.getAffiliateByCode(String(req.body.ref).trim().toUpperCase());
+        const referrerAff = await getAffiliateByCodeRecord(String(req.body.ref).trim().toUpperCase());
         if (referrerAff && referrerAff.user_id !== userId) {
-          await db.setAffiliateReferredBy(userId, referrerAff.user_id);
+          await setAffiliateReferredByMemory(userId, referrerAff.user_id);
         }
       } catch (e) {
         console.warn('[Guest Referral Hook]:', e.message);
@@ -1562,9 +1615,9 @@ app.post('/api/auth/register', async (req, res) => {
     // Auto-attribute referral if a valid code is provided
     if (ref) {
       try {
-        const referrerAff = await db.getAffiliateByCode(String(ref).trim().toUpperCase());
+        const referrerAff = await getAffiliateByCodeRecord(String(ref).trim().toUpperCase());
         if (referrerAff && referrerAff.user_id !== userId) {
-          await db.setAffiliateReferredBy(userId, referrerAff.user_id);
+          await setAffiliateReferredByMemory(userId, referrerAff.user_id);
         }
       } catch (e) {
         console.warn('[Register Referral Hook]:', e.message);
@@ -3582,27 +3635,42 @@ function generateReferralCode(username) {
 }
 
 async function ensureAffiliateRecord(user) {
-  let record = await db.getAffiliateByUserId(user.id);
+  let record = await getAffiliateRecord(user.id);
   if (!record) {
     const code = generateReferralCode(user.username);
     await db.createAffiliate(user.id, code, null);
-    record = await db.getAffiliateByUserId(user.id);
+    record = await getAffiliateRecord(user.id);
+  }
+  // In-memory fallback so affiliate status works on Vercel where db.* is a
+  // stub. The record lives in `affiliates` for the lifetime of the process.
+  if (!record) {
+    const code = generateReferralCode(user.username);
+    const created = { user_id: user.id, referral_code: code, referred_by: null, created_at: Date.now() };
+    affiliates.set(user.id, created);
+    affiliatesByCode.set(code.toUpperCase(), created);
+    record = created;
   }
   return record;
 }
 
 async function ensureAffiliateRecordFor(userId, code, referredBy) {
-  let record = await db.getAffiliateByUserId(userId);
+  let record = await getAffiliateRecord(userId);
   if (!record) {
     await db.createAffiliate(userId, code, referredBy);
-    record = await db.getAffiliateByUserId(userId);
+    record = await getAffiliateRecord(userId);
+  }
+  if (!record) {
+    const created = { user_id: userId, referral_code: code, referred_by: referredBy || null, created_at: Date.now() };
+    affiliates.set(userId, created);
+    affiliatesByCode.set(code.toUpperCase(), created);
+    record = created;
   }
   return record;
 }
 
 async function creditReferrerForDeposit(referredUser, depositUsdValue) {
   try {
-    const aff = await db.getAffiliateByUserId(referredUser.id);
+    const aff = await getAffiliateRecord(referredUser.id);
     if (!aff || !aff.referred_by) return;
     const referrer = users.get(aff.referred_by);
     if (!referrer) return;
@@ -3630,7 +3698,7 @@ async function creditReferrerForDeposit(referredUser, depositUsdValue) {
 async function creditReferrerForWager(referredUser, scWagered) {
   try {
     if (scWagered <= 0) return;
-    const aff = await db.getAffiliateByUserId(referredUser.id);
+    const aff = await getAffiliateRecord(referredUser.id);
     if (!aff || !aff.referred_by) return;
     const referrer = users.get(aff.referred_by);
     if (!referrer) return;
@@ -3657,7 +3725,7 @@ app.post('/api/affiliate/click', express.json(), async (req, res) => {
   if (!code) return res.status(400).json({ error: 'Referral code required.' });
   try {
     const normalized = String(code).trim().toUpperCase();
-    const aff = await db.getAffiliateByCode(normalized);
+    const aff = await getAffiliateByCodeRecord(normalized);
     if (!aff) return res.status(404).json({ error: 'Invalid referral code.' });
     const clicks = affClicks.get(normalized) || 0;
     affClicks.set(normalized, clicks + 1);
@@ -3731,12 +3799,12 @@ app.post('/api/affiliate/apply', verifyToken, async (req, res) => {
   if (!code) return res.status(400).json({ error: 'Referral code is required.' });
 
   try {
-    const existing = await db.getAffiliateByUserId(user.id);
+    const existing = await getAffiliateRecord(user.id);
     if (existing && existing.referred_by) {
       return res.status(400).json({ error: 'You already used a referral code.' });
     }
 
-    const referrerAff = await db.getAffiliateByCode(code);
+    const referrerAff = await getAffiliateByCodeRecord(code);
     if (!referrerAff) return res.status(404).json({ error: 'Invalid referral code.' });
     if (referrerAff.user_id === user.id) {
       return res.status(400).json({ error: 'You cannot refer yourself.' });
@@ -3746,7 +3814,7 @@ app.post('/api/affiliate/apply', verifyToken, async (req, res) => {
     if (!referrer) return res.status(404).json({ error: 'Referrer not found.' });
 
     await ensureAffiliateRecord(user);
-    await db.setAffiliateReferredBy(user.id, referrer.id);
+    await setAffiliateReferredByMemory(user.id, referrer.id);
 
     user.referred_by = referrer.id;
     saveData();
