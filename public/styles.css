@@ -2842,7 +2842,7 @@ opacity: 0.5;
   padding: 32px;
   max-width: 500px;
   width: 100%;
-  max-height: 90vh;
+  max-height: 90dvh;
   overflow-y: auto;
   position: relative;
   animation: modalSlideUp 0.3s ease-out;
@@ -2862,7 +2862,7 @@ opacity: 0.5;
 
   .modal-box {
     padding: 24px;
-    max-height: 95vh;
+     max-height: 95dvh;
   }
 }
 
@@ -9389,7 +9389,7 @@ opacity: 0.5;
 body.light-theme {
   background: linear-gradient(135deg, #e0eafc 0%, #cfdef3 100%);
   color: #1a1a2e;
-  min-height: 100vh;
+   min-height: 100dvh;
   overflow-x: hidden;
 }
 body.light-theme .account-card,
