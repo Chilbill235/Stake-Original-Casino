@@ -357,9 +357,19 @@ function ensureSchema() {
 
 function persistSync() {
   if (!db) return;
-  const data = db.export();
-  fs.writeFileSync(dbPath, Buffer.from(data));
+  try {
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+  } catch (e) {
+    // On read-only filesystems (e.g. serverless, containers) persistence is
+    // best-effort. In-memory state still works; we just can't write to disk.
+    if (!persistWarned) {
+      persistWarned = true;
+      console.warn('[Persistence]: Read-only filesystem — changes will not be saved to disk. In-memory state is active.');
+    }
+  }
 }
+var persistWarned = false;
 
 function scheduleSave() {
   if (saveScheduled) return;
