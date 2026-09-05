@@ -987,27 +987,42 @@ app.post('/api/auth/guest', async (req, res) => {
       });
     }
 
-    const userId = await db.createUser({
-      username,
-      email,
-      password: null,
-      gcBalance: 10000,
-      scBalance: 10
-    });
+    let userId;
+    try {
+      userId = await db.createUser({
+        username,
+        email,
+        password: null,
+        gcBalance: 10000,
+        scBalance: 10
+      });
+    } catch (dbErr) {
+      console.error('[Guest DB createUser Error]:', dbErr.message, dbErr.stack);
+      return res.status(500).json({ error: 'Database error during guest creation.', details: dbErr.message });
+    }
 
-    await db.updateUser(userId, {
-      state: detectedState,
-      geo_ip: clientIp,
-      geo_country: geo.country || null,
-      geo_city: geo.city || null,
-      geo_is_vpn: geo.isVpn ? 1 : 0,
-      geo_risk_score: geo.riskScore || 0,
-      registered_at: Date.now()
-    });
+    try {
+      await db.updateUser(userId, {
+        state: detectedState,
+        geo_ip: clientIp,
+        geo_country: geo.country || null,
+        geo_city: geo.city || null,
+        geo_is_vpn: geo.isVpn ? 1 : 0,
+        geo_risk_score: geo.riskScore || 0,
+        registered_at: Date.now()
+      });
+    } catch (dbErr) {
+      console.error('[Guest DB updateUser Error]:', dbErr.message, dbErr.stack);
+      return res.status(500).json({ error: 'Database error during guest profile update.', details: dbErr.message });
+    }
 
-    // Always create an affiliate record so the user has a referral code
-    // they can share, even if they arrived without ?ref=
-    await ensureAffiliateRecordFor(userId, generateReferralCode(username), null);
+    let affCode;
+    try {
+      affCode = generateReferralCode(username);
+      await ensureAffiliateRecordFor(userId, affCode, null);
+    } catch (affErr) {
+      console.error('[Guest Affiliate Error]:', affErr.message, affErr.stack);
+    }
 
     if (req.body?.ref) {
       try {
@@ -1079,7 +1094,14 @@ app.post('/api/auth/guest', async (req, res) => {
     users.set(userId, newUser);
     transactions.set(userId, []);
 
-     const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    let token;
+    try {
+      token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    } catch (jwtErr) {
+      console.error('[Guest JWT Error]:', jwtErr.message, jwtErr.stack);
+      return res.status(500).json({ error: 'Failed to generate authentication token.', details: jwtErr.message });
+    }
+
     res.json({
       token,
       user: {
@@ -1092,10 +1114,10 @@ app.post('/api/auth/guest', async (req, res) => {
         geo: { ip: clientIp, country: geo.country, state: geo.state, city: geo.city, isVpn: geo.isVpn, riskScore: geo.riskScore }
       },
       balances: { gc: 10000, sc: 10 }
-     });
+    });
   } catch (e) {
-    console.error('[Guest Registration Error]:', e.message);
-    res.status(500).json({ error: 'Failed to create guest account.' });
+    console.error('[Guest Registration Error]:', e.message, e.stack);
+    res.status(500).json({ error: 'Failed to create guest account.', details: e.message });
   }
 });
 
@@ -3457,6 +3479,11 @@ if (process.env.VERCEL) {
     }
     process.exit(1);
   });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[Server]: Unhandled Rejection:', reason);
+  });
+
   server.listen(PORT, () => {
     console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
   });

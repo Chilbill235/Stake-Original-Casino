@@ -149,8 +149,6 @@ body.dark-theme {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-}
-  flex-direction: column;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -9154,4 +9152,35 @@ opacity: 0.5;
 .btn-checkout,
 .btn-hero-spin,
 .btn-hero-secondary { min-height: 44px; }
+
+/* Extra-small screens: single-column checkout + package grid */
+@media (max-width: 480px) {
+  .store-modal { padding: 12px; }
+  .modal-box { padding: 16px; }
+  .modal-backdrop { padding: 8px; padding-top: 12px; }
+
+  .package-grid { grid-template-columns: 1fr !important; gap: 8px; }
+  .crypto-options { grid-template-columns: repeat(2, 1fr); }
+
+  .checkout-stepper { gap: 2px; }
+  .checkout-stepper .checkout-step { font-size: 0.6rem; gap: 2px; }
+  .checkout-stepper .step-num { width: 20px; height: 20px; font-size: 0.6rem; }
+
+  .checkout-summary-panel { padding: 14px; }
+  .checkout-payment-panel { padding: 14px; }
+  .checkout-trust-badges { display: none; }
+
+  .checkout-methods { flex-direction: column; gap: 8px; }
+  .payment-method-btn { font-size: 0.8rem; padding: 10px; }
+
+  .checkout-package-name { font-size: 0.9rem; }
+  .summary-row { flex-direction: column; gap: 2px; }
+
+  .package-card-inner { gap: 6px; }
+  .package-coins { font-size: 0.85rem; }
+  .coin-amount { font-size: 1.1rem; }
+  .package-price { font-size: 0.9rem; }
+
+  .modal-header-flex h3 { font-size: 1.2rem; }
+}
 

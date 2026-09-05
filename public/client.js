@@ -15,11 +15,12 @@ const state = {
   selectedKenoNumbers: [],
   activeGameState: null,
   isProcessing: false,
-  activeCheckoutInstance: null,
+   activeCheckoutInstance: null,
   ws: null,
   wsReconnectTimer: null,
   feedFilter: 'ALL',
   liveBetBuffer: [],
+  globalListenersAttached: false,
   clientSeed: localStorage.getItem('casino_client_seed') || generateRandomSeed(),
   serverSeedHash: localStorage.getItem('casino_server_hash') || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   nonce: parseInt(localStorage.getItem('casino_nonce') || '0', 10),
@@ -262,6 +263,7 @@ async function initSession(autoGuest = true) {
     if (data.balances) state.balances = mergeBalances(data.balances);
     if (data.username) localStorage.setItem('casino_username', data.username);
     state.profile = data;
+    await handlePaymentSuccessRedirect();
   } catch (err) {
     if (err.geoRestricted) {
       showGeoRestrictionModal(err);
@@ -1531,9 +1533,38 @@ function showCheckoutSuccess(gc, sc) {
   }
 
    setTimeout(() => {
-     initSessionFromToken();
-     setTimeout(() => closeStoreModal(), 3000);
-   }, 100);
+      initSessionFromToken();
+      setTimeout(() => closeStoreModal(), 3000);
+    }, 100);
+}
+
+async function handlePaymentSuccessRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('payment') !== 'success') return;
+
+  if (history.replaceState) {
+    const clean = new URL(window.location);
+    clean.searchParams.delete('payment');
+    clean.searchParams.delete('session_id');
+    history.replaceState({}, document.title, clean.pathname + clean.search);
+  }
+
+  try {
+    const data = await apiRequest('/api/user/me');
+    if (data.balances) state.balances = mergeBalances(data.balances);
+    if (data.username) localStorage.setItem('casino_username', data.username);
+    state.profile = data;
+    updateWalletUI();
+    updateUserProfileBadge();
+  } catch (e) {
+    console.warn('[Payment Success Redirect]: Failed to refresh session:', e.message);
+  }
+
+  playSound('win');
+  const modal = document.getElementById('modal-store');
+  if (modal) modal.classList.remove('hidden');
+  setCheckoutStep(4);
+  showCheckoutSuccess('—', '—');
 }
 
 async function loadStripeSdk() {
@@ -1586,6 +1617,7 @@ async function buyCoinPackage(packageId) {
   }
   openStoreModal();
   selectPackage(packageId);
+  setTimeout(() => proceedToCheckout(), 100);
 }
 
 async function retryCheckout() {
@@ -4865,6 +4897,9 @@ function escapeHTML(str) {
 }
 
 function setupGlobalEventListeners() {
+  if (state.globalListenersAttached) return;
+  state.globalListenersAttached = true;
+
   const primaryBtn = document.getElementById('btn-primary-action');
   if (primaryBtn) {
     primaryBtn.removeEventListener('click', handlePrimaryAction);
