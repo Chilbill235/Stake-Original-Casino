@@ -135,7 +135,7 @@
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
   width: 100%;
   margin: 0;
   padding: 0;
@@ -152,6 +152,8 @@ body.dark-theme {
   min-height: 100dvh;
   min-height: 100vh;
   overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   line-height: 1.6;
@@ -2649,6 +2651,7 @@ opacity: 0.5;
 .global-bets-drawer .game-result-feed {
   flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px 12px;
 }
 
@@ -5667,6 +5670,7 @@ opacity: 0.5;
 .bets-feed-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-darker);
   border-bottom: 1px solid var(--glass-border);
 }
@@ -5717,6 +5721,7 @@ opacity: 0.5;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .bet-game {
@@ -5732,6 +5737,7 @@ opacity: 0.5;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-align: right;
+  flex-shrink: 0;
 }
 
 .bet-mult.win { color: var(--accent-green); }
@@ -5756,6 +5762,7 @@ opacity: 0.5;
 .game-result-feed-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-darker);
 }
 
