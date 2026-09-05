@@ -914,23 +914,21 @@ async function proceedToCheckout() {
   if (checkoutSection) checkoutSection.classList.remove('hidden');
 
   updateCheckoutSummary(packageId);
+
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
+  state.selectedPaymentMethod = null;
   selectPaymentMethod('card');
 
-  try {
-    if (state.activeCheckoutInstance) {
-      try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
-      state.activeCheckoutInstance = null;
+  setTimeout(() => {
+    if (!state.activeCheckoutInstance) {
+      setCheckoutStep(3);
+      const loadingState = document.getElementById('checkout-loading-state');
+      if (loadingState) loadingState.classList.remove('hidden');
     }
-    await loadStripeCheckout(packageId);
-  } catch (err) {
-    console.error('[Checkout Error]:', err);
-    if (err.requiresAccount) {
-      alert(err.message || 'Guest accounts cannot purchase coins. Please register a real account first.');
-    } else {
-      showCheckoutError(err.message || 'Failed to initialize payment.');
-    }
-    document.querySelectorAll('.package-card').forEach(c => c.classList.remove('selected'));
-  }
+  }, 50);
 }
 
 function updateCheckoutSummary(packageId) {
@@ -1013,27 +1011,28 @@ function selectPaymentMethod(method) {
   const cryptoPanel = document.getElementById('payment-crypto');
   if (!cardPanel || !cryptoPanel) return;
 
-  // Destroy any existing Stripe checkout instance and clear the container
-  if (state.activeCheckoutInstance) {
-    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
-    state.activeCheckoutInstance = null;
-  }
-  const container = document.getElementById('stripe-checkout-container');
-  if (container) container.innerHTML = '';
-
-  const oldPanel = oldMethod === 'card' ? cardPanel : cryptoPanel;
-  const newPanel = method === 'card' ? cardPanel : cryptoPanel;
-
-  if (!oldMethod) {
-    // First selection — just show the new panel
-    _showPanel(newPanel);
+  if (method === 'card') {
+    if (state.activeCheckoutInstance) {
+      _hidePanel(cryptoPanel, function () {
+        _showPanel(cardPanel);
+      });
+    } else if (state.lastPackageId) {
+      _hidePanel(cryptoPanel, function () {
+        _showPanel(cardPanel);
+        loadStripeCheckout(state.lastPackageId).catch(err => {
+          console.error('[Checkout]: Failed to (re)load Stripe:', err.message || err);
+          showCheckoutError(err.message || 'Failed to initialize payment.');
+        });
+      });
+    }
     return;
   }
 
-  // Animate: fade out old panel, then fade in new panel
-  _hidePanel(oldPanel, function () {
-    _showPanel(newPanel);
-  });
+  if (method === 'crypto') {
+    _hidePanel(cardPanel, function () {
+      _showPanel(cryptoPanel);
+    });
+  }
 }
 
 function selectCrypto(currency) {
@@ -1464,6 +1463,8 @@ function showCheckoutLoading() {
 function showCheckoutError(message) {
   setCheckoutStep(2);
   hideProcessingPanel();
+  state.activeCheckoutInstance = null;
+  state.selectedPaymentMethod = null;
   const container = document.getElementById('stripe-checkout-container');
   if (!container) return;
   container.innerHTML =
