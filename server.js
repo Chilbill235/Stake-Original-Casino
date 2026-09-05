@@ -108,6 +108,35 @@ const transactions = new Map();
 const processedEvents = new Set();
 const processedEventsTimestamps = new Map();
 
+// Helper: get user from memory Map, falling back to DB (handles serverless cold starts)
+async function getUserById(id) {
+  let user = users.get(id);
+  if (!user) {
+    const dbUser = await db.getUserById(id);
+    if (dbUser) {
+      user = {
+        id: dbUser.id,
+        username: dbUser.username,
+        email: dbUser.email,
+        password: dbUser.password,
+        gc_balance: dbUser.gc_balance,
+        sc_unplayed: dbUser.sc_unplayed,
+        sc_played: dbUser.sc_played,
+        state: dbUser.state,
+        vipTier: dbUser.vip_tier,
+        createdAt: dbUser.created_at,
+        kyc: { status: dbUser.kyc_status, tier: dbUser.kyc_tier },
+        bonus: {
+          lastClaimAt: dbUser.last_daily_claim,
+          claimStreak: dbUser.daily_streak
+        }
+      };
+      users.set(user.id, user);
+    }
+  }
+  return user;
+}
+
 // Clean up old processed event IDs every 10 minutes (keep last 1 hour)
 setInterval(() => {
   const cutoff = Date.now() - 3600000;
@@ -591,10 +620,10 @@ function updateVipAndRakeback(user, scWagered, gcWagered) {
  * balance check, max limit). Returns { user, currency, amount } or sends an error
  * response and returns null.
  */
-function validateWager(req, res) {
+async function validateWager(req, res) {
   const { currency, betAmount } = req.body || {};
 
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) { res.status(404).json({ error: 'User not found.' }); return null; }
 
   if (currency !== 'GC' && currency !== 'SC') {
@@ -694,9 +723,9 @@ app.use(cors({
 }));
 
 // Geofencing Compliance Middleware
-function enforceJurisdiction(req, res, next) {
+async function enforceJurisdiction(req, res, next) {
   // Use server-side user state, not client-spoofable header
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   const userState = (user && user.state) || 'CA';
   if (RESTRICTED_STATES.includes(userState.toUpperCase())) {
     return res.status(403).json({
@@ -1514,7 +1543,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/user/me', verifyToken, async (req, res) => {
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User profile not found.' });
 
   // Geo check on profile access
@@ -1695,8 +1724,8 @@ app.get('/api/user/transactions', verifyToken, enforceJurisdiction, (req, res) =
 // 9. STAKE-STYLE KYC VERIFICATION & USER ACTION ENDPOINTS
 // -----------------------------------------------------------------------------
 
-app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, (req, res) => {
-  const user = users.get(req.user.id);
+app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   if (user.kyc.status === 'VERIFIED') {
@@ -1716,12 +1745,12 @@ app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, (req, res) => 
   });
 });
 
-app.post('/api/user/kyc/verify-sandbox', verifyToken, enforceJurisdiction, (req, res) => {
+app.post('/api/user/kyc/verify-sandbox', verifyToken, enforceJurisdiction, async (req, res) => {
   // Sandbox KYC is only available in development/test environments
   if (process.env.NODE_ENV === 'production') {
     return res.status(403).json({ error: 'Sandbox verification is not available in production.' });
   }
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   user.kyc.status = 'VERIFIED';
@@ -1748,8 +1777,8 @@ app.post('/api/user/amoe-code', verifyToken, enforceJurisdiction, (req, res) => 
   });
 });
 
-app.post('/api/user/claim-rakeback', verifyToken, enforceJurisdiction, (req, res) => {
-  const user = users.get(req.user.id);
+app.post('/api/user/claim-rakeback', verifyToken, enforceJurisdiction, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const bonus = ensureBonusFields(user);
@@ -1786,8 +1815,8 @@ app.post('/api/user/claim-rakeback', verifyToken, enforceJurisdiction, (req, res
   });
 });
 
-app.post('/api/user/daily-bonus', verifyToken, enforceJurisdiction, (req, res) => {
-  const user = users.get(req.user.id);
+app.post('/api/user/daily-bonus', verifyToken, enforceJurisdiction, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const bonus = ensureBonusFields(user);
@@ -1825,8 +1854,8 @@ app.post('/api/user/daily-bonus', verifyToken, enforceJurisdiction, (req, res) =
   });
 });
 
-app.post('/api/user/rewarded-ad', verifyToken, enforceJurisdiction, (req, res) => {
-  const user = users.get(req.user.id);
+app.post('/api/user/rewarded-ad', verifyToken, enforceJurisdiction, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const now = Date.now();
@@ -1862,7 +1891,7 @@ app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, re
   const pkg = COIN_PACKAGES[packageId || 'pack_10'];
   if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
 
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const guestPaymentsAllowed = process.env.ALLOW_GUEST_PAYMENTS === 'true';
@@ -1947,7 +1976,7 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
     return res.status(400).json({ error: 'Unsupported cryptocurrency. Accepted: BTC, ETH, BASE, POLYGON, USDC, USDT, SOL.' });
   }
 
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
@@ -2027,7 +2056,7 @@ app.get('/api/user/crypto-payment/status/:paymentId', verifyToken, enforceJurisd
 // -----------------------------------------------------------------------------
 app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, async (req, res) => {
   const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   if (!guestOk && isGuestUser(user)) {
     return res.status(403).json({ error: 'Guest accounts cannot purchase coins.', requiresAccount: true });
@@ -2334,7 +2363,7 @@ async function verifyCryptoDeposit(payment, txid) {
 
 
 app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdiction, async (req, res) => {
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const guestOk = process.env.ALLOW_GUEST_PAYMENTS === 'true';
   if (!guestOk && isGuestUser(user)) {
@@ -2415,7 +2444,7 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
 });
 
 app.post('/api/user/withdraw-sc', verifyToken, enforceJurisdiction, async (req, res) => {
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   const host = req.headers.origin || `https://${req.headers.host}`;
 
   if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -2542,8 +2571,8 @@ require('./engine/sessionGames').register(app, {
 });
 
 // Slots Buy Bonus endpoint
-app.post('/api/play/slots/buy-bonus', verifyToken, enforceJurisdiction, (req, res) => {
-  const wager = validateWager(req, res);
+app.post('/api/play/slots/buy-bonus', verifyToken, enforceJurisdiction, async (req, res) => {
+  const wager = await validateWager(req, res);
   if (!wager) return;
   const { user, currency, amount } = wager;
 
@@ -2599,12 +2628,12 @@ app.post('/api/play/slots/buy-bonus', verifyToken, enforceJurisdiction, (req, re
 // -----------------------------------------------------------------------------
 // 12. GENERAL GAMES EXECUTION ENDPOINT
 // -----------------------------------------------------------------------------
-app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, (req, res) => {
+app.post('/api/play/:gameId', verifyToken, enforceJurisdiction, async (req, res) => {
   const { gameId } = req.params;
 
   if (!GAMES[gameId]) return res.status(404).json({ error: `Game engine '${gameId}' not supported.` });
 
-  const wager = validateWager(req, res);
+  const wager = await validateWager(req, res);
   if (!wager) return;
   const { user, currency, amount } = wager;
 
@@ -2925,8 +2954,8 @@ function calcChallengeReward(challenge) {
 
 const DAILY_CLAIM_REWARD = { gc: 1000, sc: 1.00 };
 
-app.get('/api/bonus/status', verifyToken, (req, res) => {
-  const user = users.get(req.user.id);
+app.get('/api/bonus/status', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const bonus = ensureBonusFields(user);
 
@@ -2944,8 +2973,8 @@ app.get('/api/bonus/status', verifyToken, (req, res) => {
   });
 });
 
-app.post('/api/bonus/daily-claim', verifyToken, (req, res) => {
-  const user = users.get(req.user.id);
+app.post('/api/bonus/daily-claim', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const bonus = ensureBonusFields(user);
 
@@ -2994,8 +3023,8 @@ app.post('/api/bonus/daily-claim', verifyToken, (req, res) => {
 // 12b. DAILY CHALLENGES ENDPOINTS
 // -----------------------------------------------------------------------------
 
-app.get('/api/challenges', verifyToken, (req, res) => {
-  const user = users.get(req.user.id);
+app.get('/api/challenges', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   ensureBonusFields(user);
   const challenges = generateDailyChallenges(user);
@@ -3013,8 +3042,8 @@ app.get('/api/challenges', verifyToken, (req, res) => {
   res.json({ challenges: progress });
 });
 
-app.post('/api/challenges/claim', verifyToken, (req, res) => {
-  const user = users.get(req.user.id);
+app.post('/api/challenges/claim', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const { challengeId } = req.body || {};
   if (!challengeId) return res.status(400).json({ error: 'challengeId required.' });
@@ -3087,8 +3116,8 @@ function getRakebackLosses(user) {
   };
 }
 
-app.get('/api/rakeback/status', verifyToken, (req, res) => {
-  const user = users.get(req.user.id);
+app.get('/api/rakeback/status', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const bonus = ensureBonusFields(user);
   const rb = bonus.rakeback;
@@ -3120,8 +3149,8 @@ app.get('/api/rakeback/status', verifyToken, (req, res) => {
   res.json({ rakeback: result });
 });
 
-app.post('/api/rakeback/claim', verifyToken, (req, res) => {
-  const user = users.get(req.user.id);
+app.post('/api/rakeback/claim', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const { tier } = req.body || {};
   if (!tier || !['daily', 'weekly', 'monthly'].includes(tier)) {
@@ -3277,7 +3306,7 @@ app.post('/api/affiliate/click', express.json(), async (req, res) => {
 });
 
 app.get('/api/affiliate/clicks', verifyToken, async (req, res) => {
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   try {
     const aff = await ensureAffiliateRecord(user);
@@ -3289,7 +3318,7 @@ app.get('/api/affiliate/clicks', verifyToken, async (req, res) => {
 });
 
 app.get('/api/affiliate/status', verifyToken, async (req, res) => {
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   try {
     const aff = await ensureAffiliateRecord(user);
@@ -3335,7 +3364,7 @@ app.get('/api/affiliate/status', verifyToken, async (req, res) => {
 });
 
 app.post('/api/affiliate/apply', verifyToken, async (req, res) => {
-  const user = users.get(req.user.id);
+  const user = await getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found.' });
   const code = String(req.body?.code || '').trim();
   if (!code) return res.status(400).json({ error: 'Referral code is required.' });

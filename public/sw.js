@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-const CACHE = 'stake-originals-v1';
+const CACHE = 'stake-originals-v2';
 const PRECACHE = [
   '/',
   '/index.html',
@@ -41,11 +41,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/')) return; // always network for API
+  if (url.pathname.startsWith('/api/')) return;
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request).then((response) => {
+      if (cached) return cached;
+      return fetch(event.request).then((response) => {
         if (response && response.status === 200) {
           const clone = response.clone();
           caches.open(CACHE).then((cache) => {
@@ -55,8 +56,9 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return response;
-      }).catch(() => cached);
-      return cached || networkFetch;
+      }).catch(() => {
+        return new Response('Offline', { status: 503, statusText: 'Offline' });
+      });
     })
   );
 });

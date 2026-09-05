@@ -599,6 +599,18 @@ module.exports = {
     return results;
   },
 
+  getUserById: async (id) => {
+    const database = await getDb();
+    const stmt = database.prepare('SELECT * FROM users WHERE id = ?');
+    stmt.bind([id]);
+    let result = null;
+    if (stmt.step()) {
+      result = stmt.getAsObject();
+    }
+    stmt.free();
+    return result;
+  },
+
   getTotalWagered: async () => {
     const database = await getDb();
     const result = database.exec('SELECT SUM(total_wagered_gc), SUM(total_wagered_sc) FROM users');

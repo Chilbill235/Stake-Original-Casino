@@ -139,6 +139,7 @@ html {
   width: 100%;
   margin: 0;
   padding: 0;
+  background: var(--bg-darker);
 }
 
 body {
@@ -182,9 +183,9 @@ body.dark-theme {
   color: var(--text-primary);
   font-family: var(--font-family);
   min-height: 100dvh;
-  min-height: 100vh;
   overflow-x: hidden;
   overflow-y: scroll;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   line-height: 1.6;
@@ -207,11 +208,44 @@ table {
 html, body {
   max-width: 100vw;
   overflow-x: hidden;
+  background: var(--bg-darker);
 }
 
 .main-layout {
   max-width: 100vw;
+  overflow: hidden;
+  background: var(--bg-darker);
+  min-height: 0;
+}
+
+/* Explicitly prevent sidebar from causing overflow */
+.sidebar, .content-stage, .bets-sidebar {
+  max-width: 100vw;
   overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* Prevent game displays from overflowing */
+.game-display, .game-stage {
+  overflow-x: hidden;
+  max-width: 100%;
+  width: 100%;
+}
+
+/* Ensure all modals and overlays don't cause overflow */
+.modal-backdrop, .global-bets-drawer {
+  max-width: 100vw;
+}
+
+/* Hide bets sidebar completely when hidden */
+.bets-sidebar.hidden {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
 }
 .containers-safe {
   max-width: 100%;
@@ -2309,7 +2343,8 @@ opacity: 0.5;
   align-items: center;
   justify-content: center;
   position: relative;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   width: 100%;
   box-sizing: border-box;
 }
