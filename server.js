@@ -923,11 +923,20 @@ function corsOptions(origin, callback) {
     'http://127.0.0.1:8080',
     'http://localhost:3001',
     'http://127.0.0.1:3001',
+    'https://stakecasino-six.vercel.app',
+    'https://stakecasino-six-git-main.vercel.app',
+    'https://stakecasino-six-kapon.vercel.app',
     process.env.FRONTEND_URL
   ].filter(Boolean);
 
+  // Allow any *.vercel.app preview/production domain so deploy previews
+  // don't get blocked. Tighten this in production by setting ALLOW_VERCEL_PREVIEWS=false.
+  const vercelRegex = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.vercel\.app$/i;
+  const allowVercel = process.env.ALLOW_VERCEL_PREVIEWS !== 'false' && origin && vercelRegex.test(origin);
+
   var isLocalNetwork = /^http:\/\/(localhost:|127\.0\.0\.1:|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(origin);
-  if (!origin || allowedOrigins.includes(origin) || isLocalNetwork) {
+
+  if (!origin || allowedOrigins.includes(origin) || isLocalNetwork || allowVercel) {
     callback(null, true);
   } else {
     console.warn('[CORS]: Rejected origin:', origin);

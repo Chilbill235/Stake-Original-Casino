@@ -2,7 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
 
+// Backend selection:
+//   - 'memory' (or Vercel serverless with no writable FS) → all db.* calls
+//     become safe no-ops that read/write the in-memory Maps in server.js.
+//     No SQLite file is opened, nothing is persisted across restarts.
+//   - 'sqlite' (default for local dev) → original sql.js behavior.
+// Set DATABASE_BACKEND=memory in the environment to force memory mode.
+const BACKEND = (process.env.DATABASE_BACKEND || '').toLowerCase();
 const isServerless = process.env.VERCEL === '1';
+const MEMORY_BACKEND = BACKEND === 'memory' || (isServerless && BACKEND !== 'sqlite');
 const dbPath = isServerless
   ? '/tmp/casino.sqlite'
   : path.join(__dirname, 'casino.sqlite');
@@ -11,6 +19,7 @@ const SOURCE_DB_PATH = '/var/task/casino.sqlite';
 let initPromise = null;
 let db = null;
 let persistWarned = false;
+let memoryWarned = false;
 
 async function getDb() {
   if (initPromise) await initPromise;
@@ -195,46 +204,57 @@ function scheduleSave() {
   });
 }
 
-initPromise = (async () => {
-  let SQL;
-  try {
-    SQL = await initSqlJs();
-  } catch (e) {
-    console.error('[DB]: Failed to load sql.js:', e.message);
-    return null;
+if (MEMORY_BACKEND) {
+  // In memory mode we don't open SQLite at all — the in-memory Maps in
+  // server.js (users, transactions) hold the live data. Skip the heavy
+  // initSqlJs() call so cold starts are fast on Vercel.
+  initPromise = Promise.resolve(null);
+  if (!memoryWarned) {
+    memoryWarned = true;
+    console.log('[Database]: Running in MEMORY backend mode (no persistence).');
   }
-
-  if (!SQL || typeof SQL.Database !== 'function') {
-    console.error('[DB]: sql.js Database constructor not available');
-    return null;
-  }
-
-  if (fs.existsSync(dbPath)) {
+} else {
+  initPromise = (async () => {
+    let SQL;
     try {
-      const filebuffer = fs.readFileSync(dbPath);
-       db = new SQL.Database(filebuffer);
+      SQL = await initSqlJs();
     } catch (e) {
-      console.error('[DB]: Failed to load existing database, starting fresh:', e.message);
+      console.error('[DB]: Failed to load sql.js:', e.message);
+      return null;
+    }
+
+    if (!SQL || typeof SQL.Database !== 'function') {
+      console.error('[DB]: sql.js Database constructor not available');
+      return null;
+    }
+
+    if (fs.existsSync(dbPath)) {
+      try {
+        const filebuffer = fs.readFileSync(dbPath);
+         db = new SQL.Database(filebuffer);
+      } catch (e) {
+        console.error('[DB]: Failed to load existing database, starting fresh:', e.message);
+        db = new SQL.Database();
+      }
+    } else if (isServerless && fs.existsSync(SOURCE_DB_PATH)) {
+      try {
+        const filebuffer = fs.readFileSync(SOURCE_DB_PATH);
+        db = new SQL.Database(filebuffer);
+      } catch (e) {
+        console.error('[DB]: Failed to load seed DB from /var/task, starting fresh:', e.message);
+        db = new SQL.Database();
+      }
+    } else {
       db = new SQL.Database();
     }
-  } else if (isServerless && fs.existsSync(SOURCE_DB_PATH)) {
-    try {
-      const filebuffer = fs.readFileSync(SOURCE_DB_PATH);
-      db = new SQL.Database(filebuffer);
-    } catch (e) {
-      console.error('[DB]: Failed to load seed DB from /var/task, starting fresh:', e.message);
-      db = new SQL.Database();
-    }
-  } else {
-    db = new SQL.Database();
-  }
 
-  createSchema();
-  persistSync();
-  return db;
-})();
+    createSchema();
+    persistSync();
+    return db;
+  })();
+}
 
-module.exports = {
+const REAL_DB = {
   getDb,
   createSchema,
   persistSync,
@@ -565,3 +585,66 @@ module.exports = {
     return result[0]?.values[0]?.[0] || 0;
   }
 };
+
+// In-memory backend stub. When DATABASE_BACKEND=memory (or we're on Vercel
+// without a writable filesystem), every db.* call becomes a safe no-op. The
+// in-memory Maps in server.js (users, transactions) hold the live data, so
+// the server still works — just nothing is persisted across cold starts.
+const MEMORY_STUB = {
+  getDb: async () => null,
+  createSchema: async () => {},
+  persistSync: () => {},
+  scheduleSave: () => {},
+  initPromise: Promise.resolve(),
+  isMemoryBackend: true,
+
+  // Reads return null/empty so callers fall through to the in-memory Maps.
+  getUserById: async () => null,
+  findByEmail: async () => null,
+  findByUsername: async () => null,
+  getBonusState: async () => null,
+  getSeed: async () => null,
+  getTelemetry: async () => null,
+  getTransactions: async () => [],
+  getTotalWagered: async () => ({ totalGC: 0, totalSC: 0 }),
+  getAffiliateByUserId: async () => null,
+  getAffiliateByCode: async () => null,
+  getReferrals: async () => [],
+  getReferredUsers: async () => [],
+  getAffiliateEarningsTotals: async () => ({}),
+  getAffiliateEarnings: async () => [],
+  getJackpotPool: async () => null,
+  getAllUsers: async () => [],
+  getUserCount: async () => 0,
+
+  // Writes are accepted but discarded. They log once so we know we're in
+  // memory mode in production. createUser returns a unique numeric id so
+  // server.js can store the new user in its in-memory Map.
+  _nextUserId: 1000,
+  createUser: async function (params) {
+    const id = this._nextUserId++;
+    return id;
+  },
+  updateUser: async () => {},
+  adjustBalance: async () => {},
+  saveBonusState: async () => {},
+  saveSeed: async () => {},
+  updateNonce: async () => {},
+  saveTelemetry: async () => {},
+  addTransaction: async () => {},
+  createAffiliate: async () => {},
+  setAffiliateReferredBy: async () => {},
+  addAffiliateEarning: async () => {},
+  updateJackpotPool: async () => {}
+};
+
+if (MEMORY_BACKEND) {
+  if (!memoryWarned) {
+    memoryWarned = true;
+    console.log('[Database]: Running in MEMORY backend mode (no persistence). ' +
+      'Set DATABASE_BACKEND=sqlite to force the on-disk SQLite file.');
+  }
+  module.exports = MEMORY_STUB;
+} else {
+  module.exports = REAL_DB;
+}
