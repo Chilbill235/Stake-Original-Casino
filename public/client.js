@@ -10,25 +10,41 @@
 const state = {
   currency: localStorage.getItem('casino_currency') || 'GC',
   currentGame: null,
-   balances: { gc: 10000.0, sc: 10.0, sc_unplayed: 10.0, sc_played: 0.0 },
+  balances: { gc: 10000.0, sc: 10.0, sc_unplayed: 10.0, sc_played: 0.0 },
   profile: null,
   selectedKenoNumbers: [],
   activeGameState: null,
   isProcessing: false,
-   activeCheckoutInstance: null,
+  activeCheckoutInstance: null,
   ws: null,
   wsReconnectTimer: null,
+  wsReconnectAttempts: 0,
+  wsReconnectGaveUp: false,
   feedFilter: 'ALL',
   liveBetBuffer: [],
   globalListenersAttached: false,
   clientSeed: localStorage.getItem('casino_client_seed') || generateRandomSeed(),
   serverSeedHash: localStorage.getItem('casino_server_hash') || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   nonce: parseInt(localStorage.getItem('casino_nonce') || '0', 10),
-   sfxEnabled: true,
-   isEmbedded: window.self !== window.top,
-   settings: (() => { try { return JSON.parse(localStorage.getItem('casino_settings') || '{}'); } catch (e) { return {}; } })()
- };
+  sfxEnabled: true,
+  isEmbedded: window.self !== window.top,
+  settings: (() => { try { return JSON.parse(localStorage.getItem('casino_settings') || '{}'); } catch (e) { return {}; } })()
+};
 window.__CASINO_CURRENCY = state.currency;
+
+if (typeof window !== 'undefined' && !window.__ethereumGuarded) {
+  window.__ethereumGuarded = true;
+  try {
+    if (!Object.getOwnPropertyDescriptor(window, 'ethereum')) {
+      Object.defineProperty(window, 'ethereum', {
+        value: undefined,
+        writable: true,
+        configurable: true,
+        enumerable: true
+      });
+    }
+  } catch (e) {}
+}
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
@@ -370,6 +386,11 @@ function connectWebSocket() {
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const token = localStorage.getItem('casino_token') || '';
+
+  if (!token) {
+    console.info('[WebSocket]: No auth token, skipping connection (offline feed only).');
+    return;
+  }
 
   state.wsReconnectAttempts = (state.wsReconnectAttempts || 0) + 1;
   if (state.wsReconnectAttempts > 5) {
@@ -4886,6 +4907,9 @@ async function continueAsGuest() {
     return;
   }
   closeAuthModal();
+  if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
+  state.wsReconnectAttempts = 0;
+  state.wsReconnectGaveUp = false;
   await initSessionFromToken();
   reapplyCurrentRoute();
 }

@@ -77,8 +77,14 @@
   --gradient-purple: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-blue) 100%);
   --gradient-card: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-surface) 100%);
   --gradient-surface: linear-gradient(145deg, var(--bg-surface) 0%, var(--bg-dark) 100%);
-  --gradient-hero: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  --gradient-shine: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  --gradient-elevated: linear-gradient(145deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
+  --gradient-hero: radial-gradient(ellipse at top right, var(--bg-card) 0%, var(--bg-dark) 50%, var(--bg-darker) 100%);
+  --gradient-shine: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+  --gradient-glow-card: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-elevated) 100%);
+
+  /* Card-specific gradients with accent hints */
+  --gradient-card-gold: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-elevated) 100%);
+  --gradient-card-purple: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-elevated) 100%);
   
   /* Shadows */
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -298,10 +304,11 @@ body.dark-theme::before {
    ========================================================================== */
 .navbar {
   height: var(--navbar-height);
-  background: rgba(10, 22, 40, 0.85);
+  background: rgba(7, 13, 20, 0.95);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1400,8 +1407,8 @@ opacity: 0.5;
 /* Hero Section */
 .hero-section {
   position: relative;
-  background: linear-gradient(135deg, #0a1628 0%, #1a2b44 50%, #0f3460 100%);
-  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-surface) 50%, var(--bg-dark) 100%);
+  border-radius: var(--radius-xl);
   padding: 28px 24px;
   margin-bottom: 20px;
   overflow: hidden;
@@ -1410,7 +1417,8 @@ opacity: 0.5;
   grid-template-columns: 1fr auto;
   gap: 24px;
   align-items: center;
-  min-height: 180px;
+  min-height: 200px;
+  box-shadow: var(--shadow-lg);
 }
 
 .hero-particles {
@@ -1756,6 +1764,19 @@ opacity: 0.5;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   white-space: nowrap;
+  position: relative;
+  padding-bottom: 4px;
+}
+
+.section-title::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--gradient-gold);
+  opacity: 0.5;
 }
 
 .section-line {
@@ -1868,6 +1889,7 @@ opacity: 0.5;
   opacity: 0;
   transform: translateY(20px);
   animation: cardReveal 0.5s ease-out forwards;
+  box-shadow: var(--shadow-sm);
 }
 
 .game-card:nth-child(1) { animation-delay: 0.05s; }
@@ -4344,10 +4366,34 @@ opacity: 0.5;
 }
 
 .balance-card {
-  background: var(--bg-darker);
-  border-radius: var(--radius-md);
-  padding: 16px;
+  background: var(--gradient-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
   text-align: center;
+  backdrop-filter: blur(12px);
+  transition: var(--transition-normal);
+  box-shadow: var(--shadow-md);
+}
+
+.balance-card:hover {
+  border-color: var(--accent-green);
+  box-shadow: var(--shadow-lg), 0 0 24px rgba(0, 255, 65, 0.1);
+  transform: translateY(-4px);
+}
+
+.balance-card.gc { border-color: rgba(255, 215, 0, 0.3); }
+.balance-card.gc:hover { border-color: var(--accent-gold); box-shadow: var(--shadow-lg), 0 0 24px rgba(255, 215, 0, 0.1); }
+
+.balance-card.sc { border-color: rgba(168, 85, 247, 0.35); }
+.balance-card.sc:hover { border-color: var(--accent-purple); box-shadow: var(--shadow-lg), 0 0 24px rgba(168, 85, 247, 0.1); }
+
+.balance-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .balance-amount { font-size: 1.3rem; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
@@ -5751,6 +5797,7 @@ opacity: 0.5;
     .keno-num { padding: 6px 2px; font-size: 0.65rem; }
     .tower-tile { padding: 4px 2px; font-size: 0.7rem; }
     .plinko-board { height: 240px; padding: 4px; }
+  }
 
 /* ==========================================================================
    13. SIDEBAR FEED & RESULTS
@@ -5798,8 +5845,11 @@ opacity: 0.5;
 }
 
 .bet-row:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.04);
 }
+
+.bet-row.win { border-left: 2px solid var(--accent-green); }
+.bet-row.loss { border-left: 2px solid var(--accent-red); }
 
 .bet-user-game {
   display: flex;
@@ -5887,7 +5937,7 @@ opacity: 0.5;
 }
 
 .result-row:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .sidebar-overlay {
