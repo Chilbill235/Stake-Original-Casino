@@ -142,17 +142,17 @@ function register(app, deps) {
       return res.status(400).json({ error: 'Invalid tile index.' });
     }
     if (session.revealed.includes(tile)) return res.status(400).json({ error: 'Tile already revealed.' });
-
     if (session.board[tile] === 'BOMB') {
       session.active = false;
       const user = depsUsers(deps, session.userId);
       if (user) trackSession(user, 'mines', session, false, 0);
       broadcastLiveBet({
         username: user ? user.username : 'Anonymous', game: 'MINES',
-        betAmount: session.betAmount, currency: session.currency,
+        betAmount: session.betAmount,
+        currency: session.currency,
         multiplier: 0, win: false, payout: 0
       });
-      return res.json({ win: false, hitBomb: true, board: session.board, multiplier: 0, payout: 0, balances: balancesOf(user) });
+      return res.json({ win: false, hitBomb: true, board: session.board, multiplier: 0, payout: 0, balances: user ? balancesOf(user) : { gc: 0, sc: 0 } });
     }
 
     session.revealed.push(tile);
@@ -172,6 +172,7 @@ function register(app, deps) {
 
   function finishMinesRound(session, res, lastTile) {
     const user = depsUsers(deps, session.userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
     const mult = minesMultiplier(session.revealed.length, session.mineCount);
     const payout = round2(mult * session.betAmount);
     creditWin(user, session.currency, payout);
@@ -273,7 +274,7 @@ function register(app, deps) {
       const user = depsUsers(deps, session.userId);
       if (user) trackSession(user, 'tower', session, false, 0);
       broadcastLiveBet({
-        username: user.username, game: 'TOWER', betAmount: session.betAmount,
+        username: user ? user.username : 'Anonymous', game: 'TOWER', betAmount: session.betAmount,
         currency: session.currency, multiplier: 0, win: false, payout: 0
       });
       return res.json({
@@ -289,6 +290,7 @@ function register(app, deps) {
     const finished = session.currentFloor >= TOWER_FLOORS;
     if (finished) {
       const user = depsUsers(deps, session.userId);
+      if (!user) return res.status(404).json({ error: 'User not found.' });
       const payout = round2(session.multiplier * session.betAmount);
       creditWin(user, session.currency, payout);
       session.active = false;
@@ -319,6 +321,7 @@ function register(app, deps) {
     if (session.currentFloor === 0) return res.status(400).json({ error: 'Climb at least one floor before cashing out.' });
 
     const user = depsUsers(deps, session.userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
     const mult = session.multiplier;
     const payout = round2(mult * session.betAmount);
     creditWin(user, session.currency, payout);
@@ -407,6 +410,7 @@ function register(app, deps) {
 
   function finishBlackjack(session, res, outcome, multiplier) {
     const user = depsUsers(deps, session.userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
     const payout = round2(multiplier * session.betAmount);
 
     if (multiplier > 0) creditWin(user, session.currency, payout);
@@ -540,7 +544,7 @@ function register(app, deps) {
       const user = depsUsers(deps, session.userId);
       if (user) trackSession(user, 'hilo', session, false, 0);
       broadcastLiveBet({
-        username: user.username, game: 'HILO', betAmount: session.betAmount,
+        username: user ? user.username : 'Anonymous', game: 'HILO', betAmount: session.betAmount,
         currency: session.currency, multiplier: 0, win: false, payout: 0
       });
       return res.json({
@@ -559,6 +563,7 @@ function register(app, deps) {
 
     if (!canContinue) {
       const user = depsUsers(deps, session.userId);
+      if (!user) return res.status(404).json({ error: 'User not found.' });
       const payout = round2(session.multiplier * session.betAmount);
       creditWin(user, session.currency, payout);
       session.active = false;
@@ -592,6 +597,7 @@ function register(app, deps) {
     if (!(session.multiplier > 1)) return res.status(400).json({ error: 'Win at least one correct guess before cashing out.' });
 
     const user = depsUsers(deps, session.userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
     const mult = session.multiplier;
     const payout = round2(mult * session.betAmount);
     creditWin(user, session.currency, payout);

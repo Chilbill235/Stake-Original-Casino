@@ -137,7 +137,7 @@ function getClientIp(req) {
 }
 
 function isVpnOrHosting(asn, org) {
-  if (!asn && !org) return false;
+  if ((asn == null || asn === '') && (org == null || org === '')) return false;
   const haystack = `${asn || ''} ${org || ''}`.toLowerCase();
   return VPN_ASN_KEYWORDS.some(k => haystack.includes(k));
 }
@@ -1323,7 +1323,7 @@ app.post('/api/auth/register', async (req, res) => {
      users.set(userId, newUser);
     transactions.set(userId, []);
 
-    const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
+     const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({
       token,
       user: { id: userId, username, email, isGuest: false, kyc: newUser.kyc, state: stateCode },
@@ -1478,7 +1478,7 @@ app.post('/api/auth/login', async (req, res) => {
       geo_risk_score: geo.riskScore || 0
     });
 
-    const token = jwt.sign({ id: foundUser.id, username: foundUser.username }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: foundUser.id, username: foundUser.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({
       token,
       user: {
@@ -1842,9 +1842,8 @@ app.post('/api/user/rewarded-ad', verifyToken, enforceJurisdiction, (req, res) =
 });
 
 app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, res) => {
-  const { packageId, uiMode } = req.body;
+  const { packageId, uiMode } = req.body || {};
   const pkg = COIN_PACKAGES[packageId || 'pack_10'];
-
   if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
 
   const user = users.get(req.user.id);
@@ -1876,14 +1875,14 @@ app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, re
         quantity: 1,
       }],
       mode: 'payment',
-        metadata: {
-         userId: req.user.id.toString(),
-         packageId: packageId || '',
-         packageName: pkg.name,
-         gcAmount: pkg.gcAmount.toString(),
-         scAmount: pkg.scAmount.toString(),
-         uiMode: mode
-       }
+      metadata: {
+        userId: req.user.id.toString(),
+        packageId: packageId || '',
+        packageName: pkg.name,
+        gcAmount: pkg.gcAmount.toString(),
+        scAmount: pkg.scAmount.toString(),
+        uiMode: mode
+      }
     };
 
     if (mode === 'embedded_page') {
@@ -1923,7 +1922,7 @@ app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, re
 
 // Crypto Payment Initiation (Mock / Integration Point)
 app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, async (req, res) => {
-  const { packageId, currency } = req.body;
+  const { packageId, currency } = req.body || {};
   const pkg = COIN_PACKAGES[packageId || 'pack_10'];
   if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
 
@@ -2036,19 +2035,20 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
     }
 
     // Credit the selected package
-    if (acquireLock(user.id, 'crypto-' + paymentId)) {
-      try {
-        user.gc_balance = round2((user.gc_balance || 0) + payment.gcAmount);
-        user.sc_unplayed = round2((user.sc_unplayed || 0) + payment.scAmount);
-        const txAmount = amountSent ? parseFloat(amountSent) : Number(payment.amount || 0);
-        const usd = txAmount > 0 ? txAmount * payment.usdAmount : payment.usdAmount;
-        logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''}`, payment.gcAmount, payment.scAmount, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null });
-        creditReferrerForDeposit(user, usd || payment.usdAmount || 0);
-        try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: payment.gcAmount, scDelta: payment.scAmount, currency: 'GC', amount: payment.usdAmount || 0, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
-        saveData();
-      } finally {
-        releaseLock(user.id, 'crypto-' + paymentId);
-      }
+    if (!acquireLock(user.id, 'crypto-' + paymentId)) {
+      return res.status(409).json({ error: 'Confirmation already in progress for this payment.', verified: true, status: payment.status });
+    }
+    try {
+      user.gc_balance = round2((user.gc_balance || 0) + payment.gcAmount);
+      user.sc_unplayed = round2((user.sc_unplayed || 0) + payment.scAmount);
+      const txAmount = amountSent ? parseFloat(amountSent) : Number(payment.amount || 0);
+      const usd = payment.usdAmount;
+      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''}`, payment.gcAmount, payment.scAmount, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null });
+      creditReferrerForDeposit(user, usd || 0);
+      try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: payment.gcAmount, scDelta: payment.scAmount, currency: 'GC', amount: payment.usdAmount || 0, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
+      saveData();
+    } finally {
+      releaseLock(user.id, 'crypto-' + paymentId);
     }
 
     payment.status = 'COMPLETED';
@@ -2412,7 +2412,7 @@ app.post('/api/user/withdraw-sc', verifyToken, enforceJurisdiction, async (req, 
     });
   }
 
-  const amount = parseFloat(req.body.amount);
+  const amount = parseFloat((req.body || {}).amount);
   if (isNaN(amount) || amount < 50) {
     return res.status(400).json({ error: 'Minimum redemption limit is 50.00 Sweeps Coins (SC).' });
   }
@@ -2488,7 +2488,7 @@ app.get('/api/provably-fair/seed', verifyToken, (req, res) => {
 });
 
 app.post('/api/provably-fair/rotate-seed', verifyToken, (req, res) => {
-  const { newClientSeed } = req.body;
+  const { newClientSeed } = req.body || {};
   const seeds = getUserSeedPair(req.user.id);
   
   const previousServerSeed = seeds.serverSeed;

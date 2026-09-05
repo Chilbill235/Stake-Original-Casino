@@ -10,7 +10,7 @@
 const state = {
   currency: localStorage.getItem('casino_currency') || 'GC',
   currentGame: null,
-  balances: { gc: 10000.0, sc: 10.0 },
+   balances: { gc: 10000.0, sc: 10.0, sc_unplayed: 10.0, sc_played: 0.0 },
   profile: null,
   selectedKenoNumbers: [],
   activeGameState: null,
@@ -446,10 +446,10 @@ function renderBetFeed() {
     row.innerHTML =
       `<div class="bet-user-game">` +
       `<span class="bet-user">${escapeHTML(data.username || 'Anonymous')}</span>` +
-      `<span class="bet-game">${escapeHTML(data.game)}</span>` +
+      `<span class="bet-game">${escapeHTML(data.game || '—')}</span>` +
       `</div>` +
       `<span class="bet-mult ${winClass}">` +
-      `${winLabel} ${Number(data.multiplier).toFixed(2)}x (${formatCoins(data.payout || 0)} ${data.currency || 'GC'})` +
+      `${winLabel} ${(Number(data.multiplier) || 0).toFixed(2)}x (${formatCoins(data.payout || 0)} ${escapeHTML(data.currency || 'GC')})` +
       `</span>`;
     feed.appendChild(row);
   }
@@ -803,8 +803,6 @@ function hideProcessingPanel() {
   if (cardPanel) { cardPanel.classList.remove('hidden', 'exiting'); cardPanel.style.opacity = ''; }
   const loadingState = document.getElementById('checkout-loading-state');
   if (loadingState) loadingState.classList.add('hidden');
-  const container = document.getElementById('stripe-checkout-container');
-  if (container) container.innerHTML = '';
 }
 
 function showProcessingPanel() {
@@ -827,21 +825,22 @@ function showProcessingPanel() {
 function closeStoreModal() {
   playSound('click');
   stopCryptoPolling();
-  const modal = document.getElementById('modal-store');
-  if (modal) modal.classList.add('hidden');
+
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
 
   const container = document.getElementById('stripe-checkout-container');
   if (container) {
     container.innerHTML = '';
   }
 
+  const modal = document.getElementById('modal-store');
+  if (modal) modal.classList.add('hidden');
+
   hideCheckoutSections();
   showPackageList();
-
-  if (state.activeCheckoutInstance) {
-    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
-    state.activeCheckoutInstance = null;
-  }
 }
 
 function hideCheckoutSections() {
@@ -1463,8 +1462,11 @@ function showCheckoutLoading() {
 function showCheckoutError(message) {
   setCheckoutStep(2);
   hideProcessingPanel();
-  state.activeCheckoutInstance = null;
   state.selectedPaymentMethod = null;
+  if (state.activeCheckoutInstance) {
+    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
+    state.activeCheckoutInstance = null;
+  }
   const container = document.getElementById('stripe-checkout-container');
   if (!container) return;
   container.innerHTML =
@@ -4861,7 +4863,7 @@ function logout() {
   localStorage.removeItem('casino_token');
   localStorage.removeItem('casino_username');
   state.profile = null;
-  state.balances = { gc: 10000.0, sc: 10.0 };
+  state.balances = { gc: 10000.0, sc: 10.0, sc_unplayed: 10.0, sc_played: 0.0 };
   state.wsReconnectAttempts = 0;
   state.wsReconnectGaveUp = false;
   updateWalletUI();
