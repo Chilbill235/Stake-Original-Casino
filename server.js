@@ -370,6 +370,7 @@ setInterval(saveData, 30000);
 async function gracefulShutdown(signal) {
   console.log(`${signal} signal received: saving data and closing server`);
   await saveData();
+  if (process.env.VERCEL) return;
   db.persistSync();
   server.close(() => {
     console.log('HTTP server closed');
@@ -382,88 +383,105 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 // Initialize database and load users
-(async () => {
-  await loadData();
-
-  // Initialize nextUserId after loading data
-  if (users.size > 0) {
-    nextUserId = Math.max(...users.keys()) + 1;
-  }
-
-// Seed Initial Demo User only if no users exist (don't clobber persisted data)
-if (users.size === 0) {
-  const demoId = await db.createUser({
-    username: 'Player_1001',
-    email: 'player1001@example.com',
-    password: await bcrypt.hash('Demo1234!', 12),
-    gcBalance: 10000,
-    scBalance: 50
+process.on('unhandledRejection', (reason) => {
+  console.error('[Server]: Unhandled Rejection:', reason instanceof Error ? reason.message : String(reason));
+});
+if (process.env.VERCEL) {
+  process.on('uncaughtException', (err) => {
+    console.error('[Server]: Uncaught Exception:', err.message);
   });
-
-  await db.updateUser(demoId, {
-    kyc_status: 'VERIFIED',
-    kyc_tier: 2,
-    kyc_inquiry_id: 'inq_demo123',
-    kyc_verified_at: new Date().toISOString()
-  });
-
-  const demoUser = {
-    id: demoId,
-    username: 'Player_1001',
-    email: 'player1001@example.com',
-    password: await bcrypt.hash('Demo1234!', 12),
-    gc_balance: 10000.0,
-    sc_unplayed: 50.0,
-    sc_played: 0.0,
-    stripeAccountId: null,
-    kyc: {
-      status: 'VERIFIED',
-      tier: 2,
-      inquiryId: 'inq_demo123',
-      verifiedAt: new Date().toISOString(),
-      rejectionReason: null
-    },
-    lastDailyClaim: 0,
-    dailyStreak: 0,
-    adsWatchedToday: 0,
-    lastAdReset: Date.now(),
-    state: 'CA',
-    createdAt: Date.now(),
-    vipTier: 'Bronze',
-    totalWageredGC: 0,
-    totalWageredSC: 0,
-    rakebackAccruedSC: 0,
-    isGuest: false,
-    bonus: {
-      lastClaimAt: 0,
-      claimStreak: 0,
-      dailyClaimed: false,
-      challenges: [],
-      challengeDate: '',
-      telemetry: {
-        scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
-        gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
-        weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
-        monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
-        diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
-        history: [],
-        lastDailyReset: Date.now(),
-        lastWeeklyReset: Date.now(),
-        lastMonthlyReset: Date.now()
-      },
-      rakeback: {
-        lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
-        dailyPool: 0, weeklyPool: 0, monthlyPool: 0
-      }
-    }
-  };
-  users.set(demoId, demoUser);
-  transactions.set(demoId, []);
 }
 
-console.log('[Init]: Database initialized, ' + users.size + ' users loaded.');
+(async () => {
+  try {
+    await loadData();
 
-startServer();
+    // Initialize nextUserId after loading data
+    if (users.size > 0) {
+      nextUserId = Math.max(...users.keys()) + 1;
+    }
+
+  // Seed Initial Demo User only if no users exist (don't clobber persisted data)
+  if (users.size === 0) {
+    try {
+      const demoId = await db.createUser({
+        username: 'Player_1001',
+        email: 'player1001@example.com',
+        password: await bcrypt.hash('Demo1234!', 12),
+        gcBalance: 10000,
+        scBalance: 50
+      });
+
+      await db.updateUser(demoId, {
+        kyc_status: 'VERIFIED',
+        kyc_tier: 2,
+        kyc_inquiry_id: 'inq_demo123',
+        kyc_verified_at: new Date().toISOString()
+      });
+
+      const demoUser = {
+        id: demoId,
+        username: 'Player_1001',
+        email: 'player1001@example.com',
+        password: await bcrypt.hash('Demo1234!', 12),
+        gc_balance: 10000.0,
+        sc_unplayed: 50.0,
+        sc_played: 0.0,
+        stripeAccountId: null,
+        kyc: {
+          status: 'VERIFIED',
+          tier: 2,
+          inquiryId: 'inq_demo123',
+          verifiedAt: new Date().toISOString(),
+          rejectionReason: null
+        },
+        lastDailyClaim: 0,
+        dailyStreak: 0,
+        adsWatchedToday: 0,
+        lastAdReset: Date.now(),
+        state: 'CA',
+        createdAt: Date.now(),
+        vipTier: 'Bronze',
+        totalWageredGC: 0,
+        totalWageredSC: 0,
+        rakebackAccruedSC: 0,
+        isGuest: false,
+        bonus: {
+          lastClaimAt: 0,
+          claimStreak: 0,
+          dailyClaimed: false,
+          challenges: [],
+          challengeDate: '',
+          telemetry: {
+            scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
+            gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
+            weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
+            monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
+            diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
+            history: [],
+            lastDailyReset: Date.now(),
+            lastWeeklyReset: Date.now(),
+            lastMonthlyReset: Date.now()
+          },
+          rakeback: {
+            lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
+            dailyPool: 0, weeklyPool: 0, monthlyPool: 0
+          }
+        }
+      };
+      users.set(demoId, demoUser);
+      transactions.set(demoId, []);
+    } catch (seedErr) {
+      console.error('[Init]: Failed to seed demo user:', seedErr.message);
+    }
+  }
+
+    console.log('[Init]: Database initialized, ' + users.size + ' users loaded.');
+    startServer();
+  } catch (initErr) {
+    console.error('[Init]: Database initialization error:', initErr.message);
+    startServer();
+  }
 })();
 
 async function startServer() {
@@ -478,10 +496,6 @@ async function startServer() {
       console.error('[Server]: Failed to start:', err.message);
     }
     process.exit(1);
-  });
-
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error('[Server]: Unhandled Rejection:', reason);
   });
 
   server.listen(PORT, () => {

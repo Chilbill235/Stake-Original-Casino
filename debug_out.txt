@@ -1,4 +1,0 @@
-◇ injected env (17) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
-🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port 3000
-[Persistence]: Loaded 21 users from database.
-[Init]: Database initialized, 21 users loaded.
