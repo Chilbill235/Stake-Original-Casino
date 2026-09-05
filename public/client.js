@@ -29,22 +29,6 @@ const state = {
 };
 window.__CASINO_CURRENCY = state.currency;
 
-try {
-  if (!Object.getOwnPropertyDescriptor(window, 'ethereum')) {
-    Object.defineProperty(window, 'ethereum', { configurable: true, writable: true, value: undefined });
-  }
-} catch (e) {
-  console.warn('[Client]: Could not ensure window.ethereum is configurable:', e.message);
-}
-
-window.addEventListener('error', (event) => {
-  const msg = event.message || '';
-  if (msg.includes('Cannot redefine property: ethereum')) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-}, true);
-
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
 // ==========================================================================

@@ -134,6 +134,7 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 .hidden {
@@ -147,6 +148,8 @@ body.dark-theme {
   min-height: 100dvh;
   min-height: 100vh;
   overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   line-height: 1.6;

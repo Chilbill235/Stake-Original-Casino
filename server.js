@@ -462,7 +462,32 @@ if (users.size === 0) {
 }
 
 console.log('[Init]: Database initialized, ' + users.size + ' users loaded.');
+
+startServer();
 })();
+
+async function startServer() {
+  if (process.env.VERCEL) {
+    module.exports = app;
+    return;
+  }
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Server]: Port ${PORT} is already in use. Another server instance may be running. Exiting.`);
+    } else {
+      console.error('[Server]: Failed to start:', err.message);
+    }
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[Server]: Unhandled Rejection:', reason);
+  });
+
+  server.listen(PORT, () => {
+    console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
+  });
+}
 
 // -----------------------------------------------------------------------------
 // 3. PROVABLY FAIR ENGINE
@@ -3463,28 +3488,3 @@ app.use((req, res) => {
   }
   res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-
-// -----------------------------------------------------------------------------
-// 13. SERVER INITIALIZATION & GRACEFUL SHUTDOWN
-// -----------------------------------------------------------------------------
-if (process.env.VERCEL) {
-  module.exports = app;
-} else {
-  // Fail fast and clearly instead of throwing an uncaught fatal error (e.g. EADDRINUSE).
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`[Server]: Port ${PORT} is already in use. Another server instance may be running. Exiting.`);
-    } else {
-      console.error('[Server]: Failed to start:', err.message);
-    }
-    process.exit(1);
-  });
-
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error('[Server]: Unhandled Rejection:', reason);
-  });
-
-  server.listen(PORT, () => {
-    console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
-  });
-}
