@@ -3916,7 +3916,9 @@ function applyTheme(pref) {
 async function startKycVerification() {
   try {
     const data = await apiRequest('/api/user/kyc/start', 'POST');
-    if (data.personaConfig) {
+    if (data.verificationUrl) {
+      window.open(data.verificationUrl, '_blank', 'noopener,noreferrer,width=520,height=700');
+    } else if (data.personaConfig) {
       alert('KYC verification flow would open here. Status: ' + data.kycStatus + '. Sandbox mode: use /api/user/kyc/verify-sandbox to mark verified.');
     }
   } catch (err) {

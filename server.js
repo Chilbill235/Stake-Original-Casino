@@ -21,6 +21,10 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const PERSONA_WEBHOOK_SECRET = process.env.PERSONA_WEBHOOK_SECRET;
+const DIDIT_API_KEY = process.env.DIDIT_API_KEY;
+const DIDIT_WORKFLOW_ID = process.env.DIDIT_WORKFLOW_ID;
+const DIDIT_WEBHOOK_SECRET = process.env.DIDIT_WEBHOOK_SECRET;
+const DIDIT_API_BASE = 'https://verification.didit.me/v3';
 const HOUSE_EDGE = 0.13; // 13% House Edge (86% RTP)
 const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user (0.13 * 0.05 = 0.0065 = 0.65%)
 
@@ -114,6 +118,19 @@ async function getUserById(id) {
   if (!user) {
     const dbUser = await db.getUserById(id);
     if (dbUser) {
+      let bonusState = null;
+      let affiliateRecord = null;
+      try {
+        bonusState = await db.getBonusState(dbUser.id);
+      } catch (e) {
+        console.warn('[DB]: Failed to load bonus_state for user', dbUser.id, e.message);
+      }
+      try {
+        affiliateRecord = await db.getAffiliateByUserId(dbUser.id);
+      } catch (e) {
+        console.warn('[DB]: Failed to load affiliate record for user', dbUser.id, e.message);
+      }
+
       user = {
         id: dbUser.id,
         username: dbUser.username,
@@ -125,11 +142,46 @@ async function getUserById(id) {
         state: dbUser.state,
         vipTier: dbUser.vip_tier,
         createdAt: dbUser.created_at,
-        kyc: { status: dbUser.kyc_status, tier: dbUser.kyc_tier },
+        registeredAt: dbUser.registered_at,
+        kyc: {
+          status: dbUser.kyc_status,
+          tier: dbUser.kyc_tier,
+          inquiryId: dbUser.kyc_inquiry_id || null,
+          verifiedAt: dbUser.kyc_verified_at || null,
+          rejectionReason: dbUser.kyc_rejection_reason || null
+        },
+        vip: {
+          tier: dbUser.vip_tier || 'Bronze',
+          totalWageredSC: dbUser.total_wagered_sc || 0,
+          totalWageredGC: dbUser.total_wagered_gc || 0,
+          rakebackAccruedSC: dbUser.rakeback_accrued_sc || 0
+        },
         bonus: {
-          lastClaimAt: dbUser.last_daily_claim,
-          claimStreak: dbUser.daily_streak
-        }
+          lastClaimAt: bonusState?.last_claim_at || dbUser.last_daily_claim || 0,
+          claimStreak: bonusState?.claim_streak || dbUser.daily_streak || 0,
+          dailyClaimed: bonusState?.daily_claimed || dbUser.daily_claimed || 0,
+          challengeDate: bonusState?.challenge_date || '',
+          challenges: (() => { try { return JSON.parse(bonusState?.challenges || dbUser.challenges || '[]'); } catch { return []; } })(),
+          rakeback: {
+            lastDailyAt: bonusState?.rakeback_last_daily || 0,
+            lastWeeklyAt: bonusState?.rakeback_last_weekly || 0,
+            lastMonthlyAt: bonusState?.rakeback_last_monthly || 0,
+            dailyPool: bonusState?.rakeback_daily_pool || 0,
+            weeklyPool: bonusState?.rakeback_weekly_pool || 0,
+            monthlyPool: bonusState?.rakeback_monthly_pool || 0
+          }
+        },
+        geo: {
+          ip: dbUser.geo_ip || null,
+          country: dbUser.geo_country || null,
+          city: dbUser.geo_city || null,
+          isVpn: dbUser.geo_is_vpn || 0,
+          riskScore: dbUser.geo_risk_score || 0
+        },
+         referredBy: affiliateRecord ? (affiliateRecord.referred_by || null) : null,
+        hasPayoutAccount: !!dbUser.stripe_account_id,
+        transfersActive: true,
+        stripeAccountId: dbUser.stripe_account_id || null
       };
       users.set(user.id, user);
     }
@@ -239,7 +291,7 @@ function generateUserId() {
 // -----------------------------------------------------------------------------
 async function loadData() {
   try {
-    await db.getDb();
+    await db.initPromise;
     const userCount = await db.getUserCount();
     if (userCount === 0) {
       console.log('[Persistence]: No users in database, will seed demo user.');
@@ -813,63 +865,97 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
 
 // Persona / Identity Verification Webhook Endpoint
 app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, res) => {
-  let event;
+  if (DIDIT_WEBHOOK_SECRET) {
+    const sig = req.headers['x-signature-v2'];
+    const timestamp = req.headers['x-timestamp'];
 
-  if (PERSONA_WEBHOOK_SECRET) {
-    const sig = req.headers['persona-signature'];
-    if (!sig) {
-      return res.status(401).json({ error: 'Missing webhook signature.' });
+    if (!timestamp) {
+      return res.status(401).json({ error: 'Missing X-Timestamp header.' });
     }
 
-    const computedSig = crypto
-      .createHmac('sha256', PERSONA_WEBHOOK_SECRET)
-      .update(req.body)
-      .digest('hex');
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
+      console.error('[KYC WEBHOOK]: Timestamp out of range');
+      return res.status(401).json({ error: 'Webhook timestamp out of range.' });
+    }
 
-    if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(computedSig, 'hex'))) {
-      console.error('[PERSONA WEBHOOK WARNING] Invalid signature');
-      return res.status(401).json({ error: 'Invalid webhook signature.' });
+    if (sig) {
+      const computedSig = crypto
+        .createHmac('sha256', DIDIT_WEBHOOK_SECRET)
+        .update(req.body)
+        .digest('hex');
+
+      if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(computedSig, 'hex'))) {
+        console.error('[KYC WEBHOOK]: Invalid signature');
+        return res.status(401).json({ error: 'Invalid webhook signature.' });
+      }
+    } else {
+      return res.status(401).json({ error: 'Missing webhook signature.' });
     }
   }
 
+  let event;
   try {
     event = JSON.parse(req.body.toString('utf8'));
   } catch (err) {
     return res.status(400).json({ error: 'Malformed JSON body.' });
   }
 
-  const { event: eventType, data } = event;
-  const referenceId = data?.attributes?.reference_id;
+  const { webhook_type, status, session_id, vendor_data, decision } = event;
 
-  if (!referenceId) return res.status(400).json({ error: 'Missing reference_id' });
+  const userId = parseInt(vendor_data, 10);
+  if (isNaN(userId)) {
+    console.warn('[KYC WEBHOOK]: Missing or invalid vendor_data');
+    return res.json({ success: true });
+  }
 
-  const userId = parseInt(referenceId, 10);
   const user = users.get(userId);
 
   if (user) {
-    if (eventType === 'inquiry.approved') {
+    if (status === 'Approved') {
       user.kyc.status = 'VERIFIED';
       user.kyc.tier = 2;
       user.kyc.verifiedAt = new Date().toISOString();
       user.kyc.rejectionReason = null;
+      user.diditSessionId = null;
+      saveData();
 
       sendToUser(userId, {
         type: 'KYC_STATUS_UPDATE',
         kyc: user.kyc,
         message: 'Your identity has been successfully verified!'
       });
-    } else if (eventType === 'inquiry.declined' || eventType === 'inquiry.failed') {
+    } else if (status === 'Declined') {
       user.kyc.status = 'REJECTED';
-      user.kyc.rejectionReason = data?.attributes?.declined_reason || 'Document verification failed.';
+      user.kyc.rejectionReason = decision?.warnings?.[0]?.code || decision?.rejection_reason || 'Document verification failed.';
+      saveData();
 
       sendToUser(userId, {
         type: 'KYC_STATUS_UPDATE',
         kyc: user.kyc,
         message: 'Identity verification failed. Please check your documents and retry.'
       });
+    } else if (status === 'In Review' || status === 'In Progress') {
+      user.kyc.status = 'PENDING';
+      saveData();
+
+      sendToUser(userId, {
+        type: 'KYC_STATUS_UPDATE',
+        kyc: user.kyc,
+        message: 'Your identity verification is being reviewed.'
+      });
+    } else if (status === 'Resubmitted' || status === 'Awaiting User') {
+      user.kyc.status = 'PENDING';
+      saveData();
+
+      sendToUser(userId, {
+        type: 'KYC_STATUS_UPDATE',
+        kyc: user.kyc,
+        message: 'Please complete your identity verification.'
+      });
     }
   } else {
-    console.warn(`[PERSONA WEBHOOK] User ${userId} not found for webhook event ${eventType}`);
+    console.warn('[KYC WEBHOOK]: User not found for vendor_data:', vendor_data);
   }
 
   res.json({ success: true });
@@ -1578,6 +1664,14 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
   user.geoIsVpn = !!geo.isVpn;
   user.geoRiskScore = geo.riskScore || 0;
 
+  if (!user.geo) user.geo = {};
+  user.geo.ip = clientIp;
+  user.geo.country = geo.country || null;
+  user.geo.city = geo.city || null;
+  user.geo.isVpn = !!geo.isVpn;
+  user.geo.riskScore = geo.riskScore || 0;
+  user.geo.registeredAt = user.registeredAt || null;
+
   let transfersActive = false;
   if (user.stripeAccountId) {
     try {
@@ -1588,34 +1682,34 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
     }
   }
 
-   res.json({
+  res.json({
     id: user.id,
     username: user.username,
     email: user.email,
     state: user.state,
     geo: {
-      ip: user.geoIp || null,
-      country: user.geoCountry || null,
-      city: user.geoCity || null,
-      isVpn: !!user.geoIsVpn,
-      riskScore: user.geoRiskScore || 0,
-      registeredAt: user.registeredAt || null
+      ip: user.geoIp || user.geo?.ip || null,
+      country: user.geoCountry || user.geo?.country || null,
+      city: user.geoCity || user.geo?.city || null,
+      isVpn: !!((user.geoIsVpn !== undefined ? user.geoIsVpn : user.geo?.isVpn)),
+      riskScore: (user.geoRiskScore !== undefined ? user.geoRiskScore : (user.geo?.riskScore || 0)),
+      registeredAt: user.registeredAt || user.geo?.registeredAt || null
     },
     isGuest: user.email && user.email.endsWith('@guest.casino'),
-    referredBy: user.referred_by || null,
-    createdAt: user.createdAt,
-    balances: { 
-      gc: user.gc_balance, 
+    referredBy: user.referred_by || user.referredBy || null,
+    createdAt: user.createdAt || user.created_at,
+    balances: {
+      gc: user.gc_balance,
       sc: user.sc_unplayed + user.sc_played,
-      sc_unplayed: user.sc_unplayed, 
+      sc_unplayed: user.sc_unplayed,
       sc_played: user.sc_played
     },
     kyc: user.kyc || { status: 'UNVERIFIED', tier: 0 },
     vip: {
-      tier: user.vipTier,
-      totalWageredSC: user.totalWageredSC,
-      totalWageredGC: user.totalWageredGC,
-      rakebackAccruedSC: user.rakebackAccruedSC
+      tier: user.vipTier || user.vip?.tier,
+      totalWageredSC: user.totalWageredSC || user.vip?.totalWageredSC || 0,
+      totalWageredGC: user.totalWageredGC || user.vip?.totalWageredGC || 0,
+      rakebackAccruedSC: user.rakebackAccruedSC || user.vip?.rakebackAccruedSC || 0
     },
     hasPayoutAccount: !!user.stripeAccountId,
     transfersActive,
@@ -1732,17 +1826,80 @@ app.post('/api/user/kyc/start', verifyToken, enforceJurisdiction, async (req, re
     return res.status(400).json({ error: 'Identity is already fully verified.' });
   }
 
-  user.kyc.status = 'PENDING';
-  
-  res.json({
-    success: true,
-    kycStatus: user.kyc.status,
-    personaConfig: {
-      templateId: process.env.PERSONA_TEMPLATE_ID || 'itmpl_sandbox_default',
-      referenceId: user.id.toString(),
-      environment: process.env.NODE_ENV === 'production' ? 'production' : 'sandbox'
+  if (!DIDIT_API_KEY || !DIDIT_WORKFLOW_ID) {
+    user.kyc.status = 'PENDING';
+    saveData();
+    return res.json({
+      success: true,
+      kycStatus: user.kyc.status,
+      personaConfig: {
+        templateId: process.env.PERSONA_TEMPLATE_ID || 'itmpl_sandbox_default',
+        referenceId: user.id.toString(),
+        environment: process.env.NODE_ENV === 'production' ? 'production' : 'sandbox'
+      }
+    });
+  }
+
+  const FRONTEND_URL = process.env.FRONTEND_URL || `https://${req.headers.host}`;
+  const callbackUrl = `${FRONTEND_URL.replace(/\/$/, '')}/account/kyc-callback`;
+
+  const diditPayload = {
+    workflow_id: DIDIT_WORKFLOW_ID,
+    vendor_data: String(user.id),
+    callback: callbackUrl,
+    callback_method: 'both',
+    language: 'en',
+    contact_details: {
+      email: user.email,
+      send_notification_emails: false
+    },
+    expected_details: {
+      first_name: user.username,
+      last_name: 'User',
+      date_of_birth: req.body.birthDate || undefined,
     }
-  });
+  };
+
+  try {
+    const response = await fetch(`${DIDIT_API_BASE}/session/`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': DIDIT_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(diditPayload)
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('[KYC/DIDIT]: Failed to create session:', JSON.stringify(data));
+      user.kyc.status = 'PENDING';
+      saveData();
+      return res.status(500).json({ error: 'Failed to create KYC session.', details: data.detail || data });
+    }
+
+    user.kyc.status = 'PENDING';
+    user.diditSessionId = data.session_id;
+    await db.updateUser(user.id, {
+      kyc_status: 'PENDING',
+      didit_session_id: data.session_id
+    });
+    saveData();
+
+    res.json({
+      success: true,
+      kycStatus: 'PENDING',
+      verificationUrl: data.url,
+      sessionId: data.session_id,
+      sessionToken: data.session_token
+    });
+  } catch (err) {
+    console.error('[KYC/DIDIT]: Error:', err.message);
+    user.kyc.status = 'PENDING';
+    saveData();
+    res.status(500).json({ error: 'Failed to create KYC session.', details: err.message });
+  }
 });
 
 app.post('/api/user/kyc/verify-sandbox', verifyToken, enforceJurisdiction, async (req, res) => {
