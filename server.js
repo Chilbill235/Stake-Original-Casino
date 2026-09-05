@@ -926,6 +926,9 @@ function corsOptions(origin, callback) {
     'https://stakecasino-six.vercel.app',
     'https://stakecasino-six-git-main.vercel.app',
     'https://stakecasino-six-kapon.vercel.app',
+    'https://stake-original-casino.vercel.app',
+    'https://stake-original-casino-git-main.vercel.app',
+    'https://stake-original-casino-kapon.vercel.app',
     process.env.FRONTEND_URL
   ].filter(Boolean);
 
