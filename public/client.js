@@ -77,6 +77,24 @@ window.addEventListener('unhandledrejection', function(e) {
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
+// Soft guard for window.ethereum to reduce conflicts with wallet extensions.
+// Do NOT make this fatal; some extensions inject a non-configurable property.
+if (typeof window !== 'undefined') {
+  try {
+    const desc = Object.getOwnPropertyDescriptor(window, 'ethereum');
+    if (!desc) {
+      Object.defineProperty(window, 'ethereum', {
+        value: undefined,
+        writable: true,
+        configurable: true,
+        enumerable: true
+      });
+    }
+  } catch (e) {
+    // swallow redefinition errors from extensions like evmAsk/Phantom
+  }
+}
+
 // ==========================================================================
 // 2. SYNTHESIZED WEB AUDIO SFX ENGINE
 // ==========================================================================

@@ -91,10 +91,6 @@
       "destination": "/sw.js"
     },
     {
-      "source": "/api/(.*)",
-      "destination": "/server.js"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
