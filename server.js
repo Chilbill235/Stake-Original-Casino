@@ -205,6 +205,20 @@ if (STRIPE_SECRET_KEY) {
 
 const bcrypt = require('bcryptjs');
 const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
+function calculateCryptoRewards(receivedUsd, payment) {
+  const pkg = payment.packageId ? COIN_PACKAGES[payment.packageId] : null;
+  if (pkg) {
+    const packageUsd = pkg.priceInCents / 100;
+    const tolerance = Math.max(0.01, packageUsd * 0.01);
+    if (Math.abs(receivedUsd - packageUsd) <= tolerance) {
+      return { sc: pkg.scAmount, gc: pkg.gcAmount, matchedPackage: true };
+    }
+  }
+  const sc = round2(receivedUsd);
+  const gc = round2(receivedUsd * 2);
+  return { sc, gc, matchedPackage: false };
+}
+
 function cryptoToUsd(currency, amount) {
   const cur = (currency || 'BTC').toUpperCase();
   const amt = parseFloat(amount) || 0;
@@ -2760,8 +2774,9 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
       return res.status(400).json({ error: verify.error || 'Received amount is below the $1.00 USD minimum deposit.', verified: true, receivedUsd });
     }
 
-    const creditedSc = round2(receivedUsd);
-    const creditedGc = round2(receivedUsd * 2);
+    const rewards = calculateCryptoRewards(receivedUsd, payment);
+    const creditedSc = rewards.sc;
+    const creditedGc = rewards.gc;
 
     if (!acquireLock(user.id, 'crypto-' + paymentId)) {
       return res.status(409).json({ error: 'Confirmation already in progress for this payment.', verified: true, status: payment.status });
@@ -2770,9 +2785,9 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
       user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
       user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
       const txAmount = amountSent ? parseFloat(amountSent) : Number(payment.amount || 0);
-      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''} — $${receivedUsd} USD`, creditedGc, creditedSc, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null, receivedUsd });
+      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''} — $${receivedUsd} USD`, creditedGc, creditedSc, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null, receivedUsd, matchedPackage: rewards.matchedPackage });
       creditReferrerForDeposit(user, receivedUsd);
-      try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: creditedGc, scDelta: creditedSc, currency: 'GC', amount: receivedUsd, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null, receivedUsd } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
+      try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: creditedGc, scDelta: creditedSc, currency: 'GC', amount: receivedUsd, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null, receivedUsd, matchedPackage: rewards.matchedPackage } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
       saveData();
     } finally {
       releaseLock(user.id, 'crypto-' + paymentId);
@@ -2819,39 +2834,40 @@ app.post('/api/user/crypto-payment/webhook', express.json(), async (req, res) =>
         return res.status(400).json({ error: 'Address mismatch.' });
       }
      payment.status = 'COMPLETED';
-     const user = users.get(payment.userId);
-     if (user) {
-       const receivedUsd = cryptoToUsd(payment.currency, payment.amount);
-       const creditedSc = round2(receivedUsd);
-       const creditedGc = round2(receivedUsd * 2);
-       if (creditedSc < 1) {
-         console.warn('[Crypto Webhook]: Below minimum $1 USD', receivedUsd);
-       }
-       user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
-       user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
-       saveData();
-       logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment (webhook)`, creditedGc, creditedSc, { paymentId, currency: payment.currency, address: payment.address, txid });
-       try {
-         await db.addTransaction({
-           id: `crypto_${paymentId}`,
-           userId: user.id,
-           type: 'PURCHASE',
-           description: `Crypto ${payment.currency} payment (webhook)`,
-           gcDelta: creditedGc,
-           scDelta: creditedSc,
-           currency: 'GC',
-           amount: receivedUsd,
-           status: 'COMPLETED',
-           metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid }
-         });
-       } catch (e) { console.error('[Crypto Webhook DB]:', e.message); }
-       creditReferrerForDeposit(user, receivedUsd);
-       sendToUser(user.id, {
-         type: 'BALANCE_UPDATE',
-         balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
-         message: `Crypto deposit confirmed! +${creditedGc} GC + ${creditedSc} SC credited.`
-       });
-     }
+      const user = users.get(payment.userId);
+      if (user) {
+        const receivedUsd = cryptoToUsd(payment.currency, payment.amount);
+        const rewards = calculateCryptoRewards(receivedUsd, payment);
+        const creditedSc = rewards.sc;
+        const creditedGc = rewards.gc;
+        if (creditedSc < 1) {
+          console.warn('[Crypto Webhook]: Below minimum $1 USD', receivedUsd);
+        }
+        user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
+        user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
+        saveData();
+        logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment (webhook)`, creditedGc, creditedSc, { paymentId, currency: payment.currency, address: payment.address, txid, receivedUsd, matchedPackage: rewards.matchedPackage });
+        try {
+          await db.addTransaction({
+            id: `crypto_${paymentId}`,
+            userId: user.id,
+            type: 'PURCHASE',
+            description: `Crypto ${payment.currency} payment (webhook)`,
+            gcDelta: creditedGc,
+            scDelta: creditedSc,
+            currency: 'GC',
+            amount: receivedUsd,
+            status: 'COMPLETED',
+            metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, receivedUsd, matchedPackage: rewards.matchedPackage }
+          });
+        } catch (e) { console.error('[Crypto Webhook DB]:', e.message); }
+        creditReferrerForDeposit(user, receivedUsd);
+        sendToUser(user.id, {
+          type: 'BALANCE_UPDATE',
+          balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
+          message: `Crypto deposit confirmed! +${creditedGc} GC + ${creditedSc} SC credited.`
+        });
+      }
    }
 
   res.json({ success: true });
@@ -3136,15 +3152,16 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
       return res.status(400).json({ error: 'Received amount is below the $1.00 USD minimum deposit.', received: receivedSol + ' SOL ($' + receivedUsd + ' USD)' });
     }
 
-    const creditedSc = round2(receivedUsd);
-    const creditedGc = round2(receivedUsd * 2);
+    const rewards = calculateCryptoRewards(receivedUsd, payment);
+    const creditedSc = rewards.sc;
+    const creditedGc = rewards.gc;
 
     // Mark complete + credit balances
     payment.status = 'COMPLETED';
     user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
     user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
     saveData();
-    logTransaction(user.id, 'PURCHASE', 'Phantom (SOL) payment', creditedGc, creditedSc, { paymentId, txSignature, receivedUsd });
+    logTransaction(user.id, 'PURCHASE', 'Phantom (SOL) payment', creditedGc, creditedSc, { paymentId, txSignature, receivedUsd, matchedPackage: rewards.matchedPackage });
     creditReferrerForDeposit(user, receivedUsd);
 
     res.json({
