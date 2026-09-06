@@ -3764,6 +3764,7 @@ function renderAccountPage(page = 'overview') {
     const streak = bonus.claimStreak || 0;
     const lastClaim = bonus.lastClaimAt ? new Date(bonus.lastClaimAt).toLocaleDateString() : 'Never';
     const challenges = (bonus.challenges || []).slice(0, 5);
+    const rakebackRate = 0.65;
     html = `
       <div class="account-hero">
         <div class="account-avatar">🎁</div>
@@ -3895,51 +3896,7 @@ function renderAccountPage(page = 'overview') {
         </div>
       </div>`;
     startKycPolling();
-  } else if (page === 'bonuses') {
-    const bonus = state.profile?.bonus || {};
-    const streak = bonus.claimStreak || 0;
-    const lastClaim = bonus.lastClaimAt ? new Date(bonus.lastClaimAt).toLocaleDateString() : 'Never';
-    const challenges = (bonus.challenges || []).slice(0, 5);
-    html = `
-      <div class="account-hero">
-        <div class="account-avatar">🎁</div>
-        <div class="account-hero-info">
-          <h1 class="account-username">Bonuses & Rewards</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
-        </div>
-      </div>
-      <div class="account-details-grid">
-        <div class="account-card">
-          <h3 class="account-card-title">Daily Bonus</h3>
-          <div class="bonus-daily">
-            <div class="bonus-streak">🔥 <span class="streak-count">${streak}</span> Day Streak</div>
-            <div class="bonus-last-claim">Last claimed: <strong>${lastClaim}</strong></div>
-            <button class="btn-play" onclick="openBonusModal()" style="margin-top:10px;">🎁 Claim Daily Bonus</button>
-          </div>
-        </div>
-        <div class="account-card">
-          <h3 class="account-card-title">Rakeback</h3>
-          <div class="account-detail-list">
-            <div class="account-detail-item"><span class="detail-label">Earned</span><span class="detail-value sc-val">${formatCoins(vip.rakebackAccruedSC || 0)} SC</span></div>
-            <div class="account-detail-item"><span class="detail-label">Rate</span><span class="detail-value">0.65%</span></div>
-          </div>
-          <button class="btn-profile-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()" style="margin-top:10px;">💎 View Rakeback</button>
-        </div>
-        <div class="account-card" style="grid-column: 1 / -1;">
-          <h3 class="account-card-title">Active Challenges</h3>
-          ${challenges.length === 0 ? '<p class="text-subhead">No active challenges. Check back soon!</p>' : ''}
-          <div class="challenges-list">
-            ${challenges.map(ch => `
-              <div class="challenge-item">
-                <span class="challenge-icon">🎯</span>
-                <span class="challenge-name">${escapeHTML(ch.name || 'Challenge')}</span>
-                <span class="challenge-reward">+${formatCoins(ch.reward || 0)} SC</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>';
-  } else if (page === 'transactions') {
+  } else if (page === 'affiliates') {
     html = `
       <div class="account-hero">
         <div class="account-avatar">🤝</div>
@@ -4007,6 +3964,27 @@ function renderAccountPage(page = 'overview') {
           <div class="affiliate-apply-row">
             <input type="text" id="affiliate-input-code" class="form-input" placeholder="Enter referral code (e.g. PLAYER-AB12CD)">
             <button class="btn-play" onclick="applyAffiliateCode()">Apply Code</button>
+          </div>
+        </div>
+      </div>`;
+  } else if (page === 'transactions') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">📋</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Transactions</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card" style="grid-column: 1 / -1;">
+          <div class="account-tx-tabs">
+            <button class="tx-tab-btn active" data-tx-sub="deposits" onclick="navigateToTxSub('deposits')">Deposits</button>
+            <button class="tx-tab-btn" data-tx-sub="withdrawals" onclick="navigateToTxSub('withdrawals')">Withdrawals</button>
+            <button class="tx-tab-btn" data-tx-sub="bets-casino" onclick="navigateToTxSub('bets-casino')">Bets (Casino)</button>
+          </div>
+          <div id="account-transactions-list">
+            <div class="account-placeholder">Loading transactions...</div>
           </div>
         </div>
       </div>`;
