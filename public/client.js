@@ -56,7 +56,7 @@ window.__CASINO_CURRENCY = state.currency;
 window.addEventListener('error', function(e) {
   if (!e) return;
   const msg = (e.message || '').toLowerCase();
-  if (msg.includes('clipboard') || msg.includes('model') || msg.includes('image input')) {
+  if (msg.includes('clipboard') || msg.includes('model') || msg.includes('image input') || msg.includes('ethereum')) {
     console.warn('[Client] Non-fatal error suppressed:', e.message);
     if (e.error) console.warn('[Client] Details:', e.error);
     return;
@@ -68,7 +68,7 @@ window.addEventListener('unhandledrejection', function(e) {
   if (!e) return;
   const reason = e.reason || '';
   const msg = (typeof reason === 'string' ? reason : reason && reason.message ? reason.message : '').toLowerCase();
-  if (msg.includes('clipboard') || msg.includes('model') || msg.includes('image input')) {
+  if (msg.includes('clipboard') || msg.includes('model') || msg.includes('image input') || msg.includes('ethereum')) {
     console.warn('[Client] Non-fatal promise rejection suppressed:', reason);
     return;
   }
@@ -78,15 +78,28 @@ window.addEventListener('unhandledrejection', function(e) {
 if (typeof window !== 'undefined' && !window.__ethereumGuarded) {
   window.__ethereumGuarded = true;
   try {
-    if (!Object.getOwnPropertyDescriptor(window, 'ethereum')) {
+    const desc = Object.getOwnPropertyDescriptor(window, 'ethereum');
+    if (!desc) {
       Object.defineProperty(window, 'ethereum', {
         value: undefined,
         writable: true,
         configurable: true,
         enumerable: true
       });
+    } else if (!desc.configurable && desc.writable === false) {
+      // Property exists but is non-configurable; freeze our reference to avoid
+      // downstream libraries from throwing when they attempt to redefine it.
+      const frozen = window.ethereum;
+      Object.defineProperty(window, 'ethereum', {
+        value: frozen,
+        writable: true,
+        configurable: true,
+        enumerable: true
+      });
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[Client] Ethereum guard skipped:', e.message);
+  }
 }
 
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
@@ -265,7 +278,9 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
 
 async function detectGeoLocation() {
   try {
-    const data = await fetch('/api/geo/lookup').then(r => r.json());
+    const res = await fetch('/api/geo/lookup');
+    if (!res.ok) throw new Error('Geo lookup failed: ' + res.status);
+    const data = await res.json();
     state.detectedState = data.state || 'CA';
     if (data.restricted) {
       const stateSelect = document.getElementById('reg-state');
