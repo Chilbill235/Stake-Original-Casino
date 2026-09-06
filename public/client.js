@@ -75,33 +75,6 @@ window.addEventListener('unhandledrejection', function(e) {
   console.error('[Client] Unhandled promise rejection:', reason);
 });
 
-if (typeof window !== 'undefined' && !window.__ethereumGuarded) {
-  window.__ethereumGuarded = true;
-  try {
-    const desc = Object.getOwnPropertyDescriptor(window, 'ethereum');
-    if (!desc) {
-      Object.defineProperty(window, 'ethereum', {
-        value: undefined,
-        writable: true,
-        configurable: true,
-        enumerable: true
-      });
-    } else if (!desc.configurable && desc.writable === false) {
-      // Property exists but is non-configurable; freeze our reference to avoid
-      // downstream libraries from throwing when they attempt to redefine it.
-      const frozen = window.ethereum;
-      Object.defineProperty(window, 'ethereum', {
-        value: frozen,
-        writable: true,
-        configurable: true,
-        enumerable: true
-      });
-    }
-  } catch (e) {
-    console.warn('[Client] Ethereum guard skipped:', e.message);
-  }
-}
-
 const RESTRICTED_STATES = ['WA', 'ID', 'NV', 'KY', 'MI', 'GA'];
 
 // ==========================================================================
