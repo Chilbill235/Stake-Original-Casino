@@ -122,6 +122,16 @@ function initAudioContext() {
   }
 }
 
+function resumeAudioOnGesture() {
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().then(() => { audioReady = true; }).catch(() => {});
+  }
+}
+
+['click', 'touchstart', 'keydown', 'pointerdown'].forEach(evt => {
+  document.addEventListener(evt, resumeAudioOnGesture, { once: false, passive: true });
+});
+
 function playSound(type) {
   if (!state.sfxEnabled) return;
   if (!audioCtx) return;
@@ -222,7 +232,7 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
       try {
         data = JSON.parse(text);
       } catch (parseErr) {
-        console.warn('[API Parse Warning]: Non-JSON response received', text);
+        console.warn('[API Parse Warning]: Non-JSON response received', text.slice(0, 120));
       }
     }
 
@@ -1896,6 +1906,20 @@ function showGlobalFeed() {
   if (closeBtn) closeBtn.classList.remove('hidden');
   const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
   if (lobbyBetsBtn) lobbyBetsBtn.classList.add('hidden');
+  ensureOnlyOneBetsPanelVisible();
+}
+
+function ensureOnlyOneBetsPanelVisible() {
+  const drawer = document.getElementById('global-bets-drawer');
+  const sidebar = document.getElementById('global-bets-sidebar');
+  const drawerOpen = drawer && drawer.classList.contains('open');
+  const sidebarVisible = sidebar && !sidebar.classList.contains('hidden');
+
+  if (drawerOpen && sidebarVisible) {
+    if (sidebar) sidebar.classList.add('hidden');
+    const closeBtn = document.getElementById('global-bets-close');
+    if (closeBtn) closeBtn.classList.add('hidden');
+  }
 }
 
 function toggleGlobalFeed() {
@@ -1918,6 +1942,8 @@ function toggleGlobalFeed() {
         if (fab) fab.classList.add('hidden');
       }
     }
+    if (sidebar) sidebar.classList.add('hidden');
+    if (closeBtn) closeBtn.classList.add('hidden');
   } else {
     const isSidebarHidden = sidebar?.classList.contains('hidden');
     if (isSidebarHidden) {
@@ -1932,6 +1958,7 @@ function toggleGlobalFeed() {
     if (drawer) drawer.classList.remove('open');
     if (fab) fab.classList.add('hidden');
   }
+  ensureOnlyOneBetsPanelVisible();
 }
 
 function clearGameControls() {
@@ -4447,7 +4474,7 @@ async function toggle2FA() {
 
   try {
     const data = await apiRequest('/api/user/security/2fa/enable', 'POST');
-    state.securityData = { ...state.securityData, twoFactorEnabled: true, twoFactorSecret: data.secret };
+    state.securityData = { ...state.securityData, twoFactorEnabled: false, twoFactorSecret: data.secret };
 
     const secret = data.secret || '';
     const qrData = encodeURIComponent(data.qrCode || '');
@@ -4460,7 +4487,7 @@ async function toggle2FA() {
         <div class="modal-header-flex" style="justify-content:center;">
           <div>
             <h3 style="margin:0 0 6px;">🔐 Setup Two-Factor Authentication</h3>
-            <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">Scan the QR code with your authenticator app</p>
+            <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">Scan the QR code with your authenticator app, then enter the 6-digit code</p>
           </div>
         </div>
         <div style="padding:20px; display:flex; flex-direction:column; align-items:center; gap:14px;">
@@ -4475,7 +4502,8 @@ async function toggle2FA() {
             📱 <strong>Mobile:</strong> Apple Passwords / Google Authenticator / Authy / Microsoft Authenticator<br>
             💻 <strong>PC:</strong> Authy / WinAuth / Google Authenticator (Chrome)
           </div>
-          <button class="btn btn-primary" id="btn-2fa-confirm" style="min-width:160px; margin-top:4px;">I've Saved the Secret</button>
+          <input type="text" id="2fa-verify-code" placeholder="Enter 6-digit code" maxlength="6" style="width:100%; max-width:220px; padding:12px; border-radius:10px; border:1px solid var(--glass-border); background:var(--bg-tertiary); color:var(--text-primary); font-size:1.2rem; text-align:center; letter-spacing:4px; font-family:monospace;" />
+          <button class="btn btn-primary" id="btn-2fa-verify" style="min-width:160px; margin-top:4px;">Verify and Enable</button>
         </div>
       </div>
     `;
@@ -4483,10 +4511,25 @@ async function toggle2FA() {
 
     const close = () => document.body.removeChild(overlay);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.getElementById('btn-2fa-confirm').addEventListener('click', () => {
-      close();
-      alert('2FA enabled! Please verify your identity with the authenticator app on your next login.');
-      refreshAccountPage('security');
+
+    document.getElementById('btn-2fa-verify').addEventListener('click', async () => {
+      const codeInput = document.getElementById('2fa-verify-code');
+      const code = codeInput ? codeInput.value.trim() : '';
+      if (!code || code.length !== 6) {
+        alert('Please enter the 6-digit code from your authenticator app.');
+        return;
+      }
+      try {
+        const verifyData = await apiRequest('/api/user/security/2fa/verify', 'POST', { code });
+        if (verifyData.success) {
+          state.securityData = { ...state.securityData, twoFactorEnabled: true };
+          close();
+          alert('2FA enabled successfully! Your account is now protected.');
+          refreshAccountPage('security');
+        }
+      } catch (err) {
+        alert('Verification failed: ' + (err.message || 'Invalid code. Please try again.'));
+      }
     });
   } catch (err) {
     alert('Failed to enable 2FA: ' + (err.message || err));

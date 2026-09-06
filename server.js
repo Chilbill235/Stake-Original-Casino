@@ -18,7 +18,7 @@ const { verifyToken } = require('./middleware/auth');
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const FRONTEND_BASE = process.env.FRONTEND_BASE || process.env.FRONTEND_URL || null;
-const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
+const JWT_SECRET = process.env.JWT_SECRET || 'OpOtPFoV2yOsDX8m8NZZJtB4aWWf65/iY9mNRcIvp0k=';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '14d';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
@@ -1403,9 +1403,25 @@ app.post('/api/user/security/2fa/enable', verifyToken, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const secret = generate2FASecret();
-  await db.updateUser(user.id, { two_factor_secret: secret, two_factor_enabled: 1 });
+  await db.updateUser(user.id, { two_factor_secret: secret, two_factor_enabled: 0 });
 
   res.json({ success: true, secret, qrCode: `otpauth://totp/StakeOriginals:${user.email}?secret=${secret}&issuer=StakeOriginals` });
+});
+
+app.post('/api/user/security/2fa/verify', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const { code } = req.body || {};
+  const secret = user.two_factor_secret;
+  if (!secret) return res.status(400).json({ error: 'No 2FA secret found. Please enable 2FA first.' });
+
+  if (!code || !verifyTOTP(secret, String(code))) {
+    return res.status(400).json({ error: 'Invalid verification code. Please try again.' });
+  }
+
+  await db.updateUser(user.id, { two_factor_enabled: 1 });
+  res.json({ success: true, message: 'Two-factor authentication enabled successfully.' });
 });
 
 app.post('/api/user/security/2fa/disable', verifyToken, async (req, res) => {
@@ -1485,6 +1501,50 @@ function generate2FASecret() {
     secret += chars[Math.floor(Math.random() * chars.length)];
   }
   return secret;
+}
+
+function base32Decode(str) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0;
+  let value = 0;
+  const bytes = [];
+  for (let i = 0; i < str.length; i++) {
+    const idx = alphabet.indexOf(str[i].toUpperCase());
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+function verifyTOTP(secret, token) {
+  try {
+    const key = base32Decode(secret);
+    const epoch = Math.floor(Date.now() / 1000);
+    const counter = Math.floor(epoch / 30);
+    for (let c = counter - 1; c <= counter + 1; c++) {
+      const hmac = crypto.createHmac('sha1', key);
+      hmac.update(Buffer.from([0, 0, 0, 0, 0, 0, 0, 0]));
+      const buf = Buffer.alloc(8);
+      buf.writeBigUInt64LE(BigInt(c));
+      hmac.update(buf);
+      const digest = hmac.digest();
+      const offset = digest[digest.length - 1] & 0x0f;
+      const code = ((digest[offset] & 0x7f) << 24) |
+                   ((digest[offset + 1] & 0xff) << 16) |
+                   ((digest[offset + 2] & 0xff) << 8) |
+                   (digest[offset + 3] & 0xff);
+      const otp = (code % 1000000).toString().padStart(6, '0');
+      if (otp === token.replace(/\s/g, '')) return true;
+    }
+  } catch (e) {
+    console.error('[2FA] verifyTOTP error:', e.message);
+  }
+  return false;
 }
 
 wss.on('connection', (ws) => {
