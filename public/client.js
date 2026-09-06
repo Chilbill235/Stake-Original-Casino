@@ -3577,31 +3577,76 @@ function renderAccountPage(page = 'overview') {
   let html = '';
 
   if (page === 'overview') {
+    const rakebackRate = 0.65;
+    const totalWagered = (vip.totalWageredSC || 0) + (vip.totalWageredGC || 0);
+    const rakebackEarned = vip.rakebackAccruedSC || 0;
+    const nextTierThresholds = { Bronze: 0, Silver: 1000, Gold: 5000, Platinum: 25000, Diamond: 100000 };
+    const currentTier = vipText || 'Bronze';
+    const tiers = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
+    const currentIndex = tiers.indexOf(currentTier);
+    const nextTier = currentIndex < tiers.length - 1 ? tiers[currentIndex + 1] : null;
+    const threshold = nextTier ? (nextTierThresholds[nextTier] || 0) : null;
+    const progressPct = threshold ? Math.min(100, Math.max(0, ((vip.totalWageredSC || 0) / threshold) * 100)) : 100;
+    const dailyClaimed = state.profile?.bonus?.dailyClaimed ? true : false;
+    const lastClaim = state.profile?.bonus?.lastClaimAt ? new Date(state.profile.bonus.lastClaimAt).toLocaleDateString() : 'Never';
+
     html = `
       <div class="account-hero">
         <div class="account-avatar">${escapeHTML(initial)}</div>
         <div class="account-hero-info">
           <h1 class="account-username">${escapeHTML(p.username || 'Guest')}</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <span class="vip-badge vip-${currentTier.toLowerCase()}">${escapeHTML(currentTier)} VIP</span>
         </div>
       </div>
 
       <div class="account-stats-row">
-        <div class="stat-card">
+        <div class="stat-card card-hover-lift">
           <div class="stat-icon">🪙</div>
           <div class="stat-info">
             <span class="stat-value">${gc}</span>
             <span class="stat-label">Gold Coins</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card card-hover-lift">
           <div class="stat-icon">💎</div>
           <div class="stat-info">
             <span class="stat-value">${sc}</span>
             <span class="stat-label">Sweeps Coins</span>
           </div>
         </div>
+        <div class="stat-card card-hover-lift">
+          <div class="stat-icon">🎯</div>
+          <div class="stat-info">
+            <span class="stat-value">${formatCoins(totalWagered)}</span>
+            <span class="stat-label">Total Wagered</span>
+          </div>
+        </div>
+        <div class="stat-card card-hover-lift">
+          <div class="stat-icon">💸</div>
+          <div class="stat-info">
+            <span class="stat-value">${formatCoins(rakebackEarned)}</span>
+            <span class="stat-label">Rakeback Earned</span>
+          </div>
+        </div>
       </div>
+
+      ${nextTier ? `
+      <div class="account-card tier-progress-card">
+        <h3 class="account-card-title">VIP Progress</h3>
+        <div class="tier-progress-viz">
+          <div class="tier-progress-bar">
+            <div class="tier-progress-fill" style="width: ${progressPct}%"></div>
+          </div>
+          <div class="tier-progress-labels">
+            <span class="tier-label completed">${escapeHTML(currentTier)}</span>
+            <span class="tier-label active">${escapeHTML(nextTier)}</span>
+          </div>
+        </div>
+        <div class="tier-progress-detail">
+          <span>Wager <strong>${formatCoins(threshold)}</strong> SC to reach ${escapeHTML(nextTier)} VIP</span>
+          <span class="tier-progress-pct">${Math.round(progressPct)}%</span>
+        </div>
+      </div>` : ''}
 
       <div class="account-details-grid">
         <div class="account-card">
@@ -3610,10 +3655,21 @@ function renderAccountPage(page = 'overview') {
             <div class="account-detail-item"><span class="detail-label">Username</span><span class="detail-value">${escapeHTML(p.username || 'Guest')}</span></div>
             <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || (isGuest ? 'guest@casino' : '—'))}</span></div>
             <div class="account-detail-item"><span class="detail-label">Member Since</span><span class="detail-value">${memberSince}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Account Type</span><span class="detail-value"><span class="status-pill ${isGuest ? 'status-pill-warning' : 'status-pill-success'}">${isGuest ? 'Guest' : 'Registered'}</span></span></div>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Quick Actions</h3>
+          <div class="quick-actions-grid">
+            <button class="btn-quick-action" onclick="openStoreModal()">🪙 <span>Buy Coins</span></button>
+            <button class="btn-quick-action" onclick="openRedeemModal()">💸 <span>Redeem SC</span></button>
+            <button class="btn-quick-action" onclick="openBonusModal()">🎁 <span>Daily Bonus</span></button>
+            <button class="btn-quick-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 <span>Rakeback</span></button>
           </div>
         </div>
       </div>`;
   } else if (page === 'profile') {
+    const geo = p.geo || {};
     html = `
       <div class="account-hero">
         <div class="account-avatar">${escapeHTML(initial)}</div>
@@ -3630,23 +3686,38 @@ function renderAccountPage(page = 'overview') {
             <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || '—')}</span></div>
             <div class="account-detail-item"><span class="detail-label">State</span><span class="detail-value">${escapeHTML(p.state || 'CA')}</span></div>
             <div class="account-detail-item"><span class="detail-label">Member Since</span><span class="detail-value">${memberSince}</span></div>
-            <div class="account-detail-item"><span class="detail-label">Account Type</span><span class="detail-value">${isGuest ? 'Guest' : 'Registered'}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Account Type</span><span class="detail-value"><span class="status-pill ${isGuest ? 'status-pill-warning' : 'status-pill-success'}">${isGuest ? 'Guest' : 'Registered'}</span></span></div>
+            <div class="account-detail-item"><span class="detail-label">Location</span><span class="detail-value">${escapeHTML(geo.city || '—')}${geo.state ? ', ' + escapeHTML(geo.state) : ''}</span></div>
           </div>
         </div>
         <div class="account-card">
           <h3 class="account-card-title">VIP Status</h3>
-          <div class="account-detail-list">
-            <div class="account-detail-item"><span class="detail-label">Current Tier</span><span class="detail-value"><span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)}</span></span></div>
-            <div class="account-detail-item"><span class="detail-label">Total GC Wagered</span><span class="detail-value">${totalWageredGC}</span></div>
-            <div class="account-detail-item"><span class="detail-label">Total SC Wagered</span><span class="detail-value">${totalWageredSC}</span></div>
-            <div class="account-detail-item"><span class="detail-label">Rakeback Earned</span><span class="detail-value">${formatCoins(vip.rakebackAccruedSC || 0)} SC</span></div>
+          <div class="vip-status-card">
+            <div class="vip-tier-display">
+              <span class="vip-badge vip-${vipText.toLowerCase()} vip-badge-lg">${escapeHTML(vipText)}</span>
+              <span class="vip-tier-sub">VIP Tier</span>
+            </div>
+            <div class="account-detail-list" style="margin-top:12px;">
+              <div class="account-detail-item"><span class="detail-label">Total GC Wagered</span><span class="detail-value">${totalWageredGC}</span></div>
+              <div class="account-detail-item"><span class="detail-label">Total SC Wagered</span><span class="detail-value">${totalWageredSC}</span></div>
+              <div class="account-detail-item"><span class="detail-label">Rakeback Earned</span><span class="detail-value sc-val">${formatCoins(vip.rakebackAccruedSC || 0)} SC</span></div>
+              <div class="account-detail-item"><span class="detail-label">Rakeback Rate</span><span class="detail-value">${rakebackRate}%</span></div>
+            </div>
           </div>
-          <div class="profile-actions" style="margin-top: 6px;">
+          <div class="profile-actions" style="margin-top: 12px;">
             <button class="btn-profile-action" onclick="openProvablyFairModal()">🛡️ Provably Fair Settings</button>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Referral</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Referred By</span><span class="detail-value">${p.referredBy ? escapeHTML(p.referredBy) : '—'}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Affiliate Code</span><span class="detail-value">${p.referralCode ? escapeHTML(p.referralCode) : '—'}</span></div>
           </div>
         </div>
       </div>`;
   } else if (page === 'wallet') {
+    const hasPayout = !!p.hasPayoutAccount;
     html = `
       <div class="account-hero">
         <div class="account-avatar">💰</div>
@@ -3659,12 +3730,12 @@ function renderAccountPage(page = 'overview') {
         <div class="account-card">
           <h3 class="account-card-title">Current Balances</h3>
           <div class="balance-cards">
-            <div class="balance-card gc">
+            <div class="balance-card gc card-hover-lift">
               <div class="balance-card-header"><span class="balance-icon">🪙</span><span class="balance-type">Gold Coins</span></div>
               <div class="balance-amount">${gc}</div>
               <div class="balance-sub">GC</div>
             </div>
-            <div class="balance-card sc">
+            <div class="balance-card sc card-hover-lift">
               <div class="balance-card-header"><span class="balance-icon">💎</span><span class="balance-type">Sweeps Coins</span></div>
               <div class="balance-amount">${sc}</div>
               <div class="balance-sub">Total SC</div>
@@ -3672,21 +3743,77 @@ function renderAccountPage(page = 'overview') {
           </div>
           <div class="balance-breakdown">
             <div class="breakdown-item"><span class="breakdown-label">Unplayed SC (must wager 1x)</span><span class="breakdown-value">${scUnplayed}</span></div>
-            <div class="breakdown-item"><span class="breakdown-label">Redeemable SC</span><span class="breakdown-value">${scPlayed}</span></div>
+            <div class="breakdown-item"><span class="breakdown-label">Redeemable SC</span><span class="breakdown-value sc-val">${scPlayed}</span></div>
           </div>
         </div>
         <div class="account-card">
           <h3 class="account-card-title">Manage Funds</h3>
           <div class="wallet-actions">
-            <button class="btn-wallet-action" onclick="openStoreModal()">🪙 Buy Coin Package</button>
-            <button class="btn-wallet-action" onclick="openRedeemModal()">💸 Redeem SC</button>
-            <button class="btn-wallet-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Claim Rakeback</button>
+            <button class="btn-wallet-action card-hover-lift" onclick="openStoreModal()">🪙 Buy Coin Package</button>
+            <button class="btn-wallet-action card-hover-lift" onclick="openRedeemModal()">💸 Redeem SC</button>
+            <button class="btn-wallet-action card-hover-lift" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Claim Rakeback</button>
+          </div>
+          <div class="payout-status" style="margin-top:14px;">
+            <span class="detail-label">Payout Account</span>
+            <span class="status-pill ${hasPayout ? 'status-pill-success' : 'status-pill-warning'}">${hasPayout ? 'Connected' : 'Not Connected'}</span>
+          </div>
+        </div>
+      </div>`;
+  } else if (page === 'bonuses') {
+    const bonus = state.profile?.bonus || {};
+    const streak = bonus.claimStreak || 0;
+    const lastClaim = bonus.lastClaimAt ? new Date(bonus.lastClaimAt).toLocaleDateString() : 'Never';
+    const challenges = (bonus.challenges || []).slice(0, 5);
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">🎁</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Bonuses & Rewards</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card">
+          <h3 class="account-card-title">Daily Bonus</h3>
+          <div class="bonus-daily">
+            <div class="bonus-streak">🔥 <span class="streak-count">${streak}</span> Day Streak</div>
+            <div class="bonus-last-claim">Last claimed: <strong>${lastClaim}</strong></div>
+            <button class="btn-play" onclick="openBonusModal()" style="margin-top:10px;">🎁 Claim Daily Bonus</button>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Rakeback</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Earned</span><span class="detail-value sc-val">${formatCoins(rakebackEarned)} SC</span></div>
+            <div class="account-detail-item"><span class="detail-label">Rate</span><span class="detail-value">${rakebackRate}%</span></div>
+          </div>
+          <button class="btn-profile-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()" style="margin-top:10px;">💎 View Rakeback</button>
+        </div>
+        <div class="account-card" style="grid-column: 1 / -1;">
+          <h3 class="account-card-title">Active Challenges</h3>
+          ${challenges.length === 0 ? '<p class="text-subhead">No active challenges. Check back soon!</p>' : ''}
+          <div class="challenges-list">
+            ${challenges.map(ch => `
+              <div class="challenge-item">
+                <span class="challenge-icon">🎯</span>
+                <span class="challenge-name">${escapeHTML(ch.name || 'Challenge')}</span>
+                <span class="challenge-reward">+${formatCoins(ch.reward || 0)} SC</span>
+              </div>
+            `).join('')}
           </div>
         </div>
       </div>`;
   } else if (page === 'kyc') {
     const lastChecked = state.kycLastChecked ? new Date(state.kycLastChecked).toLocaleTimeString() : null;
     const isPolling = kyc.status === 'PENDING' && !!state.diditSessionId;
+    const tierPct = Math.min(100, Math.max(0, ((kyc.tier || 0) / 2) * 100));
+    const tierLabels = ['Tier 1', 'Tier 2'];
+    const tierStatusClass = kyc.status === 'VERIFIED' ? 'complete' : (kyc.status === 'REJECTED' ? 'rejected' : (kyc.status === 'PENDING' ? 'active' : ''));
+    const step1Class = (kyc.tier >= 1 || kyc.status === 'VERIFIED') ? 'is-complete' : (kyc.status === 'PENDING' ? 'is-active' : '');
+    const step2Class = (kyc.tier >= 2 || kyc.status === 'VERIFIED') ? 'is-complete' : (kyc.status === 'PENDING' ? 'is-active' : '');
+    const statusIcon = kyc.status === 'VERIFIED' ? '✓' : (kyc.status === 'PENDING' ? '⏳' : (kyc.status === 'REJECTED' ? '✕' : '○'));
+    const statusIconClass = kyc.status === 'VERIFIED' ? 'verified' : (kyc.status === 'PENDING' ? 'pending' : (kyc.status === 'REJECTED' ? 'rejected' : ''));
+
     html = `
       <div class="account-hero">
         <div class="account-avatar">🛡️</div>
@@ -3698,13 +3825,30 @@ function renderAccountPage(page = 'overview') {
       <div class="account-details-grid">
         <div class="account-card">
           <h3 class="account-card-title">Verification Status</h3>
-          <div class="kyc-status-badge ${kycClass}" id="kyc-status-badge">${escapeHTML(kycStatusText)}</div>
-          ${kyc.rejectionReason ? `<div class="kyc-rejection" id="kyc-rejection-reason">${escapeHTML(kyc.rejectionReason)}</div>` : '<div class="kyc-rejection" id="kyc-rejection-reason" style="display:none;"></div>'}
-          <div class="kyc-tier-info">
-            <span>Verification Tier</span>
+          <div class="kyc-progress-stepper">
+            <div class="kyc-step ${step1Class}">
+              <div class="kyc-step-icon">${kyc.tier >= 1 || kyc.status === 'VERIFIED' ? '✓' : '1'}</div>
+              <span class="kyc-step-label">Email</span>
+            </div>
+            <div class="kyc-step ${step2Class}">
+              <div class="kyc-step-icon">${kyc.tier >= 2 || kyc.status === 'VERIFIED' ? '✓' : '2'}</div>
+              <span class="kyc-step-label">ID Document</span>
+            </div>
+          </div>
+          <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:14px;">
+            <span class="kyc-status-icon ${statusIconClass}">${statusIcon}</span>
+            <span class="kyc-status-badge ${kycClass}" id="kyc-status-badge">${escapeHTML(kycStatusText)}</span>
+          </div>
+          ${kyc.rejectionReason ? `<div class="kyc-rejection" id="kyc-rejection-reason"><span class="kyc-rejection-icon">⚠️</span><span>${escapeHTML(kyc.rejectionReason)}</span></div>` : ''}
+          <div class="kyc-tier-viz">
+            <div class="kyc-tier-bar"><div class="kyc-tier-fill" style="width:${tierPct}%"></div></div>
             <span class="tier-value">Tier ${kyc.tier} of 2</span>
           </div>
-          <div class="kyc-actions">
+          <div class="kyc-tier-labels">
+            <span class="${kyc.tier >= 1 ? 'completed' : ''}">Tier 1</span>
+            <span class="${kyc.tier >= 2 ? 'completed' : 'active'}">Tier 2</span>
+          </div>
+          <div class="kyc-actions" style="margin-top:14px;">
             ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
             ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button>' : ''}
             ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
@@ -3718,41 +3862,84 @@ function renderAccountPage(page = 'overview') {
               <button type="button" class="btn-secondary-action" onclick="pollKycStatus(true)">Check now</button>
             </div>` : ''}
         </div>
-        <div class="account-card">
+        <div class="account-card why-verify-card">
           <h3 class="account-card-title">Why Verify?</h3>
-          <div class="account-detail-list">
-            <div class="account-detail-item"><span class="detail-label">Tier 1</span><span class="detail-value">Email & basic info</span></div>
-            <div class="account-detail-item"><span class="detail-label">Tier 2</span><span class="detail-value">Government ID document</span></div>
-            <div class="account-detail-item"><span class="detail-label">Required to</span><span class="detail-value">Redeem Sweeps Coins for cash</span></div>
-            <div class="account-detail-item"><span class="detail-label">Provider</span><span class="detail-value">Didit (secure)</span></div>
+          <div class="why-verify-item">
+            <div class="why-verify-icon">📧</div>
+            <div class="why-verify-content">
+              <div class="why-verify-label">Tier 1</div>
+              <div class="why-verify-value">Email & basic info verification</div>
+            </div>
+          </div>
+          <div class="why-verify-item">
+            <div class="why-verify-icon">🪪</div>
+            <div class="why-verify-content">
+              <div class="why-verify-label">Tier 2</div>
+              <div class="why-verify-value">Government ID document scan</div>
+            </div>
+          </div>
+          <div class="why-verify-item">
+            <div class="why-verify-icon">💸</div>
+            <div class="why-verify-content">
+              <div class="why-verify-label">Required to</div>
+              <div class="why-verify-value">Redeem Sweeps Coins for cash prizes</div>
+            </div>
+          </div>
+          <div class="why-verify-item">
+            <div class="why-verify-icon">🔒</div>
+            <div class="why-verify-content">
+              <div class="why-verify-label">Provider</div>
+              <div class="why-verify-value">Didit — secure, encrypted verification</div>
+            </div>
           </div>
         </div>
       </div>`;
-    // Start the 30s polling loop when we land on a pending KYC page.
     startKycPolling();
-  } else if (page === 'transactions') {
-    const sub = state.accountTxSub || 'deposits';
+  } else if (page === 'bonuses') {
+    const bonus = state.profile?.bonus || {};
+    const streak = bonus.claimStreak || 0;
+    const lastClaim = bonus.lastClaimAt ? new Date(bonus.lastClaimAt).toLocaleDateString() : 'Never';
+    const challenges = (bonus.challenges || []).slice(0, 5);
     html = `
       <div class="account-hero">
-        <div class="account-avatar">📋</div>
+        <div class="account-avatar">🎁</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Transaction History</h1>
+          <h1 class="account-username">Bonuses & Rewards</h1>
           <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
         </div>
       </div>
       <div class="account-details-grid">
-        <div class="account-card" style="grid-column: 1 / -1;">
-          <div class="account-tx-tabs">
-            <button class="tx-tab-btn ${sub === 'deposits' ? 'active' : ''}" data-tx-sub="deposits" onclick="navigateToTxSub('deposits')">💰 Deposits</button>
-            <button class="tx-tab-btn ${sub === 'withdrawals' ? 'active' : ''}" data-tx-sub="withdrawals" onclick="navigateToTxSub('withdrawals')">💸 Withdrawals</button>
-            <button class="tx-tab-btn ${sub === 'bets-casino' ? 'active' : ''}" data-tx-sub="bets-casino" onclick="navigateToTxSub('bets-casino')">🎲 Bets / Casino</button>
-          </div>
-          <div id="account-transactions-list">
-            <div class="account-placeholder">Loading transactions...</div>
+        <div class="account-card">
+          <h3 class="account-card-title">Daily Bonus</h3>
+          <div class="bonus-daily">
+            <div class="bonus-streak">🔥 <span class="streak-count">${streak}</span> Day Streak</div>
+            <div class="bonus-last-claim">Last claimed: <strong>${lastClaim}</strong></div>
+            <button class="btn-play" onclick="openBonusModal()" style="margin-top:10px;">🎁 Claim Daily Bonus</button>
           </div>
         </div>
-      </div>`;
-  } else if (page === 'affiliates') {
+        <div class="account-card">
+          <h3 class="account-card-title">Rakeback</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Earned</span><span class="detail-value sc-val">${formatCoins(vip.rakebackAccruedSC || 0)} SC</span></div>
+            <div class="account-detail-item"><span class="detail-label">Rate</span><span class="detail-value">0.65%</span></div>
+          </div>
+          <button class="btn-profile-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()" style="margin-top:10px;">💎 View Rakeback</button>
+        </div>
+        <div class="account-card" style="grid-column: 1 / -1;">
+          <h3 class="account-card-title">Active Challenges</h3>
+          ${challenges.length === 0 ? '<p class="text-subhead">No active challenges. Check back soon!</p>' : ''}
+          <div class="challenges-list">
+            ${challenges.map(ch => `
+              <div class="challenge-item">
+                <span class="challenge-icon">🎯</span>
+                <span class="challenge-name">${escapeHTML(ch.name || 'Challenge')}</span>
+                <span class="challenge-reward">+${formatCoins(ch.reward || 0)} SC</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>';
+  } else if (page === 'transactions') {
     html = `
       <div class="account-hero">
         <div class="account-avatar">🤝</div>
@@ -3904,7 +4091,39 @@ function renderAccountPage(page = 'overview') {
           <div class="setting-row"><label><input type="checkbox" onchange="toggleSetting('animations', this.checked)" ${s.animations!==false?'checked':''}> Enable Animations</label></div>
           <div class="setting-row"><label><input type="checkbox" onchange="toggleSetting('soundOnHover', this.checked)" ${s.soundOnHover?'checked':''}> Sound on Hover</label></div>
         </div>
-      </div>`;
+      </div>';
+  } else if (page === 'support') {
+    html = `
+      <div class="account-hero">
+        <div class="account-avatar">💬</div>
+        <div class="account-hero-info">
+          <h1 class="account-username">Support</h1>
+          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+        </div>
+      </div>
+      <div class="account-details-grid">
+        <div class="account-card">
+          <h3 class="account-card-title">Contact Support</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">support@stakeoriginals.com</span></div>
+            <div class="account-detail-item"><span class="detail-label">Live Chat</span><span class="detail-value"><span class="status-pill status-pill-info">Available 24/7</span></span></div>
+            <div class="account-detail-item"><span class="detail-label">Response Time</span><span class="detail-value">&lt; 24 hours</span></div>
+          </div>
+          <div class="support-actions" style="margin-top:12px;">
+            <button class="btn-profile-action" onclick="window.open('mailto:support@stakeoriginals.com')">📧 Email Support</button>
+            <button class="btn-profile-action" onclick="alert('Live chat coming soon!')">💬 Live Chat</button>
+          </div>
+        </div>
+        <div class="account-card">
+          <h3 class="account-card-title">Help Center</h3>
+          <div class="account-detail-list">
+            <div class="account-detail-item"><span class="detail-label">FAQ</span><span class="detail-value"><a href="/legal/terms.html" class="legal-link">View FAQ</a></span></div>
+            <div class="account-detail-item"><span class="detail-label">Terms</span><span class="detail-value"><a href="/legal/terms.html" class="legal-link">Terms of Service</a></span></div>
+            <div class="account-detail-item"><span class="detail-label">Privacy</span><span class="detail-value"><a href="/legal/privacy.html" class="legal-link">Privacy Policy</a></span></div>
+            <div class="account-detail-item"><span class="detail-label">Sweepstakes Rules</span><span class="detail-value"><a href="/legal/sweepstakes-rules.html" class="legal-link">View Rules</a></span></div>
+          </div>
+        </div>
+      </div>';
   }
 
    content.innerHTML = html;
@@ -3913,6 +4132,9 @@ function renderAccountPage(page = 'overview') {
   }
   if (page === 'affiliates') {
     loadAffiliateData();
+  }
+  if (page === 'bonuses') {
+    // Bonuses page rendered
   }
 }
 
@@ -4028,6 +4250,16 @@ async function pollKycStatus(manual) {
     }
     return null;
   }
+}
+
+function closeAllModals() {
+  document.getElementById('modal-store')?.classList.add('hidden');
+  document.getElementById('modal-redeem')?.classList.add('hidden');
+  document.getElementById('modal-pf')?.classList.add('hidden');
+  document.getElementById('modal-auth')?.classList.add('hidden');
+  document.getElementById('modal-forgot-password')?.classList.add('hidden');
+  document.getElementById('kyc-identity-overlay')?.remove();
+  document.getElementById('referral-welcome-overlay')?.remove();
 }
 
 function showKycCallbackResult(status) {
@@ -5412,14 +5644,18 @@ function handleRouteChange() {
       page = 'wallet';
     } else if (path === '/account/kyc') {
       page = 'kyc';
-   } else if (path === '/account/security') {
-       page = 'security';
-     } else if (path === '/account/settings') {
-       page = 'settings';
-     } else if (path === '/account/transactions') {
-      page = 'transactions';
-      state.accountTxSub = state.accountTxSub || 'deposits';
-    }
+      } else if (path === '/account/security') {
+        page = 'security';
+      } else if (path === '/account/settings') {
+        page = 'settings';
+      } else if (path === '/account/bonuses') {
+        page = 'bonuses';
+      } else if (path === '/account/support') {
+        page = 'support';
+      } else if (path === '/account/transactions') {
+       page = 'transactions';
+       state.accountTxSub = state.accountTxSub || 'deposits';
+     }
     setActiveAccountLink(page);
     if (page !== 'kyc') stopKycPolling();
     refreshAccountPage(page);

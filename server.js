@@ -27,8 +27,8 @@ const DIDIT_API_KEY = process.env.DIDIT_API_KEY;
 const DIDIT_WORKFLOW_ID = process.env.DIDIT_WORKFLOW_ID;
 const DIDIT_WEBHOOK_SECRET = process.env.DIDIT_WEBHOOK_SECRET;
 const DIDIT_API_BASE = 'https://verification.didit.me/v3';
-const HOUSE_EDGE = 0.13; // 13% House Edge (86% RTP)
-const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user (0.13 * 0.05 = 0.0065 = 0.65%)
+const HOUSE_EDGE = 0.04;    // 4% House Edge (96% RTP - standard online slot)
+const RAKEBACK_RATE = 0.05; // 5% of House Edge back to user (0.04 * 0.05 = 0.2% effective back)
 
 // Resolve the public-facing base URL for the casino. Used to build absolute
 // callback/redirect URLs that the KYC provider (Didit) and affiliate share

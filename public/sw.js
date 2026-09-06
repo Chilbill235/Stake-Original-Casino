@@ -1,64 +1,97 @@
 /* eslint-disable no-restricted-globals */
-const CACHE = 'stake-originals-v2';
-const PRECACHE = [
+
+const CACHE_NAME = 'stake-originals-v5';
+
+// Assets cached to satisfy iOS PWA installation requirements
+const PRECACHE_ASSETS = [
   '/',
   '/index.html',
-  '/client.js',
-  '/styles.css',
-  '/manifest.json',
-  '/games/loader.js',
-  '/games/slots.js',
-  '/games/dice.js',
-  '/games/crash.js',
-  '/games/plinko.js',
-  '/games/mines.js',
-  '/games/tower.js',
-  '/games/limbo.js',
-  '/games/keno.js',
-  '/games/wheel.js',
-  '/games/baccarat.js',
-  '/games/blackjack.js',
-  '/games/hilo.js',
-  '/legal/terms.html',
-  '/legal/privacy.html',
-  '/legal/sweepstakes-rules.html'
+  '/manifest.json'
 ];
 
+// Install: Skip waiting immediately
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_ASSETS))
+      .then(() => self.skipWaiting())
   );
 });
 
+// Activate: Delete all old caches & claim client control immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))
-    ).then(() => self.clients.claim())
+    caches.keys().then((keys) => {
+      return Promise.all(keys.map((key) => caches.delete(key)));
+    }).then(() => self.clients.claim())
   );
 });
 
+// Fetch: Pure Network requests. Returns an error if offline (no offline site)
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/')) return;
+  if (url.pathname.startsWith('/api/') || !url.protocol.startsWith('http')) {
+    return;
+  }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE).then((cache) => {
-            if (event.request.protocol === 'http:' || event.request.protocol === 'https:') {
-              cache.put(event.request, clone);
-            }
-          });
+    fetch(event.request).catch(() => {
+      // Prevents serving old offline pages
+      return Response.error();
+    })
+  );
+});
+
+/* ==========================================================================
+   PUSH NOTIFICATIONS (iOS Safari & Standalone PWA Support)
+   ========================================================================== */
+
+// Handle incoming push messages from Apple Push Notification service (APNs)
+self.addEventListener('push', (event) => {
+  let data = { title: 'Stake Originals', body: 'You have a new notification!' };
+
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data.body = event.data.text();
+    }
+  }
+
+  const options = {
+    body: data.body || '',
+    icon: data.icon || '/icon-192.png',
+    badge: data.badge || '/badge.png',
+    data: {
+      url: data.url || '/'
+    }
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, options)
+  );
+});
+
+// Handle notification tap actions
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // Focus existing tab if open
+      for (const client of windowClients) {
+        if (client.url === targetUrl && 'focus' in client) {
+          return client.focus();
         }
-        return response;
-      }).catch(() => {
-        return new Response('Offline', { status: 503, statusText: 'Offline' });
-      });
+      }
+      // Open new tab/window if not open
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
     })
   );
 });
