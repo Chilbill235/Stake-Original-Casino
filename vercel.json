@@ -4,22 +4,6 @@
   "framework": null,
   "cleanUrls": true,
   "trailingSlash": false,
-  "functions": {
-    "server.js": {
-      "memory": 1024,
-      "maxDuration": 30,
-      "includeFiles": "node_modules/sql.js/dist/**"
-    },
-    "api/**/*.js": {
-      "memory": 1024,
-      "maxDuration": 15,
-      "includeFiles": "node_modules/sql.js/dist/**"
-    },
-    "api/games/stream.js": {
-      "memory": 512,
-      "maxDuration": 60
-    }
-  },
   "headers": [
     {
       "source": "/(.*)",
