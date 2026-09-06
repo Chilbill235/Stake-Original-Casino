@@ -639,6 +639,27 @@
       </div>
     </aside>
 
+    <!-- Gameplay slide-out drawer for Global Bets -->
+    <div id="global-bets-drawer">
+      <div class="global-bets-drawer-header">
+        <h3>⚡ Global Bets</h3>
+        <button class="x-close" onclick="closeGlobalFeed()" aria-label="Close feed">×</button>
+      </div>
+      <div class="bets-feed-container">
+        <div class="bets-feed-header">
+          <span>USER / GAME</span>
+          <span>MULT.</span>
+        </div>
+        <div class="bets-feed" id="drawer-bets-feed"></div>
+      </div>
+      <div class="game-results-header">
+        <h4>🔥 Recent Results</h4>
+      </div>
+      <div class="game-result-feed-container">
+        <div class="game-result-feed" id="drawer-game-result-feed"></div>
+      </div>
+    </div>
+
     <!-- Lobby-only button to open the Global Bets feed -->
     <button class="lobby-bets-btn hidden" id="lobby-bets-btn" onclick="openGlobalFeedFromLobby()" aria-label="Open live bets feed">
       <span class="lobby-bets-icon">📊</span>
@@ -656,10 +677,12 @@
   <div id="modal-store" class="modal-backdrop hidden" aria-modal="true" role="dialog">
     <div class="modal-box store-modal">
       <div class="modal-header-flex">
-        <h3>🪙 Coin Store</h3>
+        <div>
+          <h3>🪙 Coin Store</h3>
+          <p class="modal-subtitle">Purchase Gold Coins (GC) and get <strong>FREE bonus Sweeps Coins (SC)</strong>!</p>
+        </div>
         <button class="x-close" onclick="closeStoreModal()" aria-label="Close Modal">×</button>
       </div>
-      <p class="modal-subtitle">Purchase Gold Coins (GC) and get <strong>FREE bonus Sweeps Coins (SC)</strong>!</p>
 
       <!-- Package Selection Section -->
       <div class="store-section package-selection" id="package-selection">
@@ -753,7 +776,7 @@
         <!-- Order Summary -->
         <div id="package-summary" class="order-summary hidden">
           <div class="summary-header">
-            <h4>Order Summary</h4>
+            <h4>📦 Order Summary</h4>
             <button class="btn-change" onclick="resetPackageSelection()">Change</button>
           </div>
           <div class="summary-items">
@@ -767,7 +790,7 @@
             </div>
             <div class="summary-item summary-total">
               <span class="summary-label">Total</span>
-              <span class="summary-value" id="summary-total">$10.00</span>
+              <span class="summary-value" id="summary-total">$9.99</span>
             </div>
           </div>
           <div class="summary-security">
@@ -779,6 +802,7 @@
           </button>
         </div>
       </div>
+
       <!-- Checkout Section (multi-step) -->
       <div id="checkout-section" class="checkout-section hidden">
         <!-- Step indicator -->
@@ -793,7 +817,7 @@
           <!-- Left: Order Summary (sticky on desktop) -->
           <div class="checkout-summary-panel">
             <div class="checkout-summary-header">
-              <h3>Order Summary</h3>
+              <h3>📋 Order Summary</h3>
               <button class="btn-back" onclick="backToPackages()">← Back</button>
             </div>
             <div class="checkout-package-card" id="checkout-package-card">
@@ -837,9 +861,18 @@
           <!-- Right: Payment Methods -->
           <div class="checkout-payment-panel">
             <div class="checkout-payment-header">
-              <h3>Payment Method</h3>
-              <p class="checkout-payment-subtitle">Secure checkout — your data is SSL encrypted</p>
+              <h3>💳 Payment Method</h3>
+              <p class="checkout-payment-subtitle">Choose how you'd like to pay</p>
             </div>
+
+            <!-- Error State -->
+            <div id="checkout-error-state" class="checkout-error-state hidden">
+              <div class="checkout-error-icon">!</div>
+              <h4 class="checkout-error-title">Checkout Error</h4>
+              <p class="checkout-error-text" id="checkout-error-message"></p>
+              <button class="btn-retry" onclick="retryCheckout()">Retry</button>
+            </div>
+
             <div class="checkout-methods">
               <button class="payment-method-btn active" data-method="card" onclick="selectPaymentMethod('card')">
                 <span class="payment-method-icon">💳</span>

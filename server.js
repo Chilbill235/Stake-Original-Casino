@@ -205,6 +205,21 @@ if (STRIPE_SECRET_KEY) {
 
 const bcrypt = require('bcryptjs');
 const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
+function cryptoToUsd(currency, amount) {
+  const cur = (currency || 'BTC').toUpperCase();
+  const amt = parseFloat(amount) || 0;
+  const rates = {
+    BTC: 50000,
+    ETH: 3000,
+    BASE: 3000,
+    POLYGON: 1,
+    USDC: 1,
+    USDT: 1,
+    SOL: 150
+  };
+  const rate = rates[cur] || 0;
+  return round2(amt * rate);
+}
 
 const RESTRICTED_STATES = [
   'WA', 'ID', 'NV', 'MI', 'MT', 'CT', 'NJ', 'NY', 'LA', 'TN', 'IN', 'ME', 'OK',
@@ -853,7 +868,7 @@ function logTransaction(userId, type, description, gcDelta, scDelta, metadata = 
     description,
     gcDelta,
     scDelta,
-    currency: gcDelta !== 0 ? 'GC' : 'SC',
+    currency: gcDelta !== 0 && scDelta !== 0 ? 'GC/SC' : gcDelta !== 0 ? 'GC' : 'SC',
     amount: gcDelta !== 0 ? Math.abs(gcDelta) : Math.abs(scDelta),
     status: 'COMPLETED',
     metadata,
@@ -946,7 +961,12 @@ function creditWin(user, currency, amount) {
 }
 
 function balancesOf(user) {
-  return { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played };
+  return {
+    gc: user.gc_balance,
+    sc: user.sc_unplayed + user.sc_played,
+    sc_unplayed: user.sc_unplayed,
+    sc_played: user.sc_played
+  };
 }
 
 /**
@@ -1288,9 +1308,184 @@ server.on('upgrade', (request, socket, head) => {
       ws.userId = decoded.id;
       ws.isAlive = true;
       wss.emit('connection', ws, request);
-    });
+  });
   });
 });
+
+// ==========================================================================
+// 9. USER SETTINGS, SECURITY, SUPPORT & KYC MANAGEMENT
+// ==========================================================================
+
+app.get('/api/user/settings', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  let settings = {};
+  if (user.settings) {
+    try { settings = JSON.parse(user.settings); } catch (e) { settings = {}; }
+  }
+
+  res.json({
+    settings: {
+      masterVolume: settings.masterVolume ?? 80,
+      soundEffects: settings.soundEffects ?? 100,
+      backgroundMusic: settings.backgroundMusic ?? 50,
+      theme: settings.theme || 'dark',
+      defaultCurrency: settings.defaultCurrency || 'GC',
+      autoCashout: settings.autoCashout || 2.00,
+      compactMode: settings.compactMode || false,
+      enableAnimations: settings.enableAnimations !== false,
+      soundOnHover: settings.soundOnHover !== false,
+      language: settings.language || 'en'
+    }
+  });
+});
+
+app.put('/api/user/settings', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const updates = req.body.settings || {};
+  let current = {};
+  if (user.settings) {
+    try { current = JSON.parse(user.settings); } catch (e) { current = {}; }
+  }
+
+  const merged = { ...current, ...updates };
+  await db.updateUser(user.id, { settings: JSON.stringify(merged) });
+
+  res.json({ success: true, settings: merged });
+});
+
+app.get('/api/user/security', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  let loginHistory = [];
+  if (user.login_history) {
+    try { loginHistory = JSON.parse(user.login_history); } catch (e) { loginHistory = []; }
+  }
+
+  res.json({
+    email: user.email,
+    username: user.username,
+    twoFactorEnabled: !!user.two_factor_enabled,
+    loginHistory: loginHistory.slice(0, 20),
+    activeSessions: [{ id: 'current', device: 'Current Browser', ip: user.geoIp || 'Unknown', lastActive: new Date().toISOString() }]
+  });
+});
+
+app.put('/api/user/security/password', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current and new password are required.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+  }
+
+  const bcrypt = require('bcryptjs');
+  if (!bcrypt.compareSync(currentPassword, user.password)) {
+    return res.status(401).json({ error: 'Current password is incorrect.' });
+  }
+
+  const hashed = bcrypt.hashSync(newPassword, 10);
+  await db.updateUser(user.id, { password: hashed });
+
+  res.json({ success: true, message: 'Password updated successfully.' });
+});
+
+app.post('/api/user/security/2fa/enable', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const secret = generate2FASecret();
+  await db.updateUser(user.id, { two_factor_secret: secret, two_factor_enabled: 1 });
+
+  res.json({ success: true, secret, qrCode: `otpauth://totp/StakeOriginals:${user.email}?secret=${secret}&issuer=StakeOriginals` });
+});
+
+app.post('/api/user/security/2fa/disable', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  await db.updateUser(user.id, { two_factor_secret: null, two_factor_enabled: 0 });
+
+  res.json({ success: true, message: 'Two-factor authentication disabled.' });
+});
+
+app.get('/api/support/faq', (req, res) => {
+  res.json({
+    faq: [
+      { id: 1, category: 'Account', question: 'How do I create an account?', answer: 'Click the "Sign Up" button in the top right and fill in your details. You can also continue as a guest to try the games.' },
+      { id: 2, category: 'Payments', question: 'What payment methods are accepted?', answer: 'We accept credit/debit cards via Stripe and cryptocurrencies (Bitcoin, Ethereum, Solana, USDT, USDC, and more).' },
+      { id: 3, category: 'KYC', question: 'Why do I need to verify my identity?', answer: 'KYC verification is required for withdrawals to comply with regulatory requirements and prevent fraud.' },
+      { id: 4, category: 'Bonuses', question: 'How do I claim my daily bonus?', answer: 'Visit the Bonuses tab in your account and click "Claim Daily Bonus". Your streak increases with consecutive daily claims.' },
+      { id: 5, category: 'Affiliates', question: 'How does the affiliate program work?', answer: 'Share your referral link with friends. You earn 5% of their deposit value and 0.1% of their wagers in Sweeps Coins.' },
+      { id: 6, category: 'Games', question: 'Are the games provably fair?', answer: 'Yes! All our games use provably fair algorithms. You can verify any game outcome using the Provably Fair tool in your account.' },
+      { id: 7, category: 'Withdrawals', question: 'How long do withdrawals take?', answer: 'Crypto withdrawals are processed within 1-24 hours after the required confirmations. Bank transfers may take 3-5 business days.' },
+      { id: 8, category: 'Security', question: 'Is my account secure?', answer: 'We use industry-standard encryption and security measures. Enable 2FA for additional protection of your account.' }
+    ]
+  });
+});
+
+app.post('/api/support/ticket', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const { subject, message, category } = req.body || {};
+  if (!subject || !message) {
+    return res.status(400).json({ error: 'Subject and message are required.' });
+  }
+
+  const ticketId = 'TKT-' + Date.now().toString(36).toUpperCase();
+  const ticket = {
+    id: ticketId,
+    userId: user.id,
+    username: user.username,
+    email: user.email,
+    subject,
+    message,
+    category: category || 'General',
+    status: 'OPEN',
+    createdAt: new Date().toISOString(),
+    responses: []
+  };
+
+  if (!global.supportTickets) global.supportTickets = [];
+  global.supportTickets.push(ticket);
+
+  res.json({ success: true, ticketId, message: 'Support ticket created successfully. We will respond within 24 hours.' });
+});
+
+app.get('/api/user/kyc/reset', verifyToken, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  await db.updateUser(user.id, {
+    kyc_status: 'UNVERIFIED',
+    kyc_tier: 0,
+    kyc_inquiry_id: null,
+    kyc_verified_at: null,
+    kyc_rejection_reason: null,
+    didit_session_id: null
+  });
+
+  user.kyc = { status: 'UNVERIFIED', tier: 0 };
+  res.json({ success: true, message: 'KYC status reset. You can now start a new verification session.', kyc: user.kyc });
+});
+
+function generate2FASecret() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let secret = '';
+  for (let i = 0; i < 32; i++) {
+    secret += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return secret;
+}
 
 wss.on('connection', (ws) => {
   if (!connectedClients.has(ws.userId)) {
@@ -1994,7 +2189,7 @@ app.get('/api/session-status', (req, res) => {
       },
       isGuest: user.email ? user.email.endsWith('@guest.casino') : false,
       kyc: user.kyc || { status: 'UNVERIFIED', tier: 0 },
-      balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played },
+      balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
       flags: {
         allowGuestPayments: process.env.ALLOW_GUEST_PAYMENTS === 'true'
       }
@@ -2375,16 +2570,20 @@ app.post('/api/user/buy-coins', verifyToken, enforceJurisdiction, async (req, re
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to create checkout session.', details: err.message });
+    console.error('[Stripe Checkout Error]:', err.message);
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({
+      error: 'Failed to create checkout session.',
+      details: err.message,
+      code: err.code || 'unknown'
+    });
   }
 });
 
 // Crypto Payment Initiation (Mock / Integration Point)
 app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, async (req, res) => {
   const { packageId, currency } = req.body || {};
-  const pkg = COIN_PACKAGES[packageId || 'pack_10'];
-  if (!pkg) return res.status(400).json({ error: 'Invalid coin package.' });
-
+  const pkg = packageId ? COIN_PACKAGES[packageId] : null;
   const cur = (currency || 'BTC').toUpperCase();
   if (!ALLOWED_CRYPTOS.includes(cur)) {
     return res.status(400).json({ error: 'Unsupported cryptocurrency. Accepted: BTC, ETH, BASE, POLYGON, USDC, USDT, SOL.' });
@@ -2398,7 +2597,7 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
     return res.status(403).json({ error: 'Guest accounts cannot purchase coins. Please register a real account first.', requiresAccount: true });
   }
 
-  const usdAmount = pkg.priceInCents / 100;
+  const usdAmount = pkg ? pkg.priceInCents / 100 : 10;
   const address = CRYPTO_ADDRESSES[cur] || '';
   if (!address) {
     return res.status(503).json({ error: `Merchant ${cur} address is not configured.`, currency: cur });
@@ -2417,14 +2616,14 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
   const paymentId = crypto.randomUUID();
   cryptoPayments.set(paymentId, {
     userId: user.id,
-    packageId,
+    packageId: packageId || null,
     currency: cur,
     chain: chainOf(cur),
     address,
     amount,
     usdAmount,
-    gcAmount: pkg.gcAmount,
-    scAmount: pkg.scAmount,
+    gcAmount: pkg ? pkg.gcAmount : 0,
+    scAmount: pkg ? pkg.scAmount : 0,
     status: 'PENDING',
     createdAt: Date.now()
   });
@@ -2437,9 +2636,12 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
     address,
     amount,
     usdAmount,
-    message: `Send the suggested ${amount} ${cur} (or more) to the address below. Your package will be credited after on-chain confirmation.`
-   });
+    message: pkg
+      ? `Send ${amount} ${cur} (or more) to the address below. Your package will be credited after on-chain confirmation.`
+      : `Send ${amount} ${cur} (or more, minimum $1.00 USD) to the address below. Your coins will be credited based on the actual amount received (1 SC + 2 GC per $1 USD) after on-chain confirmation.`
+  });
 });
+// FIX: close server.on('upgrade') callback so subsequent routes register correctly
 
 // Crypto payment status polling endpoint — lets the client auto-detect
 // when a deposit has been confirmed without the user re-pasting a txid.
@@ -2493,18 +2695,24 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
       return res.status(400).json({ error: verify.error || 'Payment could not be verified on-chain.', verified: false, currency: payment.currency });
     }
 
-    // Credit the selected package
+    const receivedUsd = verify.receivedUsd || 0;
+    if (receivedUsd < 1) {
+      return res.status(400).json({ error: verify.error || 'Received amount is below the $1.00 USD minimum deposit.', verified: true, receivedUsd });
+    }
+
+    const creditedSc = round2(receivedUsd);
+    const creditedGc = round2(receivedUsd * 2);
+
     if (!acquireLock(user.id, 'crypto-' + paymentId)) {
       return res.status(409).json({ error: 'Confirmation already in progress for this payment.', verified: true, status: payment.status });
     }
     try {
-      user.gc_balance = round2((user.gc_balance || 0) + payment.gcAmount);
-      user.sc_unplayed = round2((user.sc_unplayed || 0) + payment.scAmount);
+      user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
+      user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
       const txAmount = amountSent ? parseFloat(amountSent) : Number(payment.amount || 0);
-      const usd = payment.usdAmount;
-      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''}`, payment.gcAmount, payment.scAmount, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null });
-      creditReferrerForDeposit(user, usd || 0);
-      try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: payment.gcAmount, scDelta: payment.scAmount, currency: 'GC', amount: payment.usdAmount || 0, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
+      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''} — $${receivedUsd} USD`, creditedGc, creditedSc, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null, receivedUsd });
+      creditReferrerForDeposit(user, receivedUsd);
+      try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: creditedGc, scDelta: creditedSc, currency: 'GC', amount: receivedUsd, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null, receivedUsd } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
       saveData();
     } finally {
       releaseLock(user.id, 'crypto-' + paymentId);
@@ -2512,18 +2720,22 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
 
     payment.status = 'COMPLETED';
     payment.txid = txid;
+    payment.gcAmount = creditedGc;
+    payment.scAmount = creditedSc;
+    payment.usdAmount = receivedUsd;
     cryptoPayments.set(paymentId, payment);
 
     sendToUser(user.id, {
       type: 'BALANCE_UPDATE',
       balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
-      message: `Crypto deposit confirmed! +${payment.gcAmount} GC + ${payment.scAmount} SC credited.`
+      message: `Crypto deposit confirmed! +${creditedGc} GC + ${creditedSc} SC credited.`
     });
 
     res.json({
       success: true,
       verified: true,
-      credited: { gc: payment.gcAmount, sc: payment.scAmount },
+      credited: { gc: creditedGc, sc: creditedSc },
+      receivedUsd,
       balances: { gc: user.gc_balance, sc: user.sc_unplayed + user.sc_played }
     });
   } catch (err) {
@@ -2538,43 +2750,49 @@ app.post('/api/user/crypto-payment/webhook', express.json(), async (req, res) =>
   if (!payment) return res.status(404).json({ error: 'Payment not found.' });
 
    if (status === 'CONFIRMED' || status === 'COMPLETED') {
-     if (payment.status === 'COMPLETED') {
-       return res.json({ success: true, deduplicated: true });
+      if (payment.status === 'COMPLETED') {
+        return res.json({ success: true, deduplicated: true });
+      }
+      // Only honour webhooks that target the configured merchant address.
+      if (typeof address !== 'string' || address.toLowerCase() !== String(payment.address || CRYPTO_ADDRESSES[payment.currency] || '').toLowerCase()) {
+        console.warn('[Crypto Webhook]: address mismatch (ignored)', address, payment.address);
+        return res.status(400).json({ error: 'Address mismatch.' });
+      }
+     payment.status = 'COMPLETED';
+     const user = users.get(payment.userId);
+     if (user) {
+       const receivedUsd = cryptoToUsd(payment.currency, payment.amount);
+       const creditedSc = round2(receivedUsd);
+       const creditedGc = round2(receivedUsd * 2);
+       if (creditedSc < 1) {
+         console.warn('[Crypto Webhook]: Below minimum $1 USD', receivedUsd);
+       }
+       user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
+       user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
+       saveData();
+       logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment (webhook)`, creditedGc, creditedSc, { paymentId, currency: payment.currency, address: payment.address, txid });
+       try {
+         await db.addTransaction({
+           id: `crypto_${paymentId}`,
+           userId: user.id,
+           type: 'PURCHASE',
+           description: `Crypto ${payment.currency} payment (webhook)`,
+           gcDelta: creditedGc,
+           scDelta: creditedSc,
+           currency: 'GC',
+           amount: receivedUsd,
+           status: 'COMPLETED',
+           metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid }
+         });
+       } catch (e) { console.error('[Crypto Webhook DB]:', e.message); }
+       creditReferrerForDeposit(user, receivedUsd);
+       sendToUser(user.id, {
+         type: 'BALANCE_UPDATE',
+         balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
+         message: `Crypto deposit confirmed! +${creditedGc} GC + ${creditedSc} SC credited.`
+       });
      }
-     // Only honour webhooks that target the configured merchant address.
-     if (typeof address !== 'string' || address.toLowerCase() !== String(payment.address || CRYPTO_ADDRESSES[payment.currency] || '').toLowerCase()) {
-       console.warn('[Crypto Webhook]: address mismatch (ignored)', address, payment.address);
-       return res.status(400).json({ error: 'Address mismatch.' });
-     }
-    payment.status = 'COMPLETED';
-    const user = users.get(payment.userId);
-    if (user) {
-      user.gc_balance = round2((user.gc_balance || 0) + payment.gcAmount);
-      user.sc_unplayed = round2((user.sc_unplayed || 0) + payment.scAmount);
-      saveData();
-      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} payment`, payment.gcAmount, payment.scAmount, { paymentId, currency: payment.currency, address: payment.address, txid });
-      try {
-        await db.addTransaction({
-          id: `crypto_${paymentId}`,
-          userId: user.id,
-          type: 'PURCHASE',
-          description: `Crypto ${payment.currency} payment (webhook)`,
-          gcDelta: payment.gcAmount,
-          scDelta: payment.scAmount,
-          currency: 'GC',
-          amount: payment.usdAmount || 0,
-          status: 'COMPLETED',
-          metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid }
-        });
-      } catch (e) { console.error('[Crypto Webhook DB]:', e.message); }
-      creditReferrerForDeposit(user, payment.usdAmount || 0);
-      sendToUser(user.id, {
-        type: 'BALANCE_UPDATE',
-        balances: { gc: user.gc_balance, sc_unplayed: user.sc_unplayed, sc_played: user.sc_played },
-        message: `Crypto deposit confirmed! +${payment.gcAmount} GC + ${payment.scAmount} SC credited.`
-      });
-    }
-  }
+   }
 
   res.json({ success: true });
 });
@@ -2685,13 +2903,23 @@ async function verifyCryptoDeposit(payment, txid) {
     if (currency === 'SOL') {
       const { tx, meta } = await solanaGetTransaction(txid);
       if (!tx || !meta || meta.err) return { verified: false, error: 'Solana transaction not found or failed.' };
-      const accountKeys = tx.message?.accountKeys || [];
-      const toIdx = accountKeys.findIndex(k => (typeof k === 'string' ? k : k.pubkey) === merchantAddress);
-      if (toIdx === -1) return { verified: false, error: 'Transaction does not credit the merchant Solana wallet.' };
-      const received = (meta.postBalances?.[toIdx] ?? 0) - (meta.preBalances?.[toIdx] ?? 0);
-      if (received <= 0) return { verified: false, error: 'No SOL was received by the merchant wallet.' };
-      if (received < expected * 1e9) return { verified: false, error: 'Received amount is below the required deposit.', received: (received / 1e9) + ' SOL' };
-      return { verified: true, received: (received / 1e9) + ' SOL' };
+
+      const preBalances = meta.preBalances || [];
+      const postBalances = meta.postBalances || [];
+      let maxReceivedLamports = 0;
+      let bestAccount = '';
+      for (let i = 0; i < preBalances.length && i < postBalances.length; i++) {
+        const delta = (postBalances[i] || 0) - (preBalances[i] || 0);
+        if (delta > maxReceivedLamports) {
+          maxReceivedLamports = delta;
+          bestAccount = i;
+        }
+      }
+      if (maxReceivedLamports <= 0) return { verified: false, error: 'No SOL was received by the merchant wallet.' };
+      const receivedSol = maxReceivedLamports / 1e9;
+      const receivedUsd = cryptoToUsd('SOL', receivedSol);
+      if (receivedUsd < 1) return { verified: false, error: 'Received amount is below the $1.00 USD minimum deposit.', received: receivedSol + ' SOL ($' + receivedUsd + ' USD)' };
+      return { verified: true, received: receivedSol + ' SOL', receivedUsd };
     }
 
     // ---- Solana: SPL token (USDC) — match by token-account owner OR credited account ----
@@ -2709,8 +2937,9 @@ async function verifyCryptoDeposit(payment, txid) {
         if (delta > receivedUi) receivedUi = delta;
       }
       if (receivedUi <= 0) return { verified: false, error: 'No USDC was received by the merchant address.' };
-      if (receivedUi < expected) return { verified: false, error: 'Received amount is below the required deposit.', received: receivedUi + ' USDC' };
-      return { verified: true, received: receivedUi + ' USDC' };
+      const receivedUsd = round2(receivedUi);
+      if (receivedUsd < 1) return { verified: false, error: 'Received amount is below the $1.00 USD minimum deposit.', received: receivedUi + ' USDC ($' + receivedUsd + ' USD)' };
+      return { verified: true, received: receivedUi + ' USDC', receivedUsd };
     }
 
     // ---- Bitcoin ----
@@ -2727,10 +2956,11 @@ async function verifyCryptoDeposit(payment, txid) {
           receivedSats += (val || 0);
         }
       }
-      const expectedSats = Math.round(expected * 1e8);
       if (receivedSats <= 0) return { verified: false, error: 'No BTC was received by the merchant address.' };
-      if (receivedSats < expectedSats) return { verified: false, error: 'Received amount is below the required deposit.', received: (receivedSats / 1e8) + ' BTC' };
-      return { verified: true, received: (receivedSats / 1e8) + ' BTC' };
+      const receivedBtc = receivedSats / 1e8;
+      const receivedUsd = cryptoToUsd('BTC', receivedBtc);
+      if (receivedUsd < 1) return { verified: false, error: 'Received amount is below the $1.00 USD minimum deposit.', received: receivedBtc + ' BTC ($' + receivedUsd + ' USD)' };
+      return { verified: true, received: receivedBtc + ' BTC', receivedUsd };
     }
 
     // ---- EVM chains: native ETH / BASE / POLYGON, or ERC-20 USDT ----
@@ -2746,10 +2976,12 @@ async function verifyCryptoDeposit(payment, txid) {
       const fullEth = '0x' + MERCHANT_ETH_ADDR;
       // Native coin transfer (ETH / BASE / POLYGON)
       if (currency !== 'USDT' && tx.to && tx.to.toLowerCase() === fullEth) {
-        const expectedWei = BigInt(Math.round(expected * 1e18));
         const val = BigInt(tx.value || '0x0');
-        if (val >= expectedWei) return { verified: true, received: (Number(val) / 1e18) + ' ' + currency };
-        return { verified: false, error: 'Received ' + currency + ' amount is below the required deposit.', received: (Number(val) / 1e18) + ' ' + currency };
+        const receivedEth = Number(val) / 1e18;
+        if (receivedEth <= 0) return { verified: false, error: 'No ' + currency + ' was received by the merchant address.' };
+        const receivedUsd = cryptoToUsd(currency, receivedEth);
+        if (receivedUsd < 1) return { verified: false, error: 'Received amount is below the $1.00 USD minimum deposit.', received: receivedEth + ' ' + currency + ' ($' + receivedUsd + ' USD)' };
+        return { verified: true, received: receivedEth + ' ' + currency, receivedUsd };
       }
       // ERC-20 token transfer (USDT) credited to the merchant
       const expectedToken = BigInt(Math.round(usdAmount * 1e6));
@@ -2762,8 +2994,10 @@ async function verifyCryptoDeposit(payment, txid) {
         }
       }
       if (tokenIn > 0n) {
-        if (tokenIn < expectedToken) return { verified: false, error: 'Received amount is below the required deposit.', received: (Number(tokenIn) / 1e6) + ' ' + currency };
-        return { verified: true, received: (Number(tokenIn) / 1e6) + ' ' + currency };
+        const receivedUsdt = Number(tokenIn) / 1e6;
+        const receivedUsd = round2(receivedUsdt);
+        if (receivedUsd < 1) return { verified: false, error: 'Received amount is below the $1.00 USD minimum deposit.', received: receivedUsdt + ' USDT ($' + receivedUsd + ' USD)' };
+        return { verified: true, received: receivedUsdt + ' USDT', receivedUsd };
       }
       return { verified: false, error: 'No ' + currency + ' was received by the merchant address.' };
     }
@@ -2799,6 +3033,7 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
   try {
     // Verify on-chain transaction via Solana RPC
     let verified = false;
+    let lamportsSent = 0;
     try {
       const rpcRes = await fetch(SOLANA_RPC, {
         method: 'POST',
@@ -2820,10 +3055,9 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
         if (fromIdx !== -1 && toIdx !== -1) {
           const pre = meta.preBalances?.[fromIdx] ?? 0;
           const post = meta.postBalances?.[fromIdx] ?? 0;
-          const lamportsSent = pre - post;
-          const expected = Math.round(parseFloat(payment.amount) * 1e9);
-          // Allow 1% tolerance for tx fees / network jitter
-          if (Math.abs(lamportsSent - expected) <= Math.max(5000, expected * 0.01)) {
+          lamportsSent = pre - post;
+          // Accept any positive transfer above dust (10000 lamports ≈ $0.0006)
+          if (lamportsSent > 10000) {
             verified = true;
           }
         }
@@ -2836,17 +3070,27 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
       return res.status(400).json({ error: 'On-chain payment could not be verified. Please contact support.' });
     }
 
+    const receivedSol = lamportsSent / 1e9;
+    const receivedUsd = cryptoToUsd('SOL', receivedSol);
+    if (receivedUsd < 1) {
+      return res.status(400).json({ error: 'Received amount is below the $1.00 USD minimum deposit.', received: receivedSol + ' SOL ($' + receivedUsd + ' USD)' });
+    }
+
+    const creditedSc = round2(receivedUsd);
+    const creditedGc = round2(receivedUsd * 2);
+
     // Mark complete + credit balances
     payment.status = 'COMPLETED';
-    user.gc_balance += payment.gcAmount;
-    user.sc_unplayed += payment.scAmount;
+    user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
+    user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
     saveData();
-    logTransaction(user.id, 'PURCHASE', 'Phantom (SOL) payment', payment.gcAmount, payment.scAmount, { paymentId, txSignature });
-    creditReferrerForDeposit(user, payment.usdAmount || 0);
+    logTransaction(user.id, 'PURCHASE', 'Phantom (SOL) payment', creditedGc, creditedSc, { paymentId, txSignature, receivedUsd });
+    creditReferrerForDeposit(user, receivedUsd);
 
     res.json({
       success: true,
-      credited: { gc: payment.gcAmount, sc: payment.scAmount },
+      credited: { gc: creditedGc, sc: creditedSc },
+      receivedUsd,
       balances: balancesOf(user)
     });
   } catch (e) {
@@ -3509,24 +3753,11 @@ const RAKEBACK_WINDOWS = {
 
 function getRakebackLosses(user) {
   const bonus = ensureBonusFields(user);
-  const rb = bonus.rakeback;
   const t = bonus.telemetry;
-  const now = Date.now();
-  const ONE_DAY = 24 * 60 * 60 * 1000;
-  const ONE_WEEK = 7 * ONE_DAY;
-  const ONE_MONTH = 30 * ONE_DAY;
-
-  // Per-tier: count losses since the last claim. If last claim is older than
-  // the window, count all losses within the window.
-  const dailyLossSinceClaim = (now - rb.lastDailyAt < ONE_DAY)
-    ? (t.dailyLossSC || 0)
-    : (now - (rb.lastDailyAt || 0) < ONE_DAY ? (t.dailyLossSC || 0) : (t.dailyLossSC || 0));
-  const weeklyLossSinceClaim = (t.weeklyLossSC || 0);
-  const monthlyLossSinceClaim = (t.monthlyLossSC || 0);
   return {
-    daily:   Math.max(0, dailyLossSinceClaim),
-    weekly:  Math.max(0, weeklyLossSinceClaim),
-    monthly: Math.max(0, monthlyLossSinceClaim)
+    daily:   Math.max(0, t.dailyLossSC || 0),
+    weekly:  Math.max(0, t.weeklyLossSC || 0),
+    monthly: Math.max(0, t.monthlyLossSC || 0)
   };
 }
 
@@ -3713,6 +3944,11 @@ async function creditReferrerForWager(referredUser, scWagered) {
       amountSc: commission
     });
     saveData();
+    sendToUser(referrer.id, {
+      type: 'BALANCE_UPDATE',
+      balances: { gc: referrer.gc_balance, sc_unplayed: referrer.sc_unplayed, sc_played: referrer.sc_played },
+      message: `Affiliate commission: +${commission} SC from ${referredUser.username}'s wager.`
+    });
   } catch (e) {
     console.error('[Affiliate Wager Credit Error]:', e.message);
   }
@@ -3985,9 +4221,8 @@ app.get('/account/*', (req, res, next) => {
   res.type('html').send(renderPage('account'));
 });
 
-// 4. Global SPA fallback
-app.get(/^\/(?!api\/).*$/, (req, res, next) => {
-  if (req.path.includes('.')) return next();
+// 4. Global SPA fallback - serve index.html for all non-API, non-file routes
+app.get(/^\/(?!api\/)(?!.*\.[^\/]+$).*$/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -3997,4 +4232,8 @@ app.use((req, res) => {
     return res.status(404).json({ error: 'Endpoint not found.' });
   }
   res.status(404).send('File not found');
+});
+
+app.get('/api/debug-test', (req, res) => {
+  res.json({ debug: true, route: '/api/debug-test' });
 });

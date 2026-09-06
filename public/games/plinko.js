@@ -29,10 +29,10 @@ GameRenderers.renderPlinko = function(details, multiplier, payout) {
 
     let pins = '';
     for (let r = 0; r < rows; r++) {
-      pins += '<div style="position:relative;height:28px;margin:2px 0;">';
+      pins += '<div class="plinko-row">';
       for (let p = 0; p <= r; p++) {
         const pinX = r === 0 ? 50 : (p / r) * 100;
-        pins += '<div style="position:absolute;left:' + pinX + '%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#4d718a;border:1px solid #2f4553;"></div>';
+        pins += '<div class="plinko-peg" style="position:absolute;left:' + pinX + '%;top:50%;transform:translate(-50%,-50%);"></div>';
       }
       pins += '</div>';
     }
@@ -51,10 +51,10 @@ GameRenderers.renderPlinko = function(details, multiplier, payout) {
     const ballY = 10 + (progress * 26);
 
     display.innerHTML =
-      '<div class="plinko-board" style="position:relative;max-width:380px;margin:auto;height:380px;padding:10px;">' +
-      '<div style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:0.72rem;color:#b1bad2;font-weight:600;">Row ' + Math.min(ballRow + 1, rows) + ' / ' + rows + ' • Risk: ' + risk + '</div>' +
+      '<div class="plinko-board">' +
+      '<div class="plinko-info">Row ' + Math.min(ballRow + 1, rows) + ' / ' + rows + ' • Risk: ' + risk + '</div>' +
       pins +
-      '<div id="plinko-ball" style="position:absolute;left:' + ballX + '%;top:' + ballY + 'px;transform:translateX(-50%);font-size:1.4rem;width:24px;height:24px;">🔴</div>' +
+      '<div id="plinko-ball" class="plinko-ball" style="left:' + ballX + '%;top:' + ballY + 'px;">🔴</div>' +
       '</div>';
   }
 
@@ -73,28 +73,29 @@ GameRenderers.renderPlinko = function(details, multiplier, payout) {
   function finish() {
     renderFrame();
 
-    let bucketsHtml = '<div class="plinko-buckets" style="display:flex;justify-content:center;gap:3px;margin-top:20px;">';
+    let bucketsHtml = '<div class="plinko-buckets">';
     for (let i = 0; i <= rows; i++) {
       const hit = i === bucket;
       const m = table[i];
       const isBig = m >= 10;
       const isMid = m >= 2;
       const col = isBig ? '#00e701' : isMid ? '#8248ff' : m >= 1 ? '#00e701' : '#39424d';
-      bucketsHtml += '<div class="plinko-bucket ' + (hit ? 'bucket-hit' : '') + '" style="min-width:min(30px,7vw);padding:8px 4px;border-radius:4px;text-align:center;font-size:0.65rem;font-weight:800;color:#fff;background:' + col + ';opacity:' + (hit ? '1' : '0.55') + ';transform:' + (hit ? 'scale(1.2)' : 'none') + ';box-shadow:' + (hit ? '0 0 12px rgba(' + (isBig ? '0,231,1' : '130,72,255') + ',.6)' : 'none') + ';">' + m.toFixed(2) + 'x</div>';
+      const bucketCls = 'plinko-bucket' + (hit ? ' highlight' : '');
+      bucketsHtml += '<div class="' + bucketCls + '" style="background:' + col + ';opacity:' + (hit ? '1' : '0.55') + ';transform:' + (hit ? 'scale(1.2)' : 'none') + ';box-shadow:' + (hit ? '0 0 12px rgba(' + (isBig ? '0,231,1' : '130,72,255') + ',.6)' : 'none') + ';">' + m.toFixed(2) + 'x</div>';
     }
     bucketsHtml += '</div>';
 
     const ballEl = document.getElementById('plinko-ball');
 
     display.innerHTML =
-      '<div class="plinko-result" style="text-align:center;padding:20px;">' + bucketsHtml +
-      '<div style="font-size:2.5rem;font-weight:900;margin:14px 0;color:' + (won ? '#00e701' : '#ff4d4d') + ';">' +
+      '<div class="plinko-result">' + bucketsHtml +
+      '<div class="plinko-multiplier" style="color:' + (won ? '#00e701' : '#ff4d4d') + ';">' +
       multiplier.toFixed(2) + 'x ' + (won ? '✅' : '💥') +
       '</div>' +
-      '<div style="color:#b1bad2;font-size:0.85rem;">Landed in bucket ' + (bucket + 1) + '/' + (rows + 1) + '</div>';
+      '<div class="plinko-detail">Landed in bucket ' + (bucket + 1) + '/' + (rows + 1) + '</div>';
 
     if (payout && Number(payout) > 0) {
-      display.innerHTML += '<div style="color:#00e701;font-weight:700;margin-top:6px;">Payout: ' + Number(payout).toFixed(2) + ' ' + state.currency + '</div>';
+      display.innerHTML += '<div class="plinko-payout">Payout: ' + Number(payout).toFixed(2) + ' ' + state.currency + '</div>';
     }
     display.innerHTML += '</div>';
 

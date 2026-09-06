@@ -87,6 +87,10 @@ function createSchema() {
   ensureColumn('didit_session_id', 'TEXT');
   ensureColumn('password_reset_token', 'TEXT');
   ensureColumn('password_reset_expiry', 'INTEGER DEFAULT 0');
+  ensureColumn('settings', 'TEXT DEFAULT NULL');
+  ensureColumn('two_factor_enabled', 'INTEGER DEFAULT 0');
+  ensureColumn('two_factor_secret', 'TEXT');
+  ensureColumn('login_history', 'TEXT DEFAULT NULL');
 
 
   db.run(`CREATE TABLE IF NOT EXISTS provably_fair_seeds (

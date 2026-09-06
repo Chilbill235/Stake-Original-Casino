@@ -9,10 +9,10 @@ GameRenderers.renderCrash = function(details, win, payout) {
   const isWin = win;
 
   display.innerHTML =
-    '<div class="crash-result" style="text-align:center;padding:24px;" id="crash-result">' +
-    '<div style="font-size:3.5rem;font-weight:900;color:' + (isWin ? '#00e701' : '#ff4d4d') + ';margin-bottom:8px;">' + crashPoint.toFixed(2) + 'x ' + (isWin ? '✅' : '💥') + '</div>' +
-    '<div style="color:#b1bad2;font-weight:600;">Cashout at ' + target.toFixed(2) + 'x</div>' +
-    (isWin ? '<div style="color:#00e701;font-weight:700;margin-top:6px;">Paid ' + Number(payout).toFixed(2) + ' ' + state.currency + '</div>' : '<div style="color:#ff4d4d;font-weight:600;margin-top:6px;">You did not cash out in time</div>') +
+    '<div class="crash-result" id="crash-result">' +
+    '<div class="crash-multiplier ' + (isWin ? 'win' : 'lose') + '">' + crashPoint.toFixed(2) + 'x ' + (isWin ? '✅' : '💥') + '</div>' +
+    '<div class="crash-detail">Cashout at ' + target.toFixed(2) + 'x</div>' +
+    (isWin ? '<div class="crash-payout">Paid ' + Number(payout).toFixed(2) + ' ' + state.currency + '</div>' : '<div class="crash-message">You did not cash out in time</div>') +
     '</div>';
 
   GameRenderers.addCrashHistory(crashPoint);
@@ -35,16 +35,17 @@ GameRenderers.renderCrashHistory = function() {
   const container = document.getElementById('crash-history-panel');
   if (!container || !GameRenderers.crashHistory.length) return;
 
-  let html = '';
+  let html = '<div class="crash-history-list">';
   GameRenderers.crashHistory.slice(0, 10).forEach((entry, i) => {
     const color = parseFloat(entry.point) < 2 ? '#ff4d4d' : '#00e701';
     const isCrash = parseFloat(entry.point) < 2;
-    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">' +
-      '<span style="color:#b1bad2;font-size:0.75rem;min-width:60px;">#' + (i + 1) + '</span>' +
-      '<span style="font-family:monospace;font-weight:700;color:' + color + '">' + entry.point + 'x</span>' +
-      '<span style="color:#557086;font-size:0.7rem;flex:1;text-align:right;">' + (isCrash ? '💥' : '✅') + '</span>' +
+    html += '<div class="crash-history-item">' +
+      '<span class="crash-history-num">#' + (i + 1) + '</span>' +
+      '<span class="crash-history-point" style="color:' + color + '">' + entry.point + 'x</span>' +
+      '<span class="crash-history-icon">' + (isCrash ? '💥' : '✅') + '</span>' +
       '</div>';
   });
+  html += '</div>';
   container.innerHTML = html;
 };
 
@@ -54,7 +55,6 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
   const target = details.target;
   const isWin = win;
 
-  // Clear any prior interval
   if (state.crashIntervalHandle) {
     clearInterval(state.crashIntervalHandle);
     state.crashIntervalHandle = null;
@@ -69,13 +69,13 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
   let hasCashedOut = false;
 
   display.innerHTML =
-    '<div id="crash-game-container" style="text-align:center;padding:20px;">' +
-    '<div id="crash-multiplier" style="font-size:3rem;font-weight:900;font-variant-numeric:tabular-nums;color:#00e701;line-height:1.1;">1.00x</div>' +
-    '<div id="crash-rocket" style="font-size:4rem;margin:12px 0;transition:margin-top 0.2s ease;">🚀</div>' +
-    '<div id="crash-target-ui" style="color:#b1bad2;font-size:0.85rem;margin-bottom:12px;">Auto-cashout at ' + target.toFixed(2) + 'x</div>' +
-    '<canvas id="crash-canvas" width="320" height="180" style="background:#0b141e;border-radius:8px;border:1px solid #243542;margin-bottom:16px;"></canvas>' +
-    '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">' +
-    '<button class="game-btn-action" id="crash-stop-btn" onclick="stopCrashCashout()" style="background:var(--accent-green);color:#000;font-weight:800;padding:12px 22px;">CASH OUT NOW</button>' +
+    '<div id="crash-game-container" class="crash-game">' +
+    '<div id="crash-multiplier" class="crash-multiplier">1.00x</div>' +
+    '<div id="crash-rocket" class="crash-rocket">🚀</div>' +
+    '<div id="crash-target-ui" class="crash-target-ui">Auto-cashout at ' + target.toFixed(2) + 'x</div>' +
+    '<canvas id="crash-canvas" width="320" height="180" class="crash-canvas"></canvas>' +
+    '<div class="crash-actions">' +
+    '<button class="game-btn-action crash-cashout-btn" id="crash-stop-btn" onclick="stopCrashCashout()">CASH OUT NOW</button>' +
     '</div>' +
     '</div>';
 
@@ -127,12 +127,11 @@ GameRenderers.renderCrashGame = function(details, win, payout) {
     if (stopBtn) {
       stopBtn.disabled = true;
       stopBtn.textContent = crashed ? 'CRASHED' : 'CASHED OUT';
-      stopBtn.style.background = crashed ? '#ff4d4d' : '#00e701';
+      stopBtn.classList.add(crashed ? 'crash-crashed' : 'crash-cashedout');
     }
 
     if (cashedOut) {
-      const resultHTML = '<div id="crash-cashout-result" style="margin-top:14px;padding:10px 18px;border-radius:8px;font-weight:800;display:inline-block;' +
-        'background:rgba(0,231,1,0.15);color:#00e701;">' +
+      const resultHTML = '<div class="crash-cashout-result">' +
         '✓ + ' + Number(payout).toFixed(2) + ' ' + state.currency +
         '</div>';
       const container = document.getElementById('crash-game-container');

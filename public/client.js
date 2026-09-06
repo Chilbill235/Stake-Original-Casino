@@ -28,9 +28,52 @@ const state = {
   nonce: parseInt(localStorage.getItem('casino_nonce') || '0', 10),
   sfxEnabled: true,
   isEmbedded: window.self !== window.top,
+  isMobile: /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent)),
+  isTablet: /iPad|Android(?!.*Mobile)|Tablet/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent)),
+  deviceType: 'desktop',
   settings: (() => { try { return JSON.parse(localStorage.getItem('casino_settings') || '{}'); } catch (e) { return {}; } })()
 };
+
+if (state.isMobile) state.deviceType = 'mobile';
+else if (state.isTablet) state.deviceType = 'tablet';
+else state.deviceType = 'desktop';
+
+function updateDeviceType() {
+  const width = window.innerWidth;
+  if (width < 768) state.deviceType = 'mobile';
+  else if (width < 1024) state.deviceType = 'tablet';
+  else state.deviceType = 'desktop';
+  document.body.classList.remove('device-mobile', 'device-tablet', 'device-desktop');
+  document.body.classList.add('device-' + state.deviceType);
+}
+
+window.addEventListener('resize', updateDeviceType);
+updateDeviceType();
+
 window.__CASINO_CURRENCY = state.currency;
+
+// Global error handlers to prevent uncaught errors from breaking the UI
+window.addEventListener('error', function(e) {
+  if (!e) return;
+  const msg = (e.message || '').toLowerCase();
+  if (msg.includes('clipboard') || msg.includes('model') || msg.includes('image input')) {
+    console.warn('[Client] Non-fatal error suppressed:', e.message);
+    if (e.error) console.warn('[Client] Details:', e.error);
+    return;
+  }
+  console.error('[Client] Uncaught error:', e.message, e.filename, e.lineno);
+});
+
+window.addEventListener('unhandledrejection', function(e) {
+  if (!e) return;
+  const reason = e.reason || '';
+  const msg = (typeof reason === 'string' ? reason : reason && reason.message ? reason.message : '').toLowerCase();
+  if (msg.includes('clipboard') || msg.includes('model') || msg.includes('image input')) {
+    console.warn('[Client] Non-fatal promise rejection suppressed:', reason);
+    return;
+  }
+  console.error('[Client] Unhandled promise rejection:', reason);
+});
 
 if (typeof window !== 'undefined' && !window.__ethereumGuarded) {
   window.__ethereumGuarded = true;
@@ -481,29 +524,28 @@ function setFeedFilter(filter) {
 
 function renderBetFeed() {
   const feed = document.getElementById('bets-feed');
-  if (!feed) return;
-  feed.innerHTML = '';
+  const drawerFeed = document.getElementById('drawer-bets-feed');
+  if (!feed && !drawerFeed) return;
+  const targets = [feed, drawerFeed].filter(Boolean);
+  targets.forEach(f => { f.innerHTML = ''; });
   const myUsername = localStorage.getItem('casino_username') || 'You';
+  let html = '';
   for (const data of state.liveBetBuffer) {
     const isMyBet = data.username === myUsername;
     const isHighRoller = Number(data.payout || 0) >= 100 || Number(data.multiplier || 0) >= 10;
     if (state.feedFilter === 'MY_BETS' && !isMyBet) continue;
     if (state.feedFilter === 'HIGH_ROLLERS' && !isHighRoller) continue;
-
-    const row = document.createElement('div');
-    row.className = `bet-row ${isMyBet ? 'my-bet' : ''}`;
-    const winClass = data.win ? 'win' : 'loss';
-    const winLabel = data.win ? 'WIN' : 'LOSS';
-    row.innerHTML =
+    html +=
+      `<div class="bet-row ${isMyBet ? 'my-bet' : ''}">` +
       `<div class="bet-user-game">` +
       `<span class="bet-user">${escapeHTML(data.username || 'Anonymous')}</span>` +
       `<span class="bet-game">${escapeHTML(data.game || '—')}</span>` +
       `</div>` +
-      `<span class="bet-mult ${winClass}">` +
-      `${winLabel} ${(Number(data.multiplier) || 0).toFixed(2)}x (${formatCoins(data.payout || 0)} ${escapeHTML(data.currency || 'GC')})` +
+      `<span class="bet-mult ${data.win ? 'win' : 'loss'}">` +
+      `${data.win ? 'WIN' : 'LOSS'} ${(Number(data.multiplier) || 0).toFixed(2)}x (${formatCoins(data.payout || 0)} ${escapeHTML(data.currency || 'GC')})` +
       `</span>`;
-    feed.appendChild(row);
   }
+  targets.forEach(f => { f.innerHTML = html; });
 }
 
 function renderLiveBetRow(data) {
@@ -522,20 +564,24 @@ function renderGameResultRow(data) {
 
 function renderGameResultFeed() {
   const container = document.getElementById('game-result-feed');
-  if (!container || !state.gameResultBuffer) return;
+  const drawerContainer = document.getElementById('drawer-game-result-feed');
+  if (!container && !drawerContainer) return;
+  const targets = [container, drawerContainer].filter(Boolean);
   let html = '';
-  state.gameResultBuffer.forEach(item => {
-    const isWin = item.win;
-    const color = isWin ? '#00e701' : '#ff4d4d';
-    const mult = item.multiplier ? item.multiplier.toFixed(2) + 'x' : '';
-    const payout = item.payout ? formatCoins(item.payout) : '';
-    html += '<div class="result-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05);font-size:0.82rem;min-width:0;">' +
-      '<span style="color:' + color + ';font-weight:700;min-width:60px;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase;font-size:0.72rem;">' + escapeHTML(item.game || '—') + '</span>' +
-      '<span style="color:' + color + ';font-family:monospace;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + mult + '</span>' +
-      '<span style="color:#b1bad2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (payout ? '+' + payout + ' ' + escapeHTML(item.currency || 'GC') : '') + '</span>' +
-      '</div>';
-  });
-  container.innerHTML = html;
+  if (state.gameResultBuffer) {
+    state.gameResultBuffer.forEach(item => {
+      const isWin = item.win;
+      const color = isWin ? '#00e701' : '#ff4d4d';
+      const mult = item.multiplier ? item.multiplier.toFixed(2) + 'x' : '';
+      const payout = item.payout ? formatCoins(item.payout) : '';
+      html += '<div class="result-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05);font-size:0.82rem;min-width:0;">' +
+        '<span style="color:' + color + ';font-weight:700;min-width:60px;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase;font-size:0.72rem;">' + escapeHTML(item.game || '—') + '</span>' +
+        '<span style="color:' + color + ';font-family:monospace;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + mult + '</span>' +
+        '<span style="color:#b1bad2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (payout ? '+' + payout + ' ' + escapeHTML(item.currency || 'GC') : '') + '</span>' +
+        '</div>';
+    });
+  }
+  targets.forEach(f => { f.innerHTML = html; });
 }
 
 // ==========================================================================
@@ -553,11 +599,13 @@ function formatCoins(value) {
 
 function mergeBalances(newBalances) {
   if (!newBalances) return state.balances;
+  const scUnplayed = newBalances.sc_unplayed != null ? newBalances.sc_unplayed : state.balances.sc_unplayed;
+  const scPlayed = newBalances.sc_played != null ? newBalances.sc_played : state.balances.sc_played;
   return {
     gc: newBalances.gc != null ? newBalances.gc : state.balances.gc,
-    sc: newBalances.sc != null ? newBalances.sc : state.balances.sc,
-    sc_unplayed: newBalances.sc_unplayed != null ? newBalances.sc_unplayed : state.balances.sc_unplayed,
-    sc_played: newBalances.sc_played != null ? newBalances.sc_played : state.balances.sc_played
+    sc: scUnplayed + scPlayed,
+    sc_unplayed: scUnplayed,
+    sc_played: scPlayed
   };
 }
 
@@ -1000,7 +1048,15 @@ async function loadStripeCheckout(packageId) {
   const container = document.getElementById('stripe-checkout-container');
   if (!container) return;
 
-  // Step 3: show animated processing panel while the secure gateway initializes
+  if (!packageId || !PACKAGE_INFO[packageId]) {
+    console.error('[Checkout]: Invalid packageId for Stripe checkout:', packageId);
+    showCheckoutError('Please select a valid package before proceeding to checkout.');
+    return;
+  }
+
+  const errorState = document.getElementById('checkout-error-state');
+  if (errorState) errorState.classList.add('hidden');
+
   const stopProgress = showProcessingPanel();
   setCheckoutStep(3);
 
@@ -1027,10 +1083,6 @@ async function loadStripeCheckout(packageId) {
     });
     state.activeCheckoutInstance.mount(checkoutEl);
 
-    // The Embedded Checkout has initialized — reveal the card panel it was mounted
-    // into. Do NOT clear #stripe-checkout-container here (hideProcessingPanel()
-    // would wipe the form we just mounted); just swap the panels and stop the
-    // "preparing payment gateway" overlay so the card screen is actually visible.
     stopProgress();
     setCheckoutStep(2);
     var procPanel = document.getElementById('payment-processing');
@@ -1043,7 +1095,7 @@ async function loadStripeCheckout(packageId) {
   } catch (err) {
     stopProgress();
     hideProcessingPanel();
-    throw err;
+    showCheckoutError(err.message || 'Failed to initialize payment. Please try again.');
   }
 }
 
@@ -1059,22 +1111,23 @@ function selectPaymentMethod(method) {
 
   const cardPanel = document.getElementById('payment-card');
   const cryptoPanel = document.getElementById('payment-crypto');
+  const errorState = document.getElementById('checkout-error-state');
   if (!cardPanel || !cryptoPanel) return;
 
+  if (errorState) errorState.classList.add('hidden');
+
   if (method === 'card') {
-    if (state.activeCheckoutInstance) {
-      _hidePanel(cryptoPanel, function () {
-        _showPanel(cardPanel);
-      });
-    } else if (state.lastPackageId) {
-      _hidePanel(cryptoPanel, function () {
-        _showPanel(cardPanel);
+    _hidePanel(cryptoPanel, function () {
+      _showPanel(cardPanel);
+      const container = document.getElementById('stripe-checkout-container');
+      const isEmpty = container && (!container.querySelector('iframe') && !container.querySelector('#stripe-checkout-root') && !container.querySelector('.checkout-loading'));
+      if ((!state.activeCheckoutInstance || isEmpty) && state.lastPackageId) {
         loadStripeCheckout(state.lastPackageId).catch(err => {
           console.error('[Checkout]: Failed to (re)load Stripe:', err.message || err);
           showCheckoutError(err.message || 'Failed to initialize payment.');
         });
-      });
-    }
+      }
+    });
     return;
   }
 
@@ -1157,9 +1210,9 @@ async function initiateCryptoPayment(currency) {
 }
 
 function showCryptoPaymentConfirmation(res, cryptoType) {
-  const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
   const address = res.address || '';
   const amount = res.amount || '';
+  const usdAmount = res.usdAmount || 0;
   const uri = buildCryptoUri(cryptoType, address, amount);
   state.activeCryptoPaymentId = res.paymentId || state.activeCryptoPaymentId;
 
@@ -1172,7 +1225,7 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
       '<!-- QR + Address -->' +
       '<div class="crypto-qr-block">' +
       '  <div class="crypto-qr-wrap">' +
-'  <img class="crypto-qr-img" src="' + qrUrl(uri) + '" alt="Scan to pay ' + cryptoType + '" onerror="this.onerror=null;this.classList.add(\'hidden\')" />' +
+      '  <img class="crypto-qr-img" src="' + qrUrl(uri) + '" alt="Scan to pay ' + cryptoType + '" onerror="this.onerror=null;this.classList.add(\'hidden\')" />' +
       '    <div class="crypto-qr-fallback">📱</div>' +
       '  </div>' +
       '  <p class="crypto-qr-caption">Scan the QR code with your wallet to pay, or send manually to the address below.</p>' +
@@ -1180,27 +1233,19 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
 
       '<!-- Suggested amount -->' +
       '<div class="crypto-amount-card">' +
-      '  <label>Suggested amount</label>' +
-      '  <div class="crypto-amount-value">' + amount + ' ' + cryptoType + '</div>' +
-      '  <p class="crypto-amount-hint">Send <strong>any amount</strong> you want — you will receive the selected package below after confirmation.</p>' +
-      '</div>' +
-
-      '<!-- Address (copyable) -->' +
-      '<div class="crypto-address-card">' +
-      '  <label>Send to this address</label>' +
-      '  <div class="crypto-address-row">' +
-      '    <code class="crypto-address-code">' + escapeHTML(address) + '</code>' +
-      '    <button class="btn-copy" onclick="copyCryptoAddressHandler(\'' + escapeHTML(address).replace(/'/g, '&#39;') + '\', this)">Copy</button>' +
-      '  </div>' +
+      '  <label>Deposit address</label>' +
+      '  <div class="crypto-amount-value" style="font-size:0.8rem;word-break:break-all;">' + escapeHTML(address) + '</div>' +
+      '  <p class="crypto-amount-hint" style="margin-top:8px;">Send <strong>any amount</strong> of ' + cryptoType + ' (minimum $1.00 USD equivalent). Your coins are credited after on-chain confirmation.</p>' +
       '</div>' +
 
       '<!-- What you receive -->' +
       '<div class="crypto-reward-card">' +
-      '  <div class="crypto-reward-title">You will receive</div>' +
+      '  <div class="crypto-reward-title">How it works</div>' +
       '  <div class="crypto-reward-items">' +
-      '    <div class="crypto-reward-item"><span class="reward-num">' + pkg.gc + '</span><span class="reward-cap">Gold Coins</span></div>' +
-      '    <div class="crypto-reward-item"><span class="reward-num">+' + pkg.sc + '</span><span class="reward-cap">Sweeps Coins</span></div>' +
+      '    <div class="crypto-reward-item"><span class="reward-num">1 SC</span><span class="reward-cap">per $1.00 USD deposited</span></div>' +
+      '    <div class="crypto-reward-item"><span class="reward-num">2 GC</span><span class="reward-cap">per $1.00 USD deposited</span></div>' +
       '  </div>' +
+      '  <p style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;">Example: $10.00 deposit = 10 SC + 20 GC</p>' +
       '</div>' +
 
       '<!-- Txid submission -->' +
@@ -1213,18 +1258,18 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
        '    <button class="btn btn-secondary-action" onclick="backToPackages()" style="min-width:110px;">Back</button>' +
        '    <button class="btn btn-primary" onclick="confirmCryptoPayment()" id="btn-confirm-crypto" style="min-width:150px;">Confirm Payment</button>' +
        '  </div>' +
-        (cryptoType === 'SOL' ?
-          '  <div class="crypto-phantom-inline">' +
-          '    <button class="btn-phantom-pay" onclick="payWithPhantom()">' +
-          '      <span class="phantom-icon">👻</span> <span>Pay with Phantom (Solana)</span>' +
-          '    </button>' +
-          '    <p class="phantom-hint">Phantom detected? Sign & send directly — your coins credit instantly after on-chain verification.</p>' +
-          '  </div>' : '') +
-        '  <div class="crypto-status-row" id="crypto-status-row">' +
-        '    <span class="crypto-status-text">Waiting for on-chain confirmation…</span>' +
-        '  </div>' +
-        '</div>' +
-        '</div>';
+         (cryptoType === 'SOL' ?
+           '  <div class="crypto-phantom-inline">' +
+           '    <button class="btn-phantom-pay" onclick="payWithPhantom()">' +
+           '      <span class="phantom-icon">👻</span> <span>Pay with Phantom (Solana)</span>' +
+           '    </button>' +
+           '    <p class="phantom-hint">Phantom detected? Sign & send directly — your coins credit instantly after on-chain verification.</p>' +
+           '  </div>' : '') +
+         '  <div class="crypto-status-row" id="crypto-status-row">' +
+         '    <span class="crypto-status-text">Waiting for on-chain confirmation…</span>' +
+         '  </div>' +
+         '</div>' +
+         '</div>';
 
    state.cryptoPollingTimer = null;
    startCryptoPolling(cryptoType);
@@ -1241,12 +1286,13 @@ async function startCryptoPolling(cryptoType) {
        const statusRow = document.getElementById('crypto-status-row');
        if (res.status === 'COMPLETED' || res.status === 'CONFIRMED') {
          stopCryptoPolling();
-         const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
          if (res.balances) {
            state.balances = mergeBalances(res.balances);
            updateWalletUI();
          }
-         showCryptoDepositSuccess(pkg, true);
+         const credited = { gc: res.gcAmount || 0, sc: res.scAmount || 0 };
+         const receivedUsd = res.usdAmount || 0;
+         showCryptoDepositSuccess(credited, receivedUsd, true);
        } else if (statusRow) {
          const elapsed = Math.floor((Date.now() - (state.cryptoInitTime || Date.now())) / 1000);
          statusRow.innerHTML = '<span class="crypto-status-text">Pending on-chain confirmation… (' + elapsed + 's elapsed)</span>';
@@ -1272,6 +1318,10 @@ async function confirmCryptoPayment() {
   const amountSent = amountEl ? amountEl.value.trim() : '';
   if (!txid) return alert('Please paste your transaction ID (txid) before confirming.');
 
+  if (!state.activeCryptoPaymentId) {
+    return alert('No active crypto payment found. Please select a cryptocurrency and try again.');
+  }
+
   const btn = document.getElementById('btn-confirm-crypto');
   if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
 
@@ -1282,12 +1332,11 @@ async function confirmCryptoPayment() {
       amountSent: amountSent || undefined
     });
     if (res.success) {
-      const pkg = PACKAGE_INFO[state.lastPackageId] || { gc: '0', sc: '0' };
       if (res.balances) {
         state.balances = mergeBalances(res.balances);
         updateWalletUI();
       }
-      showCryptoDepositSuccess(pkg, res.verified);
+      showCryptoDepositSuccess(res.credited, res.receivedUsd, res.verified);
        stopCryptoPolling();
     } else {
       throw new Error(res.error || 'Payment could not be confirmed.');
@@ -1298,10 +1347,13 @@ async function confirmCryptoPayment() {
   }
 }
 
-function showCryptoDepositSuccess(pkg, verified) {
+function showCryptoDepositSuccess(credited, receivedUsd, verified) {
   const details = document.getElementById('crypto-payment-details');
   if (!details) return;
   details.classList.remove('hidden');
+  const gc = credited ? Number(credited.gc || 0).toLocaleString() : '0';
+  const sc = credited ? Number(credited.sc || 0).toLocaleString() : '0';
+  const usd = receivedUsd != null ? Number(receivedUsd).toFixed(2) : '0.00';
   details.innerHTML =
     '<div class="crypto-success-state">' +
     '<div class="crypto-success-check">' +
@@ -1311,11 +1363,11 @@ function showCryptoDepositSuccess(pkg, verified) {
     '<h4 class="crypto-success-title">Deposit Confirmed!</h4>' +
     '<p class="crypto-success-sub">' +
     (verified ? 'On-chain verification passed. ' : 'Your transaction is being processed. ') +
-    'Your coins have been credited instantly.' +
+    '$' + usd + ' USD deposit credited instantly.' +
     '</p>' +
     '<div class="crypto-success-rewards">' +
-    '<div class="crypto-success-reward"><span class="crypto-success-num gc">' + pkg.gc + '</span><span class="crypto-success-cap">Gold Coins</span></div>' +
-    '<div class="crypto-success-reward"><span class="crypto-success-num sc">+' + pkg.sc + ' SC</span><span class="crypto-success-cap">Sweeps Coins</span></div>' +
+    '<div class="crypto-success-reward"><span class="crypto-success-num gc">' + gc + '</span><span class="crypto-success-cap">Gold Coins</span></div>' +
+    '<div class="crypto-success-reward"><span class="crypto-success-num sc">+' + sc + ' SC</span><span class="crypto-success-cap">Sweeps Coins</span></div>' +
     '</div>' +
     '<button class="btn btn-primary" onclick="closeStoreModal()" style="min-width:150px;">Done</button>' +
     '</div>';
@@ -1340,23 +1392,32 @@ function animateCryptoConfetti() {
 
 function copyToClipboard(text) {
   return new Promise((resolve) => {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(() => resolve(true)).catch(fallback);
-    } else {
-      fallback();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => resolve(true)).catch(fallback);
+      } else {
+        fallback();
+      }
+    } catch (e) {
+      resolve(false);
     }
     function fallback() {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      ta.style.top = (window.scrollY || 0) + 'px';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      try { document.execCommand('copy'); resolve(true); }
-      catch (e) { resolve(false); }
-      document.body.removeChild(ta);
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.style.top = (window.scrollY || 0) + 'px';
+        ta.setAttribute('readonly', '');
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        resolve(ok);
+      } catch (e) {
+        resolve(false);
+      }
+      try { document.body.removeChild(ta); } catch (e) {}
     }
   });
 }
@@ -1452,26 +1513,28 @@ async function payWithPhantom() {
     });
     if (!confirm.success) throw new Error(confirm.error || 'Confirmation failed.');
 
-    const pkg = PACKAGE_INFO[packageId] || { gc: '0', sc: '0' };
     if (confirm.balances) {
       state.balances = mergeBalances(confirm.balances);
       updateWalletUI();
     }
-    showCryptoDepositSuccess(pkg, !!confirm.verified);
+    showCryptoDepositSuccess(confirm.credited, confirm.receivedUsd, !!confirm.verified);
   } catch (err) {
     console.error('[Phantom]', err);
     alert('Phantom payment error: ' + (err.message || err));
   }
 }
-
 function backToPackages() {
   playSound('click');
   stopCryptoPolling();
-  var pkgList = document.getElementById('package-selection');
-  var summary = document.getElementById('package-summary');
-  var checkoutSection = document.getElementById('checkout-section');
-  var successSection = document.getElementById('checkout-success');
-  var procPanel = document.getElementById('payment-processing');
+
+  const errorState = document.getElementById('checkout-error-state');
+  if (errorState) errorState.classList.add('hidden');
+
+  const pkgList = document.getElementById('package-selection');
+  const summary = document.getElementById('package-summary');
+  const checkoutSection = document.getElementById('checkout-section');
+  const successSection = document.getElementById('checkout-success');
+  const procPanel = document.getElementById('payment-processing');
   if (checkoutSection) checkoutSection.classList.add('hidden');
   if (successSection) successSection.classList.add('hidden');
   if (procPanel) procPanel.classList.add('hidden');
@@ -1483,6 +1546,7 @@ function backToPackages() {
   }
   var container = document.getElementById('stripe-checkout-container');
   if (container) container.innerHTML = '';
+  setCheckoutStep(1);
 }
 
 function showPackageList() {
@@ -1518,22 +1582,19 @@ function showCheckoutError(message) {
     try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
     state.activeCheckoutInstance = null;
   }
+
+  const errorState = document.getElementById('checkout-error-state');
+  const errorMessage = document.getElementById('checkout-error-message');
+  const cardPanel = document.getElementById('payment-card');
+  const cryptoPanel = document.getElementById('payment-crypto');
+
+  if (errorState) errorState.classList.remove('hidden');
+  if (errorMessage) errorMessage.textContent = message || 'Something went wrong. Please try again.';
+  if (cardPanel) cardPanel.classList.add('hidden');
+  if (cryptoPanel) cryptoPanel.classList.add('hidden');
+
   const container = document.getElementById('stripe-checkout-container');
-  if (!container) return;
-  container.innerHTML =
-    '<div class="checkout-error-state" style="text-align:center; padding:40px 20px;">' +
-    '<div class="checkout-error-icon">!</div>' +
-    '<h4 class="checkout-error-title">Checkout Error</h4>' +
-    '<p class="checkout-error-text">' + escapeHTML(message) + '</p>' +
-    '<div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">' +
-    '<button class="btn btn-primary" onclick="retryCheckout()" style="min-width:120px;">Retry</button>' +
-    '<button class="btn btn-secondary-action" onclick="showPackageList()">Back to Packages</button>' +
-    '</div>' +
-    '</div>';
-  if (state.activeCheckoutInstance) {
-    try { state.activeCheckoutInstance.destroy(); } catch (e) { console.warn('Checkout cleanup:', e); }
-    state.activeCheckoutInstance = null;
-  }
+  if (container) container.innerHTML = '';
 }
 
 function showCheckoutSuccess(gc, sc) {
@@ -1659,8 +1720,11 @@ async function buyCoinPackage(packageId) {
 }
 
 async function retryCheckout() {
+  const errorState = document.getElementById('checkout-error-state');
+  if (errorState) errorState.classList.add('hidden');
+
   if (state.lastPackageId) {
-    buyCoinPackage(state.lastPackageId);
+    await buyCoinPackage(state.lastPackageId);
   } else {
     showPackageList();
   }
@@ -1777,7 +1841,7 @@ function showLobby() {
   state.crashCashOutEarly = false;
   state.crashAutoTarget = null;
   clearGameControls();
-  closeGlobalFeed();
+  closeGlobalFeed(true);
 
   const betsSidebar = document.getElementById('global-bets-sidebar');
   if (betsSidebar) betsSidebar.classList.add('hidden');
@@ -1791,6 +1855,11 @@ function showLobby() {
 
 function openGlobalFeedFromLobby() {
   playSound('click');
+  const drawer = document.getElementById('global-bets-drawer');
+  if (drawer) drawer.classList.remove('open');
+  const fab = document.getElementById('global-bets-fab');
+  if (fab) fab.classList.add('hidden');
+
   const sidebar = document.getElementById('global-bets-sidebar');
   if (sidebar) sidebar.classList.remove('hidden');
   const closeBtn = document.getElementById('global-bets-close');
@@ -1799,20 +1868,17 @@ function openGlobalFeedFromLobby() {
   if (lobbyBetsBtn) lobbyBetsBtn.classList.add('hidden');
 }
 
-function closeGlobalFeed() {
-  const drawer = document.getElementById('global-bets-drawer');
-  if (drawer) drawer.classList.remove('open');
+function closeGlobalFeed(forceLobby = false) {
   const sidebar = document.getElementById('global-bets-sidebar');
   if (sidebar) sidebar.classList.add('hidden');
-  const fab = document.getElementById('global-bets-fab');
-  if (fab) fab.classList.add('hidden');
   const closeBtn = document.getElementById('global-bets-close');
   if (closeBtn) closeBtn.classList.add('hidden');
-  const inGame = document.querySelector('.main-layout')?.classList.contains('is-game');
-  if (!inGame) {
-    const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
-    if (lobbyBetsBtn) lobbyBetsBtn.classList.remove('hidden');
-  }
+  const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+  if (lobbyBetsBtn) lobbyBetsBtn.classList.remove('hidden');
+  const drawer = document.getElementById('global-bets-drawer');
+  if (drawer) drawer.classList.remove('open');
+  const fab = document.getElementById('global-bets-fab');
+  if (fab) fab.classList.add('hidden');
 }
 
 function showGlobalFeed() {
@@ -1828,19 +1894,37 @@ function showGlobalFeed() {
 
 function toggleGlobalFeed() {
   const drawer = document.getElementById('global-bets-drawer');
-  const sidebar = document.getElementById('global-bets-sidebar');
   const fab = document.getElementById('global-bets-fab');
   const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
+  const sidebar = document.getElementById('global-bets-sidebar');
+  const closeBtn = document.getElementById('global-bets-close');
 
-  if (drawer) {
-    drawer.classList.toggle('open');
-  }
-  if (sidebar) sidebar.classList.toggle('hidden');
-  if (fab && sidebar && sidebar.classList.contains('hidden')) {
-    fab.classList.toggle('hidden');
-  }
-  if (lobbyBetsBtn && sidebar && !sidebar.classList.contains('hidden')) {
-    lobbyBetsBtn.classList.add('hidden');
+  const inGame = document.querySelector('.main-layout')?.classList.contains('is-game');
+
+  if (inGame) {
+    if (drawer) {
+      const isOpen = drawer.classList.contains('open');
+      if (isOpen) {
+        drawer.classList.remove('open');
+        if (fab) fab.classList.remove('hidden');
+      } else {
+        drawer.classList.add('open');
+        if (fab) fab.classList.add('hidden');
+      }
+    }
+  } else {
+    const isSidebarHidden = sidebar?.classList.contains('hidden');
+    if (isSidebarHidden) {
+      if (sidebar) sidebar.classList.remove('hidden');
+      if (closeBtn) closeBtn.classList.remove('hidden');
+      if (lobbyBetsBtn) lobbyBetsBtn.classList.add('hidden');
+    } else {
+      if (sidebar) sidebar.classList.add('hidden');
+      if (closeBtn) closeBtn.classList.add('hidden');
+      if (lobbyBetsBtn) lobbyBetsBtn.classList.remove('hidden');
+    }
+    if (drawer) drawer.classList.remove('open');
+    if (fab) fab.classList.add('hidden');
   }
 }
 
@@ -1884,7 +1968,11 @@ async function launchGame(gameId) {
   state.activeGameState = null;
   state.isProcessing = false;
 
-  if (window.GameLoader) await window.GameLoader.load(gameId);
+  try {
+    if (window.GameLoader) await window.GameLoader.load(gameId);
+  } catch (e) {
+    console.warn('[Game] Failed to load game script:', gameId, e.message);
+  }
 
   document.getElementById('view-lobby')?.classList.add('hidden');
   document.getElementById('view-game')?.classList.remove('hidden');
@@ -1896,7 +1984,6 @@ async function launchGame(gameId) {
   if (sidebar) sidebar.classList.remove('mobile-open');
   const sidebarOverlay = document.getElementById('sidebar-overlay');
   if (sidebarOverlay) sidebarOverlay.classList.remove('active');
-  // Show FAB during game for mobile toggling
   const betsFab = document.getElementById('global-bets-fab');
   if (betsFab) betsFab.classList.remove('hidden');
   const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
@@ -1910,7 +1997,7 @@ async function launchGame(gameId) {
   const actionBtn = document.getElementById('btn-primary-action');
   const betBar = document.getElementById('bet-bar');
 
-   if (betBar) betBar.style.display = 'flex';
+  if (betBar) betBar.style.display = 'flex';
   options.innerHTML = '';
   actionBtn.disabled = false;
   updateBetCurrencyTag();
@@ -3487,8 +3574,11 @@ function navigateToAccount(page) {
   playSound('click');
   const path = page === 'overview' ? '/account' : '/account/' + page;
   history.pushState(null, '', path);
+  if (page === 'transactions') state.accountTxSub = 'deposits';
   setActiveAccountLink(page);
   renderAccountPage(page);
+  const content = document.getElementById('account-content');
+  if (content) content.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function navigateToAccountFromMenu(page) {
@@ -3564,6 +3654,7 @@ function renderAccountPage(page = 'overview') {
   const totalWageredSC = formatCoins(vip.totalWageredSC || 0);
   const memberSince = p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'N/A';
   const isGuest = !!(p.isGuest || (p.email && p.email.endsWith('@guest.casino')));
+  const rakebackRate = 0.65;
 
   const sidebarName = document.getElementById('account-sidebar-name');
   const sidebarTier = document.getElementById('account-sidebar-tier');
@@ -3594,8 +3685,11 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">${escapeHTML(initial)}</div>
         <div class="account-hero-info">
-          <h1 class="account-username">${escapeHTML(p.username || 'Guest')}</h1>
-          <span class="vip-badge vip-${currentTier.toLowerCase()}">${escapeHTML(currentTier)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">${escapeHTML(p.username || 'Guest')}</h1>
+            <span class="vip-badge vip-${currentTier.toLowerCase()}">${escapeHTML(currentTier)} VIP</span>
+          </div>
+          <p class="account-hero-sub">Member since ${memberSince} · ${isGuest ? 'Guest Account' : 'Registered Player'}</p>
         </div>
       </div>
 
@@ -3632,7 +3726,10 @@ function renderAccountPage(page = 'overview') {
 
       ${nextTier ? `
       <div class="account-card tier-progress-card">
-        <h3 class="account-card-title">VIP Progress</h3>
+        <div class="tier-progress-header">
+          <h3 class="account-card-title">VIP Progress</h3>
+          <span class="tier-progress-pct">${Math.round(progressPct)}%</span>
+        </div>
         <div class="tier-progress-viz">
           <div class="tier-progress-bar">
             <div class="tier-progress-fill" style="width: ${progressPct}%"></div>
@@ -3644,7 +3741,6 @@ function renderAccountPage(page = 'overview') {
         </div>
         <div class="tier-progress-detail">
           <span>Wager <strong>${formatCoins(threshold)}</strong> SC to reach ${escapeHTML(nextTier)} VIP</span>
-          <span class="tier-progress-pct">${Math.round(progressPct)}%</span>
         </div>
       </div>` : ''}
 
@@ -3674,8 +3770,11 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">${escapeHTML(initial)}</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Profile</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Profile</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">${escapeHTML(p.email || (isGuest ? 'guest@casino' : ''))}</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -3722,8 +3821,11 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">💰</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Wallet</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Wallet</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">Manage your Gold Coins and Sweeps Coins</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -3769,8 +3871,11 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">🎁</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Bonuses & Rewards</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Bonuses & Rewards</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">Claim daily bonuses and track your rewards</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -3819,8 +3924,11 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">🛡️</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Identity Verification</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Identity Verification</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">Verify your identity to unlock withdrawals</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -3851,8 +3959,8 @@ function renderAccountPage(page = 'overview') {
           </div>
           <div class="kyc-actions" style="margin-top:14px;">
             ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
-            ${kyc.status === 'PENDING' ? '<button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button>' : ''}
-            ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
+            ${kyc.status === 'PENDING' ? '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button><button class="btn-secondary-action" onclick="playSound(\'click\'); resetKYC()">🔄 Reset & Retry</button></div>' : ''}
+            ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="playSound(\'click\'); startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
           </div>
           ${isPolling ? `
             <div class="kyc-poll-row">
@@ -3901,8 +4009,11 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">🤝</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Affiliates</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Affiliates</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">Earn rewards by referring friends to Stake Originals</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -3972,16 +4083,19 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">📋</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Transactions</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Transactions</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">View your deposit, withdrawal, and betting history</p>
         </div>
       </div>
       <div class="account-details-grid">
         <div class="account-card" style="grid-column: 1 / -1;">
           <div class="account-tx-tabs">
-            <button class="tx-tab-btn active" data-tx-sub="deposits" onclick="navigateToTxSub('deposits')">Deposits</button>
-            <button class="tx-tab-btn" data-tx-sub="withdrawals" onclick="navigateToTxSub('withdrawals')">Withdrawals</button>
-            <button class="tx-tab-btn" data-tx-sub="bets-casino" onclick="navigateToTxSub('bets-casino')">Bets (Casino)</button>
+            <button class="tx-tab-btn ${(state.accountTxSub || 'deposits') === 'deposits' ? 'active' : ''}" data-tx-sub="deposits" onclick="navigateToTxSub('deposits')">Deposits</button>
+            <button class="tx-tab-btn ${(state.accountTxSub || 'deposits') === 'withdrawals' ? 'active' : ''}" data-tx-sub="withdrawals" onclick="navigateToTxSub('withdrawals')">Withdrawals</button>
+            <button class="tx-tab-btn ${(state.accountTxSub || 'deposits') === 'bets-casino' ? 'active' : ''}" data-tx-sub="bets-casino" onclick="navigateToTxSub('bets-casino')">Bets (Casino)</button>
           </div>
           <div id="account-transactions-list">
             <div class="account-placeholder">Loading transactions...</div>
@@ -3989,12 +4103,16 @@ function renderAccountPage(page = 'overview') {
         </div>
       </div>`;
   } else if (page === 'security') {
+    const sec = state.securityData || {};
     html = `
       <div class="account-hero">
         <div class="account-avatar">🔒</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Account Security</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Account Security</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">Manage your authentication and session preferences</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -4002,17 +4120,25 @@ function renderAccountPage(page = 'overview') {
           <h3 class="account-card-title">Authentication</h3>
           <div class="account-detail-list">
             <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || '—')}</span></div>
-            <div class="account-detail-item"><span class="detail-label">Password</span><span class="detail-value">••••••••</span></div>
-            <div class="account-detail-item"><span class="detail-label">Two-factor</span><span class="detail-value">Coming soon</span></div>
+            <div class="account-detail-item"><span class="detail-label">Two-Factor Auth</span><span class="detail-value"><span class="status-pill ${sec.twoFactorEnabled ? 'status-pill-success' : 'status-pill-warning'}">${sec.twoFactorEnabled ? 'Enabled' : 'Disabled'}</span></span></div>
           </div>
-          <div class="security-actions">
-            <button class="btn-security" onclick="openForgotPasswordModal()">🔑 Reset Password</button>
+          <div class="security-actions" style="margin-top:14px;">
+            <button class="btn-security" onclick="playSound('click'); toggle2FA()">${sec.twoFactorEnabled ? '🔓 Disable 2FA' : '🔐 Enable 2FA'}</button>
+            <button class="btn-security" onclick="playSound('click'); openForgotPasswordModal()">🔑 Change Password</button>
           </div>
         </div>
         <div class="account-card">
-          <h3 class="account-card-title">Session</h3>
-          <div class="security-actions">
-            <button class="btn-security logout" onclick="logout()">🚪 Logout</button>
+          <h3 class="account-card-title">Active Sessions</h3>
+          <div class="account-detail-list">
+            ${(sec.activeSessions || []).map(s => `
+              <div class="account-detail-item">
+                <span class="detail-label">${escapeHTML(s.device || 'Browser')}</span>
+                <span class="detail-value">${escapeHTML(s.ip || 'Unknown')} · ${new Date(s.lastActive).toLocaleTimeString()}</span>
+              </div>
+            `).join('') || '<div class="account-placeholder">No active sessions</div>'}
+          </div>
+          <div class="security-actions" style="margin-top:14px;">
+            <button class="btn-security logout" onclick="playSound('click'); logout()">🚪 Logout</button>
           </div>
         </div>
       </div>`;
@@ -4028,7 +4154,10 @@ function renderAccountPage(page = 'overview') {
       <div class="account-hero">
         <div class="account-avatar">⚙️</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Settings</h1>
+          <div class="account-hero-top">
+            <h1 class="account-username">Settings</h1>
+          </div>
+          <p class="account-hero-sub">Customize your experience</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -4069,14 +4198,17 @@ function renderAccountPage(page = 'overview') {
           <div class="setting-row"><label><input type="checkbox" onchange="toggleSetting('animations', this.checked)" ${s.animations!==false?'checked':''}> Enable Animations</label></div>
           <div class="setting-row"><label><input type="checkbox" onchange="toggleSetting('soundOnHover', this.checked)" ${s.soundOnHover?'checked':''}> Sound on Hover</label></div>
         </div>
-      </div>';
+      </div>`;
   } else if (page === 'support') {
     html = `
       <div class="account-hero">
         <div class="account-avatar">💬</div>
         <div class="account-hero-info">
-          <h1 class="account-username">Support</h1>
-          <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          <div class="account-hero-top">
+            <h1 class="account-username">Support</h1>
+            <span class="vip-badge vip-${vipText.toLowerCase()}">${escapeHTML(vipText)} VIP</span>
+          </div>
+          <p class="account-hero-sub">Get help and find answers to common questions</p>
         </div>
       </div>
       <div class="account-details-grid">
@@ -4084,12 +4216,12 @@ function renderAccountPage(page = 'overview') {
           <h3 class="account-card-title">Contact Support</h3>
           <div class="account-detail-list">
             <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">support@stakeoriginals.com</span></div>
-            <div class="account-detail-item"><span class="detail-label">Live Chat</span><span class="detail-value"><span class="status-pill status-pill-info">Available 24/7</span></span></div>
-            <div class="account-detail-item"><span class="detail-label">Response Time</span><span class="detail-value">&lt; 24 hours</span></div>
+            <div class="account-detail-item"><span class="detail-label">Live Chat</span><span class="detail-value"><span class="status-pill status-pill-success">Online</span></span></div>
+            <div class="account-detail-item"><span class="detail-label">Response Time</span><span class="detail-value">&lt; 5 minutes</span></div>
           </div>
-          <div class="support-actions" style="margin-top:12px;">
-            <button class="btn-profile-action" onclick="window.open('mailto:support@stakeoriginals.com')">📧 Email Support</button>
-            <button class="btn-profile-action" onclick="alert('Live chat coming soon!')">💬 Live Chat</button>
+          <div class="support-actions" style="margin-top:14px;">
+            <button class="btn-profile-action" onclick="playSound('click'); window.open('mailto:support@stakeoriginals.com')">📧 Email Support</button>
+            <button class="btn-profile-action" onclick="playSound('click'); openLiveChat()">💬 Live Chat</button>
           </div>
         </div>
         <div class="account-card">
@@ -4101,18 +4233,86 @@ function renderAccountPage(page = 'overview') {
             <div class="account-detail-item"><span class="detail-label">Sweepstakes Rules</span><span class="detail-value"><a href="/legal/sweepstakes-rules.html" class="legal-link">View Rules</a></span></div>
           </div>
         </div>
-      </div>';
+      </div>`;
   }
 
-   content.innerHTML = html;
+    content.innerHTML = html;
   if (page === 'transactions') {
     loadAccountTransactions(state.accountTxSub || 'deposits');
   }
   if (page === 'affiliates') {
     loadAffiliateData();
   }
+  if (page === 'settings') {
+    loadUserSettings().catch(() => {});
+  }
+  if (page === 'security') {
+    loadSecurityData().then(() => {
+      const sec = state.securityData || {};
+      const twoFactorEnabled = !!sec.twoFactorEnabled;
+      const statusEl = document.querySelector('#account-content .status-pill');
+      if (statusEl && page === 'security') {
+        statusEl.className = 'status-pill ' + (twoFactorEnabled ? 'status-pill-success' : 'status-pill-warning');
+        statusEl.textContent = twoFactorEnabled ? 'Enabled' : 'Disabled';
+      }
+    }).catch(() => {});
+  }
+  if (page === 'support') {
+    loadSupportFAQ().catch(() => {});
+  }
+  if (page === 'kyc') {
+    pollKycStatus(false).catch(() => {});
+  }
   if (page === 'bonuses') {
-    // Bonuses page rendered
+    loadBonusData().catch(() => {});
+  }
+}
+
+function openLiveChat() {
+  const chatWindow = window.open('', 'LiveChat', 'width=400,height=600,resizable=yes,scrollbars=yes');
+  if (chatWindow) {
+    chatWindow.document.write(`
+      <html><head><title>Stake Originals Support</title>
+      <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0a1628; color: #fff; margin: 0; padding: 20px; }
+        .chat-header { background: linear-gradient(135deg, #00e701, #00b4ff); padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+        .chat-header h2 { margin: 0; color: #001a0a; }
+        .chat-messages { height: 400px; overflow-y: auto; background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+        .chat-input { display: flex; gap: 8px; }
+        .chat-input input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #243542; background: #0a1628; color: #fff; }
+        .chat-input button { padding: 12px 24px; background: linear-gradient(135deg, #00e701, #00b4ff); border: none; border-radius: 8px; color: #001a0a; font-weight: 800; cursor: pointer; }
+        .chat-message { margin-bottom: 12px; padding: 10px 14px; border-radius: 12px; max-width: 80%; }
+        .chat-message.user { background: linear-gradient(135deg, rgba(0,231,1,0.2), rgba(0,180,255,0.1)); margin-left: auto; }
+        .chat-message.support { background: rgba(255,255,255,0.08); }
+        .chat-message .author { font-size: 0.75rem; color: #b1bad2; margin-bottom: 4px; }
+      </style></head><body>
+      <div class="chat-header"><h2>💬 Stake Originals Support</h2><p style="margin: 4px 0 0; color: #001a0a; opacity: 0.8;">Average response time: &lt; 5 minutes</p></div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-message support"><div class="author">Support Agent</div>Hello! Welcome to Stake Originals support. How can I help you today?</div>
+      </div>
+      <div class="chat-input">
+        <input type="text" id="chat-input" placeholder="Type your message..." onkeypress="if(event.key==='Enter')sendChatMessage()">
+        <button onclick="sendChatMessage()">Send</button>
+      </div>
+      <script>
+        function sendChatMessage() {
+          const input = document.getElementById('chat-input');
+          const text = input.value.trim();
+          if (!text) return;
+          const messages = document.getElementById('chat-messages');
+          messages.innerHTML += '<div class="chat-message user"><div class="author">You</div>' + text + '</div>';
+          input.value = '';
+          messages.scrollTop = messages.scrollHeight;
+          setTimeout(() => {
+            messages.innerHTML += '<div class="chat-message support"><div class="author">Support Agent</div>Thanks for your message! A support agent will be with you shortly. For immediate assistance, email us at support@stakeoriginals.com</div>';
+            messages.scrollTop = messages.scrollHeight;
+          }, 1500);
+        }
+      </script>
+    </body></html>`);
+    chatWindow.document.close();
+  } else {
+    alert('Could not open chat window. Please allow popups or email us at support@stakeoriginals.com');
   }
 }
 
@@ -4123,6 +4323,48 @@ function saveSetting(key, value) {
   }
   state.settings[key] = value;
   try { localStorage.setItem('casino_settings', JSON.stringify(state.settings)); } catch (e) {}
+  applySetting(key, value);
+  debounceServerSettingsSave();
+}
+
+let settingsSaveTimer = null;
+function debounceServerSettingsSave() {
+  if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => {
+    saveUserSettings(state.settings || {}).catch(() => {});
+  }, 1000);
+}
+
+function applySetting(key, value) {
+  if (key === 'theme') {
+    applyTheme(value);
+  } else if (key === 'masterVolume' || key === 'sfxVolume' || key === 'musicVolume') {
+    applyVolumeSettings();
+  } else if (key === 'compactMode') {
+    document.body.classList.toggle('compact-mode', !!value);
+  } else if (key === 'animations') {
+    document.body.classList.toggle('no-animations', !value);
+  } else if (key === 'soundOnHover') {
+    state.sfxEnabled = !!value;
+  } else if (key === 'autoCashoutThreshold') {
+    state.autoCashoutThreshold = parseFloat(value) || 0;
+  } else if (key === 'defaultCurrency') {
+    state.currency = value;
+    window.__CASINO_CURRENCY = value;
+    updateWalletUI();
+  }
+}
+
+function applyVolumeSettings() {
+  const s = state.settings || {};
+  const master = s.masterVolume != null ? s.masterVolume : 0.7;
+  const sfx = s.sfxVolume != null ? s.sfxVolume : 0.5;
+  const music = s.musicVolume != null ? s.musicVolume : 0.3;
+  if (state.masterGain && state.masterGain.gain) {
+    state.masterGain.gain.value = master;
+  }
+  state.sfxVolume = sfx;
+  state.musicVolume = music;
 }
 
 function toggleSetting(key, checked) {
@@ -4134,9 +4376,160 @@ function applyTheme(pref) {
   if (pref === 'light') {
     body.classList.add('light-theme');
     body.classList.remove('dark-theme');
+  } else if (pref === 'auto') {
+    body.classList.remove('light-theme', 'dark-theme');
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+      body.classList.add('light-theme');
+    } else {
+      body.classList.add('dark-theme');
+    }
   } else {
     body.classList.add('dark-theme');
     body.classList.remove('light-theme');
+  }
+}
+
+async function loadUserSettings() {
+  try {
+    const data = await apiRequest('/api/user/settings');
+    if (data.settings) {
+      state.settings = { ...state.settings, ...data.settings };
+      applyTheme(state.settings.theme || 'dark');
+      Object.keys(state.settings).forEach(key => applySetting(key, state.settings[key]));
+    }
+  } catch (err) {
+    console.warn('[Settings] Could not load settings:', err.message);
+  }
+}
+
+async function saveUserSettings(settings) {
+  try {
+    const data = await apiRequest('/api/user/settings', 'PUT', { settings });
+    state.settings = data.settings || settings;
+    return data;
+  } catch (err) {
+    console.warn('[Settings] Could not save settings:', err.message);
+    throw err;
+  }
+}
+
+async function loadSecurityData() {
+  try {
+    const data = await apiRequest('/api/user/security');
+    state.securityData = data;
+  } catch (err) {
+    console.warn('[Security] Could not load security data:', err.message);
+  }
+}
+
+async function changePassword(currentPassword, newPassword) {
+  const data = await apiRequest('/api/user/security/password', 'POST', { currentPassword, newPassword });
+  return data;
+}
+
+async function toggle2FA() {
+  const user = state.profile || {};
+
+  if (user.twoFactorEnabled) {
+    if (!confirm('Are you sure you want to disable two-factor authentication? This will make your account less secure.')) return;
+    await apiRequest('/api/user/security/2fa/disable', 'POST');
+    state.securityData = { ...state.securityData, twoFactorEnabled: false };
+    alert('Two-factor authentication has been disabled.');
+    refreshAccountPage('security');
+    return;
+  }
+
+  try {
+    const data = await apiRequest('/api/user/security/2fa/enable', 'POST');
+    state.securityData = { ...state.securityData, twoFactorEnabled: true, twoFactorSecret: data.secret };
+
+    const secret = data.secret || '';
+    const qrData = encodeURIComponent(data.qrCode || '');
+    const qrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&bgcolor=0f172a&color=00ff41&data=' + qrData;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-backdrop';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:420px; text-align:center;">
+        <div class="modal-header-flex" style="justify-content:center;">
+          <div>
+            <h3 style="margin:0 0 6px;">🔐 Setup Two-Factor Authentication</h3>
+            <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">Scan the QR code with your authenticator app</p>
+          </div>
+        </div>
+        <div style="padding:20px; display:flex; flex-direction:column; align-items:center; gap:14px;">
+          <img src="${qrImageUrl}" alt="2FA QR Code" style="width:220px; height:220px; border-radius:12px; border:1px solid var(--glass-border); background:#0f172a;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div style="display:none; width:220px; height:220px; align-items:center; justify-content:center; border-radius:12px; border:1px dashed var(--glass-border); color:var(--text-muted); font-size:0.8rem; padding:10px; text-align:center;">
+            QR unavailable<br>Use the secret below
+          </div>
+          <div style="background:var(--bg-tertiary); border:1px solid var(--glass-border); border-radius:10px; padding:12px 16px; font-family:monospace; font-size:1.1rem; letter-spacing:2px; word-break:break-all; color:var(--accent-green); user-select:all;">${escapeHTML(secret)}</div>
+          <p style="font-size:0.78rem; color:var(--text-muted); margin:0;">Enter this secret manually if you can't scan the QR code.</p>
+          <div style="text-align:left; background:var(--bg-tertiary); border:1px solid var(--glass-border); border-radius:10px; padding:12px 14px; font-size:0.78rem; color:var(--text-secondary); line-height:1.5;">
+            <strong style="color:var(--text-primary);">Compatible apps:</strong><br>
+            📱 <strong>Mobile:</strong> Apple Passwords / Google Authenticator / Authy / Microsoft Authenticator<br>
+            💻 <strong>PC:</strong> Authy / WinAuth / Google Authenticator (Chrome)
+          </div>
+          <button class="btn btn-primary" id="btn-2fa-confirm" style="min-width:160px; margin-top:4px;">I've Saved the Secret</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const close = () => document.body.removeChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.getElementById('btn-2fa-confirm').addEventListener('click', () => {
+      close();
+      alert('2FA enabled! Please verify your identity with the authenticator app on your next login.');
+      refreshAccountPage('security');
+    });
+  } catch (err) {
+    alert('Failed to enable 2FA: ' + (err.message || err));
+  }
+}
+
+async function loadSupportFAQ() {
+  try {
+    const data = await apiRequest('/api/support/faq');
+    state.supportFAQ = data.faq || [];
+  } catch (err) {
+    console.warn('[Support] Could not load FAQ:', err.message);
+  }
+}
+
+async function loadBonusData() {
+  try {
+    const [status, challengesData] = await Promise.all([
+      apiRequest('/api/bonus/status').catch(() => ({})),
+      apiRequest('/api/challenges').catch(() => ({ challenges: [] }))
+    ]);
+    
+    if (!state.profile) state.profile = {};
+    state.profile.bonus = {
+      dailyClaimed: !status.canClaim,
+      lastClaimAt: status.lastClaimAt || state.profile.bonus?.lastClaimAt || null,
+      claimStreak: status.streak || 0,
+      challenges: challengesData.challenges || []
+    };
+  } catch (err) {
+    console.warn('[Bonuses] Could not load bonus data:', err.message);
+  }
+}
+
+async function submitSupportTicket(subject, message, category) {
+  const data = await apiRequest('/api/support/ticket', 'POST', { subject, message, category });
+  return data;
+}
+
+async function resetKYC() {
+  try {
+    const data = await apiRequest('/api/user/kyc/reset', 'GET');
+    if (data.success) {
+      state.profile.kyc = { status: 'UNVERIFIED', tier: 0 };
+      alert('KYC status reset. You can now start a new verification session.');
+      refreshAccountPage('kyc');
+    }
+  } catch (err) {
+    alert('Could not reset KYC: ' + (err.message || err));
   }
 }
 

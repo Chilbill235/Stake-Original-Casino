@@ -28,23 +28,26 @@ GameRenderers.renderWheel = function(details, multiplier) {
     const radius = 80;
     const x = 100 + radius * Math.cos((midAngle - 90) * Math.PI / 180);
     const y = 100 + radius * Math.sin((midAngle - 90) * Math.PI / 180);
-    segmentsHtml += '<div class="wheel-label" style="left:' + x + 'px; top:' + y + 'px; transform:translate(-50%,-50%) rotate(' + (midAngle + 90) + 'deg); font-size:clamp(0.5rem,1.5vw,0.7rem);">' + seg.label + '</div>';
+    segmentsHtml += '<div class="wheel-label" style="left:' + x + 'px; top:' + y + 'px; transform:translate(-50%,-50%) rotate(' + (midAngle + 90) + 'deg);">' + seg.label + '</div>';
   });
 
   const wonColor = won ? '#00e701' : '#ff4d4d';
   const winningSeg = wheelSegs[winningIndex];
 
   display.innerHTML =
-    '<div id="wheel-result" style="text-align:center;padding:10px;position:relative;">' +
-    '<div id="wheel-spin" style="position:relative; width:min(230px,55vw); height:min(230px,55vw); margin:20px auto; border-radius:50%; background:conic-gradient(' +
+    '<div class="wheel-result">' +
+    '<div class="wheel-container">' +
+    '<div id="wheel-spin" class="wheel-spin" style="background:conic-gradient(' +
     wheelSegs.map((s, i) => WHEEL_COLORS[s.color] + ' ' + (i * 30) + 'deg ' + ((i + 1) * 30) + 'deg' + (i < 11 ? ',' : '')).join('') +
-    '); border:5px solid #243542; box-shadow:0 0 24px rgba(0,0,0,.6); transition:transform ' + spinDuration + 'ms cubic-bezier(0.25,0.1,0.25,1); transform:rotate(0deg); cursor:default;">' +
+    ');">' +
     segmentsHtml +
-    '<div style="position:absolute; top:-14px; left:50%; transform:translateX(-50%); width:0; height:0; border-left:10px solid transparent; border-right:10px solid transparent; border-top:16px solid #ffc700; filter:drop-shadow(0 0 4px rgba(255,199,0,.8);"></div>' +
-    '<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:14px; height:14px; border-radius:50%; background:#ffc700; box-shadow:0 0 8px rgba(255,199,0,1); z-index:2;"></div>' +
+    '<div class="wheel-pointer"></div>' +
+    '<div class="wheel-center"></div>' +
     '</div>' +
-    '<div id="wheel-multiplier" style="font-size:2.5rem; font-weight:900; color:#b1bad2; min-height:1.5em; margin:12px 0;">Spinning...</div>' +
-    '<div id="wheel-subtext" style="color:#b1bad2; font-weight:600; font-size:0.9rem;">Waiting for the wheel to stop...</div>';
+    '</div>' +
+    '<div id="wheel-multiplier" class="wheel-multiplier">Spinning...</div>' +
+    '<div id="wheel-subtext" class="wheel-subtext">Waiting for the wheel to stop...</div>' +
+    '</div>';
 
   if (GameRenderers.wheelHistory && GameRenderers.wheelHistory.length > 0) {
     display.innerHTML += '<div class="wheel-history"><div class="history-title">Previous</div><div class="history-items">';
@@ -53,8 +56,6 @@ GameRenderers.renderWheel = function(details, multiplier) {
     });
     display.innerHTML += '</div></div>';
   }
-
-  display.innerHTML += '</div>';
 
   playSound('spin');
 
