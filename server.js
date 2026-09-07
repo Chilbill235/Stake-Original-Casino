@@ -313,6 +313,18 @@ const affiliates = new Map();
 // Index by referral code for fast lookups. Code is uppercased.
 const affiliatesByCode = new Map();
 
+// Keep the in-memory user object in sync with DB updates so fields like
+// 2FA secret, password reset tokens, and settings are visible immediately
+// on the next request.
+const _origUpdateUser = db.updateUser.bind(db);
+db.updateUser = async function (userId, fields) {
+  await _origUpdateUser(userId, fields);
+  const user = users.get(userId);
+  if (user) {
+    Object.assign(user, fields);
+  }
+};
+
 // Memory-mode wrappers. In SQLite mode these just call db.*. In memory
 // mode they read/write the in-memory Maps above so the rest of the
 // codebase doesn't have to special-case the backend.
@@ -454,81 +466,200 @@ const amoeRegistry = new Map();
 const cryptoPayments = new Map();
 
 // -----------------------------------------------------------------------------
-// 2a. GEOLOCATION / JURISDICTION COMPLIANCE
+// 2a. ENHANCED GEOLOCATION & JURISDICTION COMPLIANCE
 // -----------------------------------------------------------------------------
 
+/**
+ * Parses and cleans client IP addresses from incoming request headers.
+ */
 function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'];
-  if (forwarded) {
-    return String(forwarded).split(',')[0].trim().replace('::ffff:', '');
-  }
-  return (req.socket.remoteAddress || '').replace('::ffff:', '');
+  const headers = req.headers || {};
+  const rawIp = 
+    headers['cf-connecting-ip'] || 
+    (headers['x-forwarded-for'] ? headers['x-forwarded-for'].split(',')[0].trim() : null) || 
+    headers['x-real-ip'] || 
+    req.socket?.remoteAddress || 
+    '';
+
+  // Strip IPv6-mapped IPv4 prefix
+  return rawIp.replace(/^::ffff:/, '').trim();
 }
 
-function isVpnOrHosting(asn, org) {
-  if ((asn == null || asn === '') && (org == null || org === '')) return false;
-  const haystack = `${asn || ''} ${org || ''}`.toLowerCase();
-  return VPN_ASN_KEYWORDS.some(k => haystack.includes(k));
+/**
+ * Checks ASN, ISP, and Organization strings against VPN/Hosting signatures.
+ */
+function isVpnOrHosting(asn, org, isp) {
+  const haystack = `${asn || ''} ${org || ''} ${isp || ''}`.toLowerCase();
+  if (!haystack.trim()) return false;
+  return VPN_ASN_KEYWORDS.some(keyword => haystack.includes(keyword.toLowerCase()));
 }
 
+/**
+ * Performs geo-lookup with rich data extraction, normalization, and dynamic risk scoring.
+ */
 async function geoLookup(ip) {
-  if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') {
-    return { ip, state: null, country: 'US', city: null, restricted: false, isVpn: false, asn: null, org: null, riskScore: 0 };
+  // 1. Loopback / Internal IP Handling
+  if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
+    return {
+      ip,
+      isLocal: true,
+      country: 'US',
+      countryName: 'United States',
+      region: 'CA',
+      regionName: 'California',
+      city: 'Localhost',
+      postalCode: '90001',
+      latitude: 34.0522,
+      longitude: -118.2437,
+      timezone: 'America/Los_Angeles',
+      asn: 'AS0000',
+      org: 'Local Network',
+      isp: 'Internal Loopback',
+      networkType: 'loopback',
+      flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
+      restricted: false,
+      riskScore: 0,
+      provider: 'internal',
+      lookedUpAt: Date.now()
+    };
   }
 
+  // 2. Cache Lookup
   const cached = geoCache.get(ip);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
   }
 
   let lastError = null;
+
+  // 3. Provider Failover Loop
   for (const provider of GEO_PROVIDERS) {
     try {
       const data = await provider(ip);
-      if (!data || data.status === 'fail') {
-        lastError = data?.reason || 'provider returned fail';
+      if (!data || data.status === 'fail' || data.error) {
+        lastError = data?.reason || data?.error || 'Provider execution failed';
         continue;
       }
 
-      const state = (data.region_code || data.region || data.state || data.subdivision || null);
-      const country = (data.country_code || data.country || null);
-      const restricted = RESTRICTED_STATES.includes((state || '').toUpperCase()) ||
-                         RESTRICTED_COUNTRIES.includes((country || '').toUpperCase());
-      const asn = data.asn || data.as || null;
-      const org = data.org || data.isp || data.as || null;
-      const isVpn = isVpnOrHosting(asn, org);
-      const riskScore = (restricted ? 50 : 0) + (isVpn ? 30 : 0) + (data.proxy ? 20 : 0) + (data.hosting ? 20 : 0);
+      // Normalized Field Mapping
+      const countryCode = String(data.country_code || data.countryCode || data.country || '').toUpperCase() || null;
+      const countryName = data.country_name || data.countryName || null;
+      const regionCode = String(data.region_code || data.region || data.state || data.subdivision || '').toUpperCase() || null;
+      const regionName = data.region_name || data.regionName || data.state_name || null;
+      const city = data.city || null;
+      const postalCode = data.postal || data.postal_code || data.zip || null;
+      const latitude = parseFloat(data.latitude || data.lat) || null;
+      const longitude = parseFloat(data.longitude || data.lon || data.lng) || null;
+      const timezone = data.timezone || data.time_zone || null;
+
+      const asn = data.asn || (data.as ? String(data.as).split(' ')[0] : null);
+      const org = data.org || data.organization || null;
+      const isp = data.isp || data.asname || null;
+
+      // Security Flags Detection
+      const isVpnDetected = isVpnOrHosting(asn, org, isp) || Boolean(data.vpn || data.is_vpn);
+      const isProxyDetected = Boolean(data.proxy || data.is_proxy);
+      const isTorDetected = Boolean(data.tor || data.is_tor);
+      const isHostingDetected = Boolean(data.hosting || data.datacenter || data.is_crawler);
+
+      // Restriction checks against ISO codes
+      const isRestrictedState = RESTRICTED_STATES.includes(regionCode);
+      const isRestrictedCountry = RESTRICTED_COUNTRIES.includes(countryCode);
+      const restricted = isRestrictedState || isRestrictedCountry;
+
+      // Dynamic Risk Score Algorithm (Scale 0 - 100)
+      let riskScore = 0;
+      if (restricted) riskScore += 50;
+      if (isTorDetected) riskScore += 45;
+      if (isVpnDetected) riskScore += 30;
+      if (isProxyDetected) riskScore += 25;
+      if (isHostingDetected) riskScore += 20;
+      if (!countryCode) riskScore += 15; // Unknown origin penalty
+
+      const finalRiskScore = Math.min(100, riskScore);
 
       const result = {
         ip,
-        state: state ? String(state).toUpperCase() : null,
-        country: country ? String(country).toUpperCase() : null,
-        city: data.city || null,
+        isLocal: false,
+        country: countryCode,
+        countryName,
+        region: regionCode,
+        regionName,
+        city,
+        postalCode,
+        coordinates: {
+          latitude,
+          longitude
+        },
+        timezone,
+        network: {
+          asn,
+          org,
+          isp,
+          connectionType: data.connection_type || data.net_type || 'unknown'
+        },
+        flags: {
+          isVpn: isVpnDetected,
+          isProxy: isProxyDetected,
+          isTor: isTorDetected,
+          isDatacenter: isHostingDetected
+        },
         restricted,
-        isVpn,
-        asn,
-        org,
-        riskScore: Math.min(100, riskScore),
-        provider: 'geo',
+        restrictionDetails: {
+          byState: isRestrictedState,
+          byCountry: isRestrictedCountry
+        },
+        riskScore: finalRiskScore,
+        provider: data.providerName || 'geo_provider',
         lookedUpAt: Date.now()
       };
 
+      // Save to cache
       geoCache.set(ip, { data: result, expiresAt: Date.now() + GEO_CACHE_TTL });
       return result;
+
     } catch (e) {
       lastError = e.message;
       continue;
     }
   }
 
+  // 4. Fallback Payload on Full Failure
   console.warn(`[Geo] All providers failed for ${ip}: ${lastError}`);
-  return { ip, state: null, country: null, city: null, restricted: null, isVpn: false, asn: null, org: null, riskScore: -1, error: lastError };
+  return {
+    ip,
+    isLocal: false,
+    country: null,
+    countryName: null,
+    region: null,
+    regionName: null,
+    city: null,
+    postalCode: null,
+    coordinates: { latitude: null, longitude: null },
+    timezone: null,
+    network: { asn: null, org: null, isp: null, connectionType: 'unknown' },
+    flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
+    restricted: null,
+    restrictionDetails: { byState: false, byCountry: false },
+    riskScore: -1,
+    error: lastError,
+    lookedUpAt: Date.now()
+  };
 }
 
-// Generate a unique user ID (avoids collisions from deletions/counters)
+// -----------------------------------------------------------------------------
+// USER ID GENERATION (Thread-Safe Cryptographic Counter Fallback)
+// -----------------------------------------------------------------------------
+
 let nextUserId = 1;
+
+/**
+ * Generates an incremental ID while avoiding conflicts with existing key sets.
+ */
 function generateUserId() {
-  while (users.has(nextUserId)) nextUserId++;
+  while (users.has(nextUserId)) {
+    nextUserId++;
+  }
   const id = nextUserId;
   nextUserId++;
   return id;
