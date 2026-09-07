@@ -205,6 +205,7 @@ if (STRIPE_SECRET_KEY) {
 
 const bcrypt = require('bcryptjs');
 const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
+
 function calculateCryptoRewards(receivedUsd, payment) {
   const pkg = payment.packageId ? COIN_PACKAGES[payment.packageId] : null;
   if (pkg) {
@@ -240,9 +241,9 @@ function cryptoToUsd(currency, amount) {
 // -----------------------------------------------------------------------------
 
 /**
- * 2026 Restricted US Jurisdictions
+ * Restricted US Jurisdictions
  * Strictly enforced due to state statutory bans, attorney general cease-and-desists,
- * or explicit prohibition of promotional dual-currency (Gold Coins / Sweeps Coins) gaming models.
+ * or explicit prohibition of promotional dual-currency sweepstakes models.
  */
 const RESTRICTED_STATES = new Set([
   'CA', // California (AB 831 Statutory Ban)
@@ -261,6 +262,10 @@ const RESTRICTED_STATES = new Set([
   'WA'  // Washington (RCW 9.46.240 Internet Gambling Ban)
 ]);
 
+const RESTRICTED_COUNTRIES = new Set([
+  'AF', 'CN', 'IQ', 'IR', 'KP', 'LY', 'PK', 'RU', 'SA', 'SD', 'SS', 'SY', 'YE'
+]);
+
 const GEO_CACHE_TTL = 1000 * 60 * 60 * 2; // 2 hours
 
 /**
@@ -273,23 +278,32 @@ const STRICT_VPN_KEYWORDS = [
   'pia', 'ipvanish', 'vyprvpn', 'windscribe', 'proton', 'protonvpn', 'purevpn',
   'hide.me', 'zenmate', 'strongvpn', 'tunnelbear', 'airvpn', 'ivpn',
 
-  // Residential Proxy Providers (Used to evade traditional geo-blocks)
+  // Residential Proxy Providers
   'brightdata', 'luminati', 'oxylabs', 'smartproxy', 'geosurf', 'packetstream',
   'iproyal', 'soax', 'netnut', 'rayobyte', 'webshare', 'proxyrack', 'infatica',
 
-  // Cloud Providers, Data Centers, and Hosting (Players should not play from servers)
+  // Cloud Providers, Data Centers, and Hosting Infrastructure
   'aws', 'amazon', 'azure', 'gcp', 'google cloud', 'oracle cloud', 'alibaba', 
-  'tencent', 'ibm cloud', 'scaleway', 'ovh', 'ovhcloud', 'hosting', 'datacenter', 
-  'data center', 'server', 'vps', 'cloud', 'colocation', 'digitalocean', 
-  'linode', 'akamai', 'hetzner', 'contabo', 'vultr', 'upcloud', 'hostinger', 
+  'alicloud', 'tencent', 'ibm cloud', 'scaleway', 'ovh', 'ovhcloud', 'hosting', 
+  'datacenter', 'data center', 'server', 'vps', 'cloud', 'colo', 'colocation', 
+  'dedi', 'dedicated', 'bare metal', 'rackspace', 'digitalocean', 'linode', 
+  'akamai', 'hetzner', 'contabo', 'vultr', 'upcloud', 'hostinger', 'bluehost', 
+  'hostgator', 'godaddy', 'ionos', 'a2 hosting', 'siteground', 'fastcomet', 
+  'inmotion', 'dreamhost', 'liquid web', 'leaseweb', 'choopa',
 
   // CDNs and Security Networks
-  'cloudflare', 'fastly', 'imperva', 'incapsula', 'stackpath', 'ddos-guard', 
-  'sucuri', 'cogent', 'he.net', 'hurricane electric', 'zayo', 'level3', 'lumen'
+  'cloudflare', 'fastly', 'imperva', 'incapsula', 'stackpath', 'limelight', 
+  'edgio', 'ddos-guard', 'sucuri', 'cogent', 'cogentco', 'he.net', 
+  'hurricane electric', 'gtt', 'pccw', 'zayo', 'level3', 'lumen', 'telia', 
+  'arelion', 'tata communications', 'seaborn', 'telstra global',
+
+  // Datacenter Real Estate & Interconnects
+  'equinix', 'digital realty', 'cyrusone', 'switch', 'tierpoint', 'telehouse', 
+  'coresite', 'flexential', 'iron mountain', 'qts', 'databank'
 ];
 
 /**
- * Normalized Geo Providers with strict field resolution
+ * Normalized Geo Providers with strict field resolution and failover safety
  */
 const GEO_PROVIDERS = [
   async (ip) => {
@@ -334,7 +348,7 @@ const GEO_PROVIDERS = [
       asn: data.asn || null,
       org: data.org || null,
       isp: data.org || null,
-      isProxy: Boolean(data.in_eu), // Fallback safety flag
+      isProxy: false,
       providerName: 'ipapi.co'
     };
   },
@@ -345,7 +359,7 @@ const GEO_PROVIDERS = [
     if (data.status !== 'success') return null;
     return {
       ip: data.query,
-      state: data.region || null, // ip-api uses 'region' for state code (e.g. 'OH')
+      state: data.region || null,
       stateName: data.regionName || null,
       country: data.countryCode || null,
       countryName: data.country || null,
@@ -365,10 +379,9 @@ const GEO_PROVIDERS = [
 
 const geoCache = new Map();
 
-// -----------------------------------------------------------------------------
-// CORE EVALUATION ENGINE
-// -----------------------------------------------------------------------------
-
+/**
+ * Parses and cleans client IP addresses from incoming request headers.
+ */
 function getClientIp(req) {
   const headers = req.headers || {};
   const forwarded = headers['cf-connecting-ip'] || headers['x-forwarded-for'] || headers['x-real-ip'];
@@ -378,17 +391,20 @@ function getClientIp(req) {
   return String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '').trim();
 }
 
+/**
+ * Checks ASN, ISP, and Organization strings against VPN/Hosting signatures.
+ */
 function isVpnOrHosting(asn, org, isp) {
   const haystack = `${asn || ''} ${org || ''} ${isp || ''}`.toLowerCase();
   if (!haystack.trim()) return false;
-  return STRICT_VPN_KEYWORDS.some(k => haystack.includes(k));
+  return STRICT_VPN_KEYWORDS.some(keyword => haystack.includes(keyword));
 }
 
 /**
- * Strictly verifies geo-compliance for sweepstakes casino gameplay & redemptions.
+ * Performs geo-lookup with rich data extraction, normalization, and dynamic risk scoring.
  */
 async function geoLookup(ip) {
-  // 1. Localhost Bypass (Development Environments Only)
+  // 1. Loopback / Internal IP Handling
   if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
     return {
       ip,
@@ -410,7 +426,7 @@ async function geoLookup(ip) {
     };
   }
 
-  // 2. Cache Verification
+  // 2. Cache Lookup
   const cached = geoCache.get(ip);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.data;
@@ -418,7 +434,7 @@ async function geoLookup(ip) {
 
   let lastError = null;
 
-  // 3. Provider Execution Loop
+  // 3. Provider Failover Execution Loop
   for (const provider of GEO_PROVIDERS) {
     try {
       const data = await provider(ip);
@@ -429,21 +445,22 @@ async function geoLookup(ip) {
       
       const isVpnDetected = data.isProxy || isVpnOrHosting(data.asn, data.org, data.isp);
       const isOutsideUS = country !== 'US';
-      const isRestrictedState = state ? RESTRICTED_US_STATES.has(state) : true; // Default-deny if state is unidentified inside US
+      const isRestrictedState = state ? RESTRICTED_STATES.has(state) : true;
+      const isRestrictedCountry = country ? RESTRICTED_COUNTRIES.has(country) : false;
 
       const reasons = [];
       if (isOutsideUS) reasons.push(`NON_US_JURISDICTION_${country || 'UNKNOWN'}`);
       if (isRestrictedState) reasons.push(`RESTRICTED_US_STATE_${state || 'UNKNOWN'}`);
+      if (isRestrictedCountry) reasons.push(`RESTRICTED_COUNTRY_${country || 'UNKNOWN'}`);
       if (isVpnDetected) reasons.push('VPN_PROXY_DATACENTER_DETECTED');
 
-      // Risk Score Evaluation (Strict Compliance Thresholds)
+      // Dynamic Risk Scoring Algorithm (0 - 100)
       let riskScore = 0;
       if (isOutsideUS) riskScore += 100;
       if (isRestrictedState) riskScore += 100;
       if (isVpnDetected) riskScore += 80;
-      if (!state) riskScore += 50; // Missing region details inside US is high risk
+      if (!state) riskScore += 50;
 
-      // COMPLIANCE RULE: Must be inside allowed US state AND NOT on a VPN/Proxy network
       const allowed = !isOutsideUS && !isRestrictedState && !isVpnDetected && riskScore < 50;
 
       const result = {
@@ -476,7 +493,6 @@ async function geoLookup(ip) {
         lookedUpAt: Date.now()
       };
 
-      // Save valid response to cache
       geoCache.set(ip, { data: result, expiresAt: Date.now() + GEO_CACHE_TTL });
       return result;
 
@@ -486,8 +502,7 @@ async function geoLookup(ip) {
     }
   }
 
-  // 4. Strict Failure Mode: Fail Closed
-  // If all providers fail, do NOT grant access. Block action to protect legal standing.
+  // 4. Fallback Payload: Strict Fail-Closed Security Policy
   console.error(`[Compliance Failure] Universal lookup failed for IP ${ip}: ${lastError}`);
   return {
     ip,
@@ -522,354 +537,6 @@ function isGuestUser(user) {
 }
 
 // -----------------------------------------------------------------------------
-// 2. IN-MEMORY DATA STORES
-// -----------------------------------------------------------------------------
-const users = new Map();
-const transactions = new Map();
-const processedEvents = new Set();
-const processedEventsTimestamps = new Map();
-// In-memory affiliate store. Used as a fallback when db.* is the memory
-// stub so affiliate status / clicks / applications still work end-to-end.
-// Keyed by user_id.
-const affiliates = new Map();
-// Index by referral code for fast lookups. Code is uppercased.
-const affiliatesByCode = new Map();
-
-// Keep the in-memory user object in sync with DB updates so fields like
-// 2FA secret, password reset tokens, and settings are visible immediately
-// on the next request.
-const _origUpdateUser = db.updateUser.bind(db);
-db.updateUser = async function (userId, fields) {
-  await _origUpdateUser(userId, fields);
-  const user = users.get(userId);
-  if (user) {
-    Object.assign(user, fields);
-  }
-};
-
-// Memory-mode wrappers. In SQLite mode these just call db.*. In memory
-// mode they read/write the in-memory Maps above so the rest of the
-// codebase doesn't have to special-case the backend.
-async function getAffiliateRecord(userId) {
-  if (affiliates.has(userId)) return affiliates.get(userId);
-  const record = await db.getAffiliateByUserId(userId);
-  if (record) {
-    affiliates.set(userId, record);
-    if (record.referral_code) affiliatesByCode.set(String(record.referral_code).toUpperCase(), record);
-  }
-  return record;
-}
-
-async function getAffiliateByCodeRecord(code) {
-  const upper = String(code).trim().toUpperCase();
-  if (affiliatesByCode.has(upper)) return affiliatesByCode.get(upper);
-  const record = await db.getAffiliateByCode(upper);
-  if (record) {
-    affiliates.set(record.user_id, record);
-    affiliatesByCode.set(upper, record);
-  }
-  return record;
-}
-
-async function setAffiliateReferredByMemory(userId, referredBy) {
-  // Always write to db (no-op in memory mode). Also update the in-memory
-  // record so subsequent getAffiliateRecord calls return the fresh value.
-  await db.setAffiliateReferredBy(userId, referredBy);
-  const existing = affiliates.get(userId);
-  if (existing) {
-    existing.referred_by = referredBy;
-  } else {
-    const record = await db.getAffiliateByUserId(userId);
-    if (record) {
-      record.referred_by = referredBy;
-      affiliates.set(userId, record);
-      if (record.referral_code) {
-        affiliatesByCode.set(String(record.referral_code).toUpperCase(), record);
-      }
-    } else {
-      // Create a minimal record so the rest of the system can proceed.
-      const placeholder = { user_id: userId, referral_code: null, referred_by: referredBy, created_at: Date.now() };
-      affiliates.set(userId, placeholder);
-    }
-  }
-}
-
-// Helper: get user from memory Map, falling back to DB (handles serverless cold starts)
-async function getUserById(id) {
-  let user = users.get(id);
-  if (!user) {
-    const dbUser = await db.getUserById(id);
-    if (dbUser) {
-      let bonusState = null;
-      let affiliateRecord = null;
-      try {
-        bonusState = await db.getBonusState(dbUser.id);
-      } catch (e) {
-        console.warn('[DB]: Failed to load bonus_state for user', dbUser.id, e.message);
-      }
-      try {
-        affiliateRecord = await getAffiliateRecord(dbUser.id);
-      } catch (e) {
-        console.warn('[DB]: Failed to load affiliate record for user', dbUser.id, e.message);
-      }
-
-      user = {
-        id: dbUser.id,
-        username: dbUser.username,
-        email: dbUser.email,
-        password: dbUser.password,
-        gc_balance: dbUser.gc_balance,
-        sc_unplayed: dbUser.sc_unplayed,
-        sc_played: dbUser.sc_played,
-        state: dbUser.state,
-        vipTier: dbUser.vip_tier,
-        createdAt: dbUser.created_at,
-        registeredAt: dbUser.registered_at,
-        kyc: {
-          status: dbUser.kyc_status,
-          tier: dbUser.kyc_tier,
-          inquiryId: dbUser.kyc_inquiry_id || null,
-          verifiedAt: dbUser.kyc_verified_at || null,
-          rejectionReason: dbUser.kyc_rejection_reason || null
-        },
-        vip: {
-          tier: dbUser.vip_tier || 'Bronze',
-          totalWageredSC: dbUser.total_wagered_sc || 0,
-          totalWageredGC: dbUser.total_wagered_gc || 0,
-          rakebackAccruedSC: dbUser.rakeback_accrued_sc || 0
-        },
-        bonus: {
-          lastClaimAt: bonusState?.last_claim_at || dbUser.last_daily_claim || 0,
-          claimStreak: bonusState?.claim_streak || dbUser.daily_streak || 0,
-          dailyClaimed: bonusState?.daily_claimed || dbUser.daily_claimed || 0,
-          challengeDate: bonusState?.challenge_date || '',
-          challenges: (() => { try { return JSON.parse(bonusState?.challenges || dbUser.challenges || '[]'); } catch { return []; } })(),
-          rakeback: {
-            lastDailyAt: bonusState?.rakeback_last_daily || 0,
-            lastWeeklyAt: bonusState?.rakeback_last_weekly || 0,
-            lastMonthlyAt: bonusState?.rakeback_last_monthly || 0,
-            dailyPool: bonusState?.rakeback_daily_pool || 0,
-            weeklyPool: bonusState?.rakeback_weekly_pool || 0,
-            monthlyPool: bonusState?.rakeback_monthly_pool || 0
-          }
-        },
-        geo: {
-          ip: dbUser.geo_ip || null,
-          country: dbUser.geo_country || null,
-          city: dbUser.geo_city || null,
-          isVpn: dbUser.geo_is_vpn || 0,
-          riskScore: dbUser.geo_risk_score || 0
-        },
-         referredBy: affiliateRecord ? (affiliateRecord.referred_by || null) : null,
-        hasPayoutAccount: !!dbUser.stripe_account_id,
-        transfersActive: true,
-        stripeAccountId: dbUser.stripe_account_id || null
-      };
-      users.set(user.id, user);
-    }
-  }
-  return user;
-}
-
-// Clean up old processed event IDs every 10 minutes (keep last 1 hour)
-setInterval(() => {
-  const cutoff = Date.now() - 3600000;
-  for (const [id, ts] of processedEventsTimestamps.entries()) {
-    if (ts < cutoff) {
-      processedEventsTimestamps.delete(id);
-      processedEvents.delete(id);
-    }
-  }
-}, 600000);
-
-const activeSessions = new Map();
-const userSeeds = new Map();
-const amoeRegistry = new Map();
-const cryptoPayments = new Map();
-
-// -----------------------------------------------------------------------------
-// 2a. ENHANCED GEOLOCATION & JURISDICTION COMPLIANCE
-// -----------------------------------------------------------------------------
-
-/**
- * Parses and cleans client IP addresses from incoming request headers.
- */
-function getClientIp(req) {
-  const headers = req.headers || {};
-  const rawIp = 
-    headers['cf-connecting-ip'] || 
-    (headers['x-forwarded-for'] ? headers['x-forwarded-for'].split(',')[0].trim() : null) || 
-    headers['x-real-ip'] || 
-    req.socket?.remoteAddress || 
-    '';
-
-  // Strip IPv6-mapped IPv4 prefix
-  return rawIp.replace(/^::ffff:/, '').trim();
-}
-
-/**
- * Checks ASN, ISP, and Organization strings against VPN/Hosting signatures.
- */
-function isVpnOrHosting(asn, org, isp) {
-  const haystack = `${asn || ''} ${org || ''} ${isp || ''}`.toLowerCase();
-  if (!haystack.trim()) return false;
-  return VPN_ASN_KEYWORDS.some(keyword => haystack.includes(keyword.toLowerCase()));
-}
-
-/**
- * Performs geo-lookup with rich data extraction, normalization, and dynamic risk scoring.
- */
-async function geoLookup(ip) {
-  // 1. Loopback / Internal IP Handling
-  if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
-    return {
-      ip,
-      isLocal: true,
-      country: 'US',
-      countryName: 'United States',
-      region: 'CA',
-      regionName: 'California',
-      city: 'Localhost',
-      postalCode: '90001',
-      latitude: 34.0522,
-      longitude: -118.2437,
-      timezone: 'America/Los_Angeles',
-      asn: 'AS0000',
-      org: 'Local Network',
-      isp: 'Internal Loopback',
-      networkType: 'loopback',
-      flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
-      restricted: false,
-      riskScore: 0,
-      provider: 'internal',
-      lookedUpAt: Date.now()
-    };
-  }
-
-  // 2. Cache Lookup
-  const cached = geoCache.get(ip);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.data;
-  }
-
-  let lastError = null;
-
-  // 3. Provider Failover Loop
-  for (const provider of GEO_PROVIDERS) {
-    try {
-      const data = await provider(ip);
-      if (!data || data.status === 'fail' || data.error) {
-        lastError = data?.reason || data?.error || 'Provider execution failed';
-        continue;
-      }
-
-      // Normalized Field Mapping
-      const countryCode = String(data.country_code || data.countryCode || data.country || '').toUpperCase() || null;
-      const countryName = data.country_name || data.countryName || null;
-      const regionCode = String(data.region_code || data.region || data.state || data.subdivision || '').toUpperCase() || null;
-      const regionName = data.region_name || data.regionName || data.state_name || null;
-      const city = data.city || null;
-      const postalCode = data.postal || data.postal_code || data.zip || null;
-      const latitude = parseFloat(data.latitude || data.lat) || null;
-      const longitude = parseFloat(data.longitude || data.lon || data.lng) || null;
-      const timezone = data.timezone || data.time_zone || null;
-
-      const asn = data.asn || (data.as ? String(data.as).split(' ')[0] : null);
-      const org = data.org || data.organization || null;
-      const isp = data.isp || data.asname || null;
-
-      // Security Flags Detection
-      const isVpnDetected = isVpnOrHosting(asn, org, isp) || Boolean(data.vpn || data.is_vpn);
-      const isProxyDetected = Boolean(data.proxy || data.is_proxy);
-      const isTorDetected = Boolean(data.tor || data.is_tor);
-      const isHostingDetected = Boolean(data.hosting || data.datacenter || data.is_crawler);
-
-      // Restriction checks against ISO codes
-      const isRestrictedState = RESTRICTED_STATES.includes(regionCode);
-      const isRestrictedCountry = RESTRICTED_COUNTRIES.includes(countryCode);
-      const restricted = isRestrictedState || isRestrictedCountry;
-
-      // Dynamic Risk Score Algorithm (Scale 0 - 100)
-      let riskScore = 0;
-      if (restricted) riskScore += 50;
-      if (isTorDetected) riskScore += 45;
-      if (isVpnDetected) riskScore += 30;
-      if (isProxyDetected) riskScore += 25;
-      if (isHostingDetected) riskScore += 20;
-      if (!countryCode) riskScore += 15; // Unknown origin penalty
-
-      const finalRiskScore = Math.min(100, riskScore);
-
-      const result = {
-        ip,
-        isLocal: false,
-        country: countryCode,
-        countryName,
-        region: regionCode,
-        regionName,
-        city,
-        postalCode,
-        coordinates: {
-          latitude,
-          longitude
-        },
-        timezone,
-        network: {
-          asn,
-          org,
-          isp,
-          connectionType: data.connection_type || data.net_type || 'unknown'
-        },
-        flags: {
-          isVpn: isVpnDetected,
-          isProxy: isProxyDetected,
-          isTor: isTorDetected,
-          isDatacenter: isHostingDetected
-        },
-        restricted,
-        restrictionDetails: {
-          byState: isRestrictedState,
-          byCountry: isRestrictedCountry
-        },
-        riskScore: finalRiskScore,
-        provider: data.providerName || 'geo_provider',
-        lookedUpAt: Date.now()
-      };
-
-      // Save to cache
-      geoCache.set(ip, { data: result, expiresAt: Date.now() + GEO_CACHE_TTL });
-      return result;
-
-    } catch (e) {
-      lastError = e.message;
-      continue;
-    }
-  }
-
-  // 4. Fallback Payload on Full Failure
-  console.warn(`[Geo] All providers failed for ${ip}: ${lastError}`);
-  return {
-    ip,
-    isLocal: false,
-    country: null,
-    countryName: null,
-    region: null,
-    regionName: null,
-    city: null,
-    postalCode: null,
-    coordinates: { latitude: null, longitude: null },
-    timezone: null,
-    network: { asn: null, org: null, isp: null, connectionType: 'unknown' },
-    flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
-    restricted: null,
-    restrictionDetails: { byState: false, byCountry: false },
-    riskScore: -1,
-    error: lastError,
-    lookedUpAt: Date.now()
-  };
-}
-
-// -----------------------------------------------------------------------------
 // USER ID GENERATION (Thread-Safe Cryptographic Counter Fallback)
 // -----------------------------------------------------------------------------
 
@@ -886,7 +553,6 @@ function generateUserId() {
   nextUserId++;
   return id;
 }
-
 // -----------------------------------------------------------------------------
 // 2b. PERSISTENCE — SQLite database for durable storage
 // -----------------------------------------------------------------------------
