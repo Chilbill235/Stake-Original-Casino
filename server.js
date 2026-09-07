@@ -244,7 +244,7 @@ function cryptoToUsd(currency, amount) {
  * Strictly enforced due to state statutory bans, attorney general cease-and-desists,
  * or explicit prohibition of promotional dual-currency (Gold Coins / Sweeps Coins) gaming models.
  */
-const RESTRICTED_US_STATES = new Set([
+const RESTRICTED_STATES = new Set([
   'CA', // California (AB 831 Statutory Ban)
   'CT', // Connecticut (PA 25-112 Statutory Ban)
   'ID', // Idaho (Article III Constitutional Gambling Ban)
