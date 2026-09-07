@@ -235,57 +235,279 @@ function cryptoToUsd(currency, amount) {
   return round2(amt * rate);
 }
 
-const RESTRICTED_STATES = [
-  'WA', 'ID', 'NV', 'MI', 'MT', 'CT', 'NJ', 'NY', 'LA', 'TN', 'IN', 'ME', 'OK',
-  'KY', 'GA', 'AL', 'DE', 'AR', 'FL', 'HI', 'IL', 'IA', 'KS', 'MD', 'MN', 'MS',
-  'MO', 'NE', 'NH', 'NC', 'ND', 'PA', 'RI', 'SC', 'SD', 'TX', 'UT', 'VT', 'VA',
-  'WV', 'WI', 'WY'
-];
+// -----------------------------------------------------------------------------
+// SWEEPSTAKES PLATFORM COMPLIANCE & GEO-FENCING ENGINE
+// -----------------------------------------------------------------------------
 
-const RESTRICTED_COUNTRIES = [
-  'AF', 'IQ', 'IR', 'KP', 'LY', 'PK', 'SA', 'SD', 'SS', 'SY', 'YE', 'CN', 'RU'
-];
+/**
+ * 2026 Restricted US Jurisdictions
+ * Strictly enforced due to state statutory bans, attorney general cease-and-desists,
+ * or explicit prohibition of promotional dual-currency (Gold Coins / Sweeps Coins) gaming models.
+ */
+const RESTRICTED_US_STATES = new Set([
+  'CA', // California (AB 831 Statutory Ban)
+  'CT', // Connecticut (PA 25-112 Statutory Ban)
+  'ID', // Idaho (Article III Constitutional Gambling Ban)
+  'IN', // Indiana (HB 1052 Statutory Ban)
+  'LA', // Louisiana (HB 883 Dual-Currency Prohibition)
+  'ME', // Maine (LD 2007 Statutory Ban)
+  'MI', // Michigan (MGCB Regulatory Ban & Enforcement)
+  'MT', // Montana (SB 555 Electronic Sweepstakes Ban)
+  'NV', // Nevada (SB 256 / Interactive Gaming Licensing Requirement)
+  'NJ', // New Jersey (A 5447 Statutory Ban)
+  'NY', // New York (S 5935A Statutory Ban)
+  'OK', // Oklahoma (SB 1589 Statutory Ban)
+  'TN', // Tennessee (SB 2136 Statutory Ban)
+  'WA'  // Washington (RCW 9.46.240 Internet Gambling Ban)
+]);
 
-const GEO_CACHE_TTL = 1000 * 60 * 60; // 1 hour
+const GEO_CACHE_TTL = 1000 * 60 * 60 * 2; // 2 hours
 
-const GEO_PROVIDERS = [
-  (ip) => fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`).then(r => r.json()) ,
-  (ip) => fetch(`https://ipwho.is/${encodeURIComponent(ip)}`).then(r => r.json()) ,
-  (ip) => fetch(`https://ip-api.com/json/${encodeURIComponent(ip)}`).then(r => r.json())
-];
-
-const VPN_ASN_KEYWORDS = [
-  // Generic VPN, Proxy & Security Services
+/**
+ * Enhanced Keywords for VPN, Data Center, and Residential Proxy Detection
+ */
+const STRICT_VPN_KEYWORDS = [
+  // VPNs, Anonymizers, and Tor
   'vpn', 'proxy', 'anonymizer', 'tunnel', 'tor', 'exit-node', 'mullvad', 
   'nordvpn', 'expressvpn', 'surfshark', 'cyberghost', 'privateinternetaccess', 
   'pia', 'ipvanish', 'vyprvpn', 'windscribe', 'proton', 'protonvpn', 'purevpn',
-  'hide.me', 'zenmate', 'strongvpn', 'tunnelbear', 'airvpn', 'mullvad', 'ivpn',
+  'hide.me', 'zenmate', 'strongvpn', 'tunnelbear', 'airvpn', 'ivpn',
 
-  // Cloud Providers & Hyperscalers
+  // Residential Proxy Providers (Used to evade traditional geo-blocks)
+  'brightdata', 'luminati', 'oxylabs', 'smartproxy', 'geosurf', 'packetstream',
+  'iproyal', 'soax', 'netnut', 'rayobyte', 'webshare', 'proxyrack', 'infatica',
+
+  // Cloud Providers, Data Centers, and Hosting (Players should not play from servers)
   'aws', 'amazon', 'azure', 'gcp', 'google cloud', 'oracle cloud', 'alibaba', 
-  'alicloud', 'tencent', 'ibm cloud', 'scaleway', 'ovh', 'ovhcloud', 
-
-  // Hosting, VPS & Infrastructure
-  'hosting', 'datacenter', 'data center', 'server', 'vps', 'cloud', 'colo', 
-  'colocation', 'dedi', 'dedicated', 'bare metal', 'rackspace', 'digitalocean', 
+  'tencent', 'ibm cloud', 'scaleway', 'ovh', 'ovhcloud', 'hosting', 'datacenter', 
+  'data center', 'server', 'vps', 'cloud', 'colocation', 'digitalocean', 
   'linode', 'akamai', 'hetzner', 'contabo', 'vultr', 'upcloud', 'hostinger', 
-  'bluehost', 'hostgator', 'godaddy', 'ionos', 'a2 hosting', 'siteground', 
-  'fastcomet', 'inmotion', 'dreamhost', 'liquid web', 'leaseweb', 'choopa', 
 
-  // Network Infrastructure & Backbone/Transit
-  'transit', 'backbone', 'peering', 'ixp', 'interconnection', 'cdn', 
-  'cloudflare', 'fastly', 'imperva', 'incapsula', 'stackpath', 'limelight', 
-  'edgio', 'denial', 'ddos-guard', 'sucuri', 'cogent', 'cogentco', 'he.net', 
-  'hurricane electric', 'gtt', 'pccw', 'zayo', 'level3', 'lumen', 'telia', 
-  'arelion', 'tata communications', 'seaborn', 'telstra global',
-
-  // Datacenter Real Estate & Interconnects
-  'equinix', 'digital realty', 'cyrusone', 'switch', 'tierpoint', 'telehouse', 
-  'coresite', 'flexential', 'iron mountain', 'qts', 'databank'
+  // CDNs and Security Networks
+  'cloudflare', 'fastly', 'imperva', 'incapsula', 'stackpath', 'ddos-guard', 
+  'sucuri', 'cogent', 'he.net', 'hurricane electric', 'zayo', 'level3', 'lumen'
 ];
 
-// In-memory geo cache: ip -> { data, expiresAt }
+/**
+ * Normalized Geo Providers with strict field resolution
+ */
+const GEO_PROVIDERS = [
+  async (ip) => {
+    const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.success) return null;
+    return {
+      ip: data.ip,
+      state: data.region_code || null,
+      stateName: data.region || null,
+      country: data.country_code || null,
+      countryName: data.country || null,
+      city: data.city || null,
+      postal: data.postal || null,
+      latitude: data.latitude || null,
+      longitude: data.longitude || null,
+      timezone: data.timezone?.id || null,
+      asn: data.connection?.asn ? `AS${data.connection.asn}` : null,
+      org: data.connection?.org || data.connection?.isp || null,
+      isp: data.connection?.isp || null,
+      isProxy: Boolean(data.security?.proxy || data.security?.vpn || data.security?.tor || data.security?.hosting),
+      providerName: 'ipwho.is'
+    };
+  },
+  async (ip) => {
+    const res = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.error) return null;
+    return {
+      ip: data.ip,
+      state: data.region_code || null,
+      stateName: data.region || null,
+      country: data.country_code || null,
+      countryName: data.country_name || null,
+      city: data.city || null,
+      postal: data.postal || null,
+      latitude: data.latitude || null,
+      longitude: data.longitude || null,
+      timezone: data.timezone || null,
+      asn: data.asn || null,
+      org: data.org || null,
+      isp: data.org || null,
+      isProxy: Boolean(data.in_eu), // Fallback safety flag
+      providerName: 'ipapi.co'
+    };
+  },
+  async (ip) => {
+    const res = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,countryCode,country,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 'success') return null;
+    return {
+      ip: data.query,
+      state: data.region || null, // ip-api uses 'region' for state code (e.g. 'OH')
+      stateName: data.regionName || null,
+      country: data.countryCode || null,
+      countryName: data.country || null,
+      city: data.city || null,
+      postal: data.zip || null,
+      latitude: data.lat || null,
+      longitude: data.lon || null,
+      timezone: data.timezone || null,
+      asn: data.as ? data.as.split(' ')[0] : null,
+      org: data.org || data.as || null,
+      isp: data.isp || null,
+      isProxy: false,
+      providerName: 'ip-api.com'
+    };
+  }
+];
+
 const geoCache = new Map();
+
+// -----------------------------------------------------------------------------
+// CORE EVALUATION ENGINE
+// -----------------------------------------------------------------------------
+
+function getClientIp(req) {
+  const headers = req.headers || {};
+  const forwarded = headers['cf-connecting-ip'] || headers['x-forwarded-for'] || headers['x-real-ip'];
+  if (forwarded) {
+    return String(forwarded).split(',')[0].trim().replace(/^::ffff:/, '');
+  }
+  return String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '').trim();
+}
+
+function isVpnOrHosting(asn, org, isp) {
+  const haystack = `${asn || ''} ${org || ''} ${isp || ''}`.toLowerCase();
+  if (!haystack.trim()) return false;
+  return STRICT_VPN_KEYWORDS.some(k => haystack.includes(k));
+}
+
+/**
+ * Strictly verifies geo-compliance for sweepstakes casino gameplay & redemptions.
+ */
+async function geoLookup(ip) {
+  // 1. Localhost Bypass (Development Environments Only)
+  if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
+    return {
+      ip,
+      allowed: true,
+      state: 'OH',
+      stateName: 'Ohio',
+      country: 'US',
+      countryName: 'United States',
+      city: 'Localhost',
+      postal: '45202',
+      coordinates: { latitude: 39.1031, longitude: -84.5120 },
+      timezone: 'America/New_York',
+      network: { asn: 'AS000', org: 'Local', isp: 'Localhost' },
+      flags: { isVpn: false, isProxy: false, isOutsideUS: false, isRestrictedState: false },
+      riskScore: 0,
+      reasons: [],
+      provider: 'development',
+      lookedUpAt: Date.now()
+    };
+  }
+
+  // 2. Cache Verification
+  const cached = geoCache.get(ip);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  let lastError = null;
+
+  // 3. Provider Execution Loop
+  for (const provider of GEO_PROVIDERS) {
+    try {
+      const data = await provider(ip);
+      if (!data || !data.country) continue;
+
+      const state = data.state ? String(data.state).toUpperCase() : null;
+      const country = data.country ? String(data.country).toUpperCase() : null;
+      
+      const isVpnDetected = data.isProxy || isVpnOrHosting(data.asn, data.org, data.isp);
+      const isOutsideUS = country !== 'US';
+      const isRestrictedState = state ? RESTRICTED_US_STATES.has(state) : true; // Default-deny if state is unidentified inside US
+
+      const reasons = [];
+      if (isOutsideUS) reasons.push(`NON_US_JURISDICTION_${country || 'UNKNOWN'}`);
+      if (isRestrictedState) reasons.push(`RESTRICTED_US_STATE_${state || 'UNKNOWN'}`);
+      if (isVpnDetected) reasons.push('VPN_PROXY_DATACENTER_DETECTED');
+
+      // Risk Score Evaluation (Strict Compliance Thresholds)
+      let riskScore = 0;
+      if (isOutsideUS) riskScore += 100;
+      if (isRestrictedState) riskScore += 100;
+      if (isVpnDetected) riskScore += 80;
+      if (!state) riskScore += 50; // Missing region details inside US is high risk
+
+      // COMPLIANCE RULE: Must be inside allowed US state AND NOT on a VPN/Proxy network
+      const allowed = !isOutsideUS && !isRestrictedState && !isVpnDetected && riskScore < 50;
+
+      const result = {
+        ip,
+        allowed,
+        state,
+        stateName: data.stateName || null,
+        country,
+        countryName: data.countryName || null,
+        city: data.city || null,
+        postal: data.postal || null,
+        coordinates: {
+          latitude: data.latitude,
+          longitude: data.longitude
+        },
+        timezone: data.timezone,
+        network: {
+          asn: data.asn,
+          org: data.org,
+          isp: data.isp
+        },
+        flags: {
+          isVpn: isVpnDetected,
+          isOutsideUS,
+          isRestrictedState
+        },
+        riskScore: Math.min(100, riskScore),
+        reasons,
+        provider: data.providerName,
+        lookedUpAt: Date.now()
+      };
+
+      // Save valid response to cache
+      geoCache.set(ip, { data: result, expiresAt: Date.now() + GEO_CACHE_TTL });
+      return result;
+
+    } catch (e) {
+      lastError = e.message;
+      continue;
+    }
+  }
+
+  // 4. Strict Failure Mode: Fail Closed
+  // If all providers fail, do NOT grant access. Block action to protect legal standing.
+  console.error(`[Compliance Failure] Universal lookup failed for IP ${ip}: ${lastError}`);
+  return {
+    ip,
+    allowed: false,
+    state: null,
+    stateName: null,
+    country: null,
+    countryName: null,
+    city: null,
+    postal: null,
+    coordinates: { latitude: null, longitude: null },
+    timezone: null,
+    network: { asn: null, org: null, isp: null },
+    flags: { isVpn: false, isOutsideUS: true, isRestrictedState: true },
+    riskScore: 100,
+    reasons: ['GEO_LOOKUP_FAILED_FAIL_CLOSED'],
+    error: lastError,
+    lookedUpAt: Date.now()
+  };
+}
 
 // Coin Package Configurations
 const COIN_PACKAGES = {
