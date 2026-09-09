@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'casino_secret_key_123';
+const JWT_SECRET = process.env.JWT_SECRET || 'OpOtPFoV2yOsDX8m8NZZJtB4aWWf65/iY9mNRcIvp0k=';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 /**

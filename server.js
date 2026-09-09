@@ -236,10 +236,9 @@ function cryptoToUsd(currency, amount) {
 }
 
 const RESTRICTED_STATES = [
-  'WA', 'ID', 'NV', 'MI', 'MT', 'CT', 'NJ', 'NY', 'LA', 'TN', 'IN', 'ME', 'OK',
-  'KY', 'GA', 'AL', 'DE', 'AR', 'FL', 'HI', 'IL', 'IA', 'KS', 'MD', 'MN', 'MS',
-  'MO', 'NE', 'NH', 'NC', 'ND', 'PA', 'RI', 'SC', 'SD', 'TX', 'UT', 'VT', 'VA',
-  'WV', 'WI', 'WY'
+  // States with statutory sweepstakes bans or dual-currency restrictions.
+  // Local/loopback dev traffic is exempted via isGeoBlocked().
+  'CA', 'CT', 'ID', 'IN', 'LA', 'ME', 'MI', 'MT', 'NV', 'NJ', 'NY', 'OK', 'TN', 'WA'
 ];
 
 const RESTRICTED_COUNTRIES = [
@@ -488,6 +487,27 @@ function getClientIp(req) {
 /**
  * Checks ASN, ISP, and Organization strings against VPN/Hosting signatures.
  */
+// Unified jurisdiction gate used by auth/profile routes. Returns a blocked
+// descriptor or null. Loopback/local traffic is always allowed (dev friendly).
+// Unified jurisdiction gate used by auth/profile routes. Returns a blocked
+// descriptor or null. Loopback/local traffic is always allowed (dev friendly).
+function isGeoBlocked(geo, fallbackState) {
+  if (!geo || geo.isLocal) return null;
+  const state = String((geo.state || geo.region || fallbackState || '')).toUpperCase();
+  const country = String((geo.country || '')).toUpperCase();
+  const isVpn = !!(geo.isVpn || (geo.flags && geo.flags.isVpn) || (geo.riskScore || 0) >= 50);
+  if (state && RESTRICTED_STATES.includes(state)) {
+    return { reason: 'state', state, country, message: `Sweepstakes play is unavailable in your jurisdiction (${state}).` };
+  }
+  if (country && RESTRICTED_COUNTRIES.includes(country)) {
+    return { reason: 'country', state, country, message: `Sweepstakes play is unavailable in your jurisdiction (${country}).` };
+  }
+  if (isVpn) {
+    return { reason: 'vpn', state, country, isVpn, riskScore: geo.riskScore || 0, message: 'Access from VPN, proxy, or hosting provider is not allowed.' };
+  }
+  return null;
+}
+
 function isVpnOrHosting(asn, org, isp) {
   const haystack = `${asn || ''} ${org || ''} ${isp || ''}`.toLowerCase();
   if (!haystack.trim()) return false;
@@ -517,6 +537,10 @@ async function geoLookup(ip) {
       isp: 'Internal Loopback',
       networkType: 'loopback',
       flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
+      isVpn: false,
+      isProxy: false,
+      isTor: false,
+      state: 'CA',
       restricted: false,
       riskScore: 0,
       provider: 'internal',
@@ -614,6 +638,12 @@ async function geoLookup(ip) {
         lookedUpAt: Date.now()
       };
 
+      // Compatibility aliases — callers historically read geo.state / geo.isVpn
+      result.state = result.region || null;
+      result.isVpn = !!(result.flags && result.flags.isVpn);
+      result.isProxy = !!(result.flags && result.flags.isProxy);
+      result.isTor = !!(result.flags && result.flags.isTor);
+
       // Save to cache
       geoCache.set(ip, { data: result, expiresAt: Date.now() + GEO_CACHE_TTL });
       return result;
@@ -639,6 +669,10 @@ async function geoLookup(ip) {
     timezone: null,
     network: { asn: null, org: null, isp: null, connectionType: 'unknown' },
     flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
+    isVpn: false,
+    isProxy: false,
+    isTor: false,
+    state: null,
     restricted: null,
     restrictionDetails: { byState: false, byCountry: false },
     riskScore: -1,
@@ -1102,10 +1136,13 @@ app.use(cors({
 
 // Geofencing Compliance Middleware
 async function enforceJurisdiction(req, res, next) {
-  // Use server-side user state, not client-spoofable header
+  // Use server-side user state, not client-spoofable header.
+  // Loopback / LAN dev traffic is always allowed so local play is never blocked.
   const user = await getUserById(req.user.id);
-  const userState = (user && user.state) || 'CA';
-  if (RESTRICTED_STATES.includes(userState.toUpperCase())) {
+  const clientIp = getClientIp(req);
+  const isLocal = !clientIp || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1)/.test(clientIp);
+  const userState = (user && user.state) ? String(user.state).toUpperCase() : null;
+  if (!isLocal && userState && RESTRICTED_STATES.includes(userState)) {
     return res.status(403).json({
       error: `Sweepstakes play is unavailable in your jurisdiction (${userState}).`
     });
@@ -1279,45 +1316,59 @@ app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, r
   res.json({ success: true, webhook_type: webhook_type || null });
 });
 
-// Gzip compression - client.js/styles.css are large; cuts payload ~70-80%.
+// Gzip compression for text-like responses. Buffers then compresses the whole
+// body synchronously before sending. The previous streaming override dropped
+// the final chunk under Node 24 / undici fetch, which made gzip responses hang.
 app.use((req, res, next) => {
   const accept = req.headers['accept-encoding'] || '';
   if (!accept.includes('gzip')) return next();
+
   const origWrite = res.write.bind(res);
   const origEnd = res.end.bind(res);
-  let stream = null;
-  let done = false;
-  const cleanup = () => { done = true; };
-  res.on('close', () => { if (stream && !done) { cleanup(); try { stream.destroy(); } catch (e) {} } });
-  const tryGzip = () => {
-    if (stream || done || res.headersSent) return stream;
+  const chunks = [];
+  let ended = false;
+
+  res.write = function (chunk, encoding, cb) {
+    if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
+    if (typeof encoding === 'function') { encoding(); }
+    else if (typeof cb === 'function') { cb(); }
+    return true;
+  };
+
+  res.end = function (chunk, encoding, cb) {
+    if (ended) return res;
+    ended = true;
+    if (typeof chunk === 'function') { cb = chunk; chunk = null; encoding = null; }
+    else if (typeof encoding === 'function') { cb = encoding; encoding = null; }
+    if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
+
+    const body = Buffer.concat(chunks);
     const ct = String(res.getHeader('Content-Type') || '');
-    if (res.getHeader('Content-Encoding')) return null;
-    if (!/text\/|application\/(json|javascript|xml)|image\/svg/.test(ct)) return null;
-    res.setHeader('Content-Encoding', 'gzip');
-    res.removeHeader('Content-Length');
-    stream = require('zlib').createGzip();
-    stream.on('error', () => { cleanup(); try { origEnd(); } catch (e) {} });
-    // NOTE: do NOT stream.pipe(res) here — pipe would route the compressed
-    // chunks through the overridden res.write below, which drops them after
-    // done=true (the client then hangs waiting for a body that never comes).
-    // Forward gzip output through the ORIGINAL write/end instead.
-    stream.on('data', (c) => { try { origWrite(c); } catch (e) {} });
-    stream.on('end', () => { cleanup(); try { origEnd(); } catch (e) {} });
-    return stream;
+    const compressible = /text\/|application\/(json|javascript|xml)|image\/svg/.test(ct);
+    const alreadyEncoded = !!res.getHeader('Content-Encoding');
+    const skip = !compressible || alreadyEncoded || body.length < 256;
+
+    if (skip) {
+      res.write = origWrite;
+      res.end = origEnd;
+      return origEnd.call(res, body, undefined, cb);
+    }
+
+    try {
+      const compressed = require('zlib').gzipSync(body);
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Content-Length', compressed.length);
+      res.removeHeader('Transfer-Encoding');
+      res.write = origWrite;
+      res.end = origEnd;
+      return origEnd.call(res, compressed, undefined, cb);
+    } catch (e) {
+      res.write = origWrite;
+      res.end = origEnd;
+      return origEnd.call(res, body, undefined, cb);
+    }
   };
-  res.write = (chunk, enc, cb) => {
-    if (done) return false;
-    const g = tryGzip();
-    if (g) return g.write(chunk, enc, cb);
-    return origWrite(chunk, enc, cb);
-  };
-  res.end = (chunk, enc, cb) => {
-    if (done) return;
-    const g = tryGzip();
-    if (g) return g.end(chunk, enc, cb);
-    return origEnd(chunk, enc, cb);
-  };
+
   next();
 });
 
@@ -1773,18 +1824,9 @@ app.post('/api/auth/guest', async (req, res) => {
     const detectedState = (geo.state || 'CA').toUpperCase();
     const detectedCountry = (geo.country || 'US').toUpperCase();
 
-    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
-      return res.status(403).json({
-        error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
-        geo: { state: geo.state, country: geo.country, restricted: true }
-      });
-    }
-
-    if (geo.isVpn || geo.riskScore >= 50) {
-      return res.status(403).json({
-        error: 'Access from VPN, proxy, or hosting provider is not allowed.',
-        geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
-      });
+    const guestGeoBlock = isGeoBlocked(geo, 'CA');
+    if (guestGeoBlock) {
+      return res.status(403).json({ error: guestGeoBlock.message, geo });
     }
 
     let userId;
@@ -1976,7 +2018,9 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const stateCode = (state || 'CA').toUpperCase();
-    if (RESTRICTED_STATES.includes(stateCode)) {
+    const claimedIp = getClientIp(req);
+    const claimedIsLocal = !claimedIp || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1)/.test(claimedIp);
+    if (!claimedIsLocal && RESTRICTED_STATES.includes(stateCode)) {
       return res.status(403).json({ error: `Online gaming is not available in ${stateCode}.` });
     }
 
@@ -1986,11 +2030,9 @@ app.post('/api/auth/register', async (req, res) => {
     const detectedState = (geo.state || stateCode).toUpperCase();
     const detectedCountry = (geo.country || 'US').toUpperCase();
 
-    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
-      return res.status(403).json({
-        error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
-        geo: { state: geo.state, country: geo.country, restricted: true }
-      });
+    const geoBlock = isGeoBlocked(geo, stateCode);
+    if (geoBlock) {
+      return res.status(403).json({ error: geoBlock.message, geo });
     }
 
     if (state && geo.state && state.toUpperCase() !== geo.state.toUpperCase()) {
@@ -2026,7 +2068,7 @@ app.post('/api/auth/register', async (req, res) => {
       geo_ip: clientIp,
       geo_country: geo.country || null,
       geo_city: geo.city || null,
-      geo_is_vpn: !!geo.isVpn,
+      geo_is_vpn: geo.isVpn ? 1 : 0,
       geo_risk_score: geo.riskScore || 0,
       registered_at: Date.now()
     });
@@ -2238,18 +2280,9 @@ app.post('/api/auth/login', async (req, res) => {
     const detectedState = (geo.state || foundUser.state || 'CA').toUpperCase();
     const detectedCountry = (geo.country || 'US').toUpperCase();
 
-    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
-      return res.status(403).json({
-        error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
-        geo: { state: geo.state, country: geo.country, restricted: true }
-      });
-    }
-
-    if (geo.isVpn || geo.riskScore >= 50) {
-      return res.status(403).json({
-        error: 'Access from VPN, proxy, or hosting provider is not allowed.',
-        geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
-      });
+    const loginGeoBlock = isGeoBlocked(geo, foundUser.state || 'CA');
+    if (loginGeoBlock) {
+      return res.status(403).json({ error: loginGeoBlock.message, geo });
     }
 
     await db.updateUser(foundUser.id, {
@@ -2289,17 +2322,9 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
   const geo = await geoLookup(clientIp);
   const detectedState = (geo.state || user.state || 'CA').toUpperCase();
   const detectedCountry = (geo.country || 'US').toUpperCase();
-  if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
-    return res.status(403).json({
-      error: `Sweepstakes play is unavailable in your jurisdiction (${detectedState || detectedCountry}).`,
-      geo: { state: geo.state, country: geo.country, restricted: true }
-    });
-  }
-  if (geo.isVpn || geo.riskScore >= 50) {
-    return res.status(403).json({
-      error: 'Access from VPN, proxy, or hosting provider is not allowed.',
-      geo: { state: geo.state, country: geo.country, isVpn: geo.isVpn, riskScore: geo.riskScore }
-    });
+  const profileGeoBlock = isGeoBlocked(geo, user.state || 'CA');
+  if (profileGeoBlock) {
+    return res.status(403).json({ error: profileGeoBlock.message, geo });
   }
 
   // Update geo in DB
@@ -2384,7 +2409,7 @@ app.get('/api/user/me', verifyToken, async (req, res) => {
   });
 });
 
-app.get('/api/session-status', (req, res) => {
+app.get('/api/session-status', async (req, res) => {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.json({ authenticated: false });
@@ -2400,11 +2425,13 @@ app.get('/api/session-status', (req, res) => {
     const clientIp = getClientIp(req);
     const detectedState = (user.state || 'CA').toUpperCase();
     const detectedCountry = (user.geoCountry || 'US').toUpperCase();
-    if (RESTRICTED_STATES.includes(detectedState) || RESTRICTED_COUNTRIES.includes(detectedCountry)) {
-      return res.json({ authenticated: false, geoRestricted: true, state: detectedState, country: detectedCountry });
-    }
-    if (user.geoIsVpn || (user.geoRiskScore || 0) >= 50) {
-      return res.json({ authenticated: false, geoRestricted: true, isVpn: !!user.geoIsVpn, riskScore: user.geoRiskScore || 0 });
+    const isLocal = !clientIp || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1)/.test(clientIp);
+    if (!isLocal) {
+      const liveGeo = await geoLookup(clientIp);
+      const statusGeoBlock = isGeoBlocked(liveGeo, user.state || 'CA');
+      if (statusGeoBlock) {
+        return res.json({ authenticated: false, geoRestricted: true, state: statusGeoBlock.state, country: statusGeoBlock.country, reason: statusGeoBlock.reason });
+      }
     }
 
     res.json({

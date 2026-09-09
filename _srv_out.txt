@@ -1,4 +1,0 @@
-◇ injected env (0) from .env // tip: ⌘ suppress logs { quiet: true }
-[Persistence]: Loaded 1 users from database.
-[Init]: Database initialized, 1 users loaded.
-ðŸŽ° SWEEPSTAKES CASINO ENGINE ONLINE: Port 3017
