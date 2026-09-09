@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SWEEPSTAKES CASINO FRONTEND CONTROLLER (UPGRADED & FULLY UNIFIED)
  * Integrated State Management, Interactive Games, Provably Fair Suite, Audio SFX, Live Feed & Embedded Mode Protection
  */
@@ -298,7 +298,7 @@ async function detectGeoLocation() {
   }
 }
 
-async function initSession(autoGuest = true) {
+async function initSession(autoGuest = false) {
   const ageConfirmed = localStorage.getItem('casino_age_confirmed') === 'true';
   if (!ageConfirmed) {
     document.getElementById('modal-agegate')?.classList.remove('hidden');
@@ -334,19 +334,12 @@ async function initSession(autoGuest = true) {
   let token = localStorage.getItem('casino_token');
 
   if (!token) {
-    if (autoGuest) {
-      // continueAsGuest() handles its own token creation, profile setup,
-      // wallet update, listener wiring, AND calls reapplyCurrentRoute() so
-      // any deep-linked page (e.g. /account/wallet) re-renders with the
-      // populated session data.
-      await continueAsGuest();
-      return;
-    } else {
-      openAuthModal();
-      return;
-    }
+    // No session: show the public landing page instead of creating a guest.
+    setupGlobalEventListeners();
+    updateAuthUI();
+    showLanding();
+    return;
   }
-
   try {
     const data = await apiRequest('/api/user/me');
     if (data.balances) state.balances = mergeBalances(data.balances);
@@ -359,17 +352,14 @@ async function initSession(autoGuest = true) {
       return;
     }
     if (err && (err.status === 401 || err.status === 403 || err.status === 404)) {
-      if (autoGuest) {
-        console.warn('[Auth failure]: Token rejected (HTTP ' + err.status + '), falling back to guest.', err.message);
-        localStorage.removeItem('casino_token');
-        localStorage.removeItem('casino_username');
-        await continueAsGuest();
-      } else {
-        console.warn('[Auth failure]: Token rejected (HTTP ' + err.status + '), clearing.', err.message);
-        localStorage.removeItem('casino_token');
-        localStorage.removeItem('casino_username');
-        openAuthModal();
-      }
+      // Invalid/expired token: force a clean sign-in instead of a guest session.
+      console.warn('[Auth failure]: Token rejected (HTTP ' + err.status + '), please sign in again.', err.message);
+      localStorage.removeItem('casino_token');
+      localStorage.removeItem('casino_username');
+      state.profile = null;
+      updateAuthUI();
+      showLanding();
+      openAuthModal();
       return;
     }
     console.warn('[Auth]: Transient /api/user/me error, keeping session token:', (err && err.message) || err);
@@ -385,6 +375,7 @@ async function initSession(autoGuest = true) {
   injectMobileAndNavigationDOM();
   applyEmbeddedModeRestrictions();
   updateUserProfileBadge();
+  updateAuthUI();
 
   // Deep-link support: re-render the initial route once the session is loaded.
   reapplyCurrentRoute();
@@ -555,7 +546,7 @@ function renderBetFeed() {
       `<div class="bet-row ${isMyBet ? 'my-bet' : ''}">` +
       `<div class="bet-user-game">` +
       `<span class="bet-user">${escapeHTML(data.username || 'Anonymous')}</span>` +
-      `<span class="bet-game">${escapeHTML(data.game || '—')}</span>` +
+      `<span class="bet-game">${escapeHTML(data.game || 'â€”')}</span>` +
       `</div>` +
       `<span class="bet-mult ${data.win ? 'win' : 'loss'}">` +
       `${data.win ? 'WIN' : 'LOSS'} ${(Number(data.multiplier) || 0).toFixed(2)}x (${formatCoins(data.payout || 0)} ${escapeHTML(data.currency || 'GC')})` +
@@ -591,7 +582,7 @@ function renderGameResultFeed() {
       const mult = item.multiplier ? item.multiplier.toFixed(2) + 'x' : '';
       const payout = item.payout ? formatCoins(item.payout) : '';
       html += '<div class="result-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05);font-size:0.82rem;min-width:0;">' +
-        '<span style="color:' + color + ';font-weight:700;min-width:60px;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase;font-size:0.72rem;">' + escapeHTML(item.game || '—') + '</span>' +
+        '<span style="color:' + color + ';font-weight:700;min-width:60px;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase;font-size:0.72rem;">' + escapeHTML(item.game || 'â€”') + '</span>' +
         '<span style="color:' + color + ';font-family:monospace;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + mult + '</span>' +
         '<span style="color:#b1bad2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (payout ? '+' + payout + ' ' + escapeHTML(item.currency || 'GC') : '') + '</span>' +
         '</div>';
@@ -1204,7 +1195,7 @@ async function initiateCryptoPayment(currency) {
     details.innerHTML =
       '<div class="crypto-payment-loading" style="text-align:center;padding:34px;">' +
       '<div class="checkout-spinner"></div>' +
-      '<p class="checkout-loading-text">Loading your deposit address…</p>' +
+      '<p class="checkout-loading-text">Loading your deposit addressâ€¦</p>' +
       '<p class="checkout-loading-sub">Generating your secure wallet address</p>' +
       '</div>';
   }
@@ -1221,7 +1212,7 @@ async function initiateCryptoPayment(currency) {
     }
   } catch (err) {
     if (details) details.innerHTML =
-      '<div style="text-align:center;padding:24px;color:var(--accent-red);">⚠ ' + escapeHTML(err.message || err) + '</div>';
+      '<div style="text-align:center;padding:24px;color:var(--accent-red);">âš  ' + escapeHTML(err.message || err) + '</div>';
   }
 }
 
@@ -1242,7 +1233,7 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
       '<div class="crypto-qr-block">' +
       '  <div class="crypto-qr-wrap">' +
       '  <img class="crypto-qr-img" src="' + qrUrl(uri) + '" alt="Scan to pay ' + cryptoType + '" onerror="this.onerror=null;this.classList.add(\'hidden\')" />' +
-      '    <div class="crypto-qr-fallback">📱</div>' +
+      '    <div class="crypto-qr-fallback">ðŸ“±</div>' +
       '  </div>' +
       '  <p class="crypto-qr-caption">Scan the QR code with your wallet to pay, or send manually to the address below.</p>' +
       '</div>' +
@@ -1267,7 +1258,7 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
       '<!-- Txid submission -->' +
       '<div class="crypto-confirm-form">' +
       '  <label for="crypto-txid">Transaction ID (txid)</label>' +
-      '  <input id="crypto-txid" type="text" placeholder="Paste your transaction hash…" maxlength="128" class="crypto-txid-input" />' +
+      '  <input id="crypto-txid" type="text" placeholder="Paste your transaction hashâ€¦" maxlength="128" class="crypto-txid-input" />' +
       '  <label for="crypto-amount-sent" style="margin-top:12px;">Amount you actually sent (optional)</label>' +
       '  <input id="crypto-amount-sent" type="text" placeholder="e.g. 0.00001 BTC" class="crypto-txid-input" />' +
        '  <div class="crypto-confirm-actions">' +
@@ -1277,12 +1268,12 @@ function showCryptoPaymentConfirmation(res, cryptoType) {
          (cryptoType === 'SOL' ?
            '  <div class="crypto-phantom-inline">' +
            '    <button class="btn-phantom-pay" onclick="payWithPhantom()">' +
-           '      <span class="phantom-icon">👻</span> <span>Pay with Phantom (Solana)</span>' +
+           '      <span class="phantom-icon">ðŸ‘»</span> <span>Pay with Phantom (Solana)</span>' +
            '    </button>' +
-           '    <p class="phantom-hint">Phantom detected? Sign & send directly — your coins credit instantly after on-chain verification.</p>' +
+           '    <p class="phantom-hint">Phantom detected? Sign & send directly â€” your coins credit instantly after on-chain verification.</p>' +
            '  </div>' : '') +
          '  <div class="crypto-status-row" id="crypto-status-row">' +
-         '    <span class="crypto-status-text">Waiting for on-chain confirmation…</span>' +
+         '    <span class="crypto-status-text">Waiting for on-chain confirmationâ€¦</span>' +
          '  </div>' +
          '</div>' +
          '</div>';
@@ -1311,7 +1302,7 @@ async function startCryptoPolling(cryptoType) {
          showCryptoDepositSuccess(credited, receivedUsd, true);
        } else if (statusRow) {
          const elapsed = Math.floor((Date.now() - (state.cryptoInitTime || Date.now())) / 1000);
-         statusRow.innerHTML = '<span class="crypto-status-text">Pending on-chain confirmation… (' + elapsed + 's elapsed)</span>';
+         statusRow.innerHTML = '<span class="crypto-status-text">Pending on-chain confirmationâ€¦ (' + elapsed + 's elapsed)</span>';
        }
      } catch (err) {
        console.warn('[Crypto Poll]:', err.message || err);
@@ -1339,7 +1330,7 @@ async function confirmCryptoPayment() {
   }
 
   const btn = document.getElementById('btn-confirm-crypto');
-  if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Verifyingâ€¦'; }
 
   try {
     const res = await apiRequest('/api/user/crypto-payment/confirm', 'POST', {
@@ -1373,7 +1364,7 @@ function showCryptoDepositSuccess(credited, receivedUsd, verified) {
   details.innerHTML =
     '<div class="crypto-success-state">' +
     '<div class="crypto-success-check">' +
-    '<div class="crypto-success-checkmark">✓</div>' +
+    '<div class="crypto-success-checkmark">âœ“</div>' +
     '<div class="crypto-confetti" id="crypto-confetti"></div>' +
     '</div>' +
     '<h4 class="crypto-success-title">Deposit Confirmed!</h4>' +
@@ -1461,7 +1452,7 @@ function copyCryptoAmount() {
 
 /**
  * Phantom (Solana) wallet payment flow:
- *  1. Detect window.solana (Phantom) — if missing, prompt install.
+ *  1. Detect window.solana (Phantom) â€” if missing, prompt install.
  *  2. Ask Phantom to connect (publicKey).
  *  3. POST /api/user/crypto-payment/initiate with paymentMethod:'phantom' to lock the
  *     expected amount + get the merchant SOL address.
@@ -1679,7 +1670,7 @@ async function handlePaymentSuccessRedirect() {
   const modal = document.getElementById('modal-store');
   if (modal) modal.classList.remove('hidden');
   setCheckoutStep(4);
-  showCheckoutSuccess('—', '—');
+  showCheckoutSuccess('â€”', 'â€”');
 }
 
 async function loadStripeSdk() {
@@ -1717,7 +1708,7 @@ function showCheckoutBackButton() {
   const btn = document.createElement('button');
   btn.className = 'btn btn-sm btn-ghost checkout-back-btn';
   btn.style.cssText = 'position:absolute; top:16px; left:16px; z-index:10;';
-  btn.innerHTML = '← Back to Packages';
+  btn.innerHTML = 'â† Back to Packages';
   btn.onclick = showPackageList;
   const container = document.getElementById('stripe-checkout-container');
   if (container) container.appendChild(btn);
@@ -1832,6 +1823,84 @@ async function submitRedeem() {
 // 9. LOBBY & NAVIGATION ROUTING
 // ==========================================================================
 
+function escapeHTMLSafe(str) {
+  return String(str == null ? '' : str).replace(/[&<>'"]/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
+}
+
+let leaderboardTimer = null;
+async function loadLeaderboard() {
+  const listEl = document.getElementById('leaderboard-list');
+  if (!listEl) return;
+  try {
+    const data = await apiRequest('/api/leaderboard', 'GET');
+    const rows = data.leaderboard || [];
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="lb-empty">No wagers yet — be the first on the board!</div>';
+      return;
+    }
+    const medals = ['🥇', '🥈', '🥉'];
+    listEl.innerHTML = rows.map((r, i) =>
+      '<div class="lb-row' + (i < 3 ? ' lb-top' : '') + '">' +
+        '<span class="lb-rank">' + (medals[i] || ('#' + (i + 1))) + '</span>' +
+        '<span class="lb-name">' + escapeHTMLSafe(r.username) + '</span>' +
+        '<span class="lb-vip">' + escapeHTMLSafe(r.vipTier) + '</span>' +
+        '<span class="lb-rounds">' + (r.rounds || 0) + ' rounds</span>' +
+        '<span class="lb-vol">' + Number(r.gcWagered || 0).toLocaleString() + ' GC' +
+          (r.scWagered ? ' · ' + Number(r.scWagered).toFixed(2) + ' SC' : '') + '</span>' +
+      '</div>'
+    ).join('');
+  } catch (err) {
+    console.warn('[Leaderboard]:', err.message);
+  }
+}
+
+function isAuthenticated() {
+  return !!(state.profile && localStorage.getItem('casino_token'));
+}
+
+function updateAuthUI() {
+  const signedIn = isAuthenticated();
+  const authActions = document.getElementById('nav-auth-actions');
+  const walletArea = document.getElementById('nav-wallet-area');
+  const walletBtn = document.getElementById('btn-wallet-connect');
+  const userBadge = document.getElementById('user-badge-wrapper');
+  if (authActions) authActions.style.display = signedIn ? 'none' : 'flex';
+  if (walletArea) walletArea.style.visibility = signedIn ? 'visible' : 'hidden';
+  if (walletBtn) walletBtn.style.display = signedIn ? '' : 'none';
+  if (userBadge) userBadge.style.display = signedIn ? '' : 'none';
+  document.body.classList.toggle('signed-out', !signedIn);
+}
+
+function showLanding() {
+  hideAllViews();
+  document.getElementById('view-landing')?.classList.remove('hidden');
+  document.querySelector('.main-layout')?.classList.remove('is-game');
+  state.currentGame = null;
+  state.activeGameState = null;
+  updateAuthUI();
+  initLandingParticles();
+  window.scrollTo(0, 0);
+}
+
+function initLandingParticles() {
+  const container = document.getElementById('lp-particles');
+  if (!container || container.childElementCount) return;
+  const colors = ['#00ff41', '#ffd700', '#00b4ff', '#a855f7', '#ff8c00'];
+  for (let i = 0; i < 18; i++) {
+    const particle = document.createElement('div');
+    particle.className = 'hero-particle';
+    particle.style.left = Math.random() * 100 + '%';
+    particle.style.top = Math.random() * 100 + '%';
+    particle.style.background = colors[Math.floor(Math.random() * colors.length)];
+    particle.style.animationDelay = Math.random() * 6 + 's';
+    particle.style.animationDuration = (4 + Math.random() * 4) + 's';
+    particle.style.width = (2 + Math.random() * 4) + 'px';
+    particle.style.height = particle.style.width;
+    container.appendChild(particle);
+  }
+}
+
 function showLobby() {
   playSound('click');
   if (!document.getElementById('view-lobby')) {
@@ -1840,6 +1909,7 @@ function showLobby() {
   }
   history.pushState(null, '', '/');
   setActiveSidebarLink('/');
+  document.getElementById('view-landing')?.classList.add('hidden');
   document.getElementById('view-lobby')?.classList.remove('hidden');
   document.getElementById('view-game')?.classList.add('hidden');
   document.getElementById('view-account')?.classList.add('hidden');
@@ -1867,6 +1937,7 @@ function showLobby() {
   if (fab) fab.classList.add('hidden');
   const lobbyBetsBtn = document.getElementById('lobby-bets-btn');
   if (lobbyBetsBtn) lobbyBetsBtn.classList.remove('hidden');
+  loadLeaderboard();
 }
 
 function openGlobalFeedFromLobby() {
@@ -1992,6 +2063,7 @@ function searchLobbyGames(query) {
 }
 
 async function launchGame(gameId) {
+  if (!isAuthenticated()) { showLanding(); openAuthModal(); return; }
   playSound('click');
   if (!document.getElementById('view-game')) {
     window.location.href = '/' + gameId;
@@ -2068,7 +2140,7 @@ async function launchGame(gameId) {
           </div>
         </div>
         <div class="control-group" style="grid-column: 1 / -1;">
-          <div id="dice-payout-preview" style="font-size:0.75rem; color:#b1bad2; font-weight:600; padding:6px 8px; background:#14222d; border-radius:4px;">Win Chance: 50.00%  •  Payout: 1.9800x</div>
+          <div id="dice-payout-preview" style="font-size:0.75rem; color:#b1bad2; font-weight:600; padding:6px 8px; background:#14222d; border-radius:4px;">Win Chance: 50.00%  â€¢  Payout: 1.9800x</div>
         </div>`;
        setTimeout(updateDiceOdds, 50);
        break;
@@ -2126,9 +2198,9 @@ async function launchGame(gameId) {
         <div class="control-group" style="grid-column: 1 / -1;">
           <label class="control-label">Main Bet</label>
           <select id="baccarat-bet" class="control-select">
-            <option value="PLAYER" selected>Player — pays 2x</option>
-            <option value="BANKER">Banker — pays 1.95x</option>
-            <option value="TIE">Tie — pays 9x</option>
+            <option value="PLAYER" selected>Player â€” pays 2x</option>
+            <option value="BANKER">Banker â€” pays 1.95x</option>
+            <option value="TIE">Tie â€” pays 9x</option>
           </select>
         </div>
         <div style="display:flex;gap:6px;grid-column:1/-1;flex-wrap:wrap;">
@@ -2143,7 +2215,7 @@ async function launchGame(gameId) {
     case 'hilo':
       options.innerHTML = `
         <div class="control-group" style="grid-column: 1 / -1; color:#b1bad2; font-size:0.85rem; font-weight:600;">
-          Guess HIGHER or LOWER than your base card. Correct guesses compound your multiplier — cash out anytime. Ties lose.
+          Guess HIGHER or LOWER than your base card. Correct guesses compound your multiplier â€” cash out anytime. Ties lose.
         </div>`;
       break;
 
@@ -2194,10 +2266,10 @@ async function launchGame(gameId) {
         </div>
         <div class="control-group" style="grid-column: 1 / -1;">
           <button class="btn-buy-bonus" onclick="buySlotsBonus()">BUY BONUS (100x bet)</button>
-          <div style="font-size:0.7rem;color:#b1bad2;margin-top:4px;text-align:center;">Free spins: 3+ ⭐ symbols trigger 10 free spins</div>
+          <div style="font-size:0.7rem;color:#b1bad2;margin-top:4px;text-align:center;">Free spins: 3+ â­ symbols trigger 10 free spins</div>
         </div>
         <div class="control-group" style="grid-column: 1 / -1;">
-          <div style="text-align:center;font-size:0.7rem;color:#b1bad2;font-weight:600;">Progressive Jackpots: Mini • Minor • Major • Grand</div>
+          <div style="text-align:center;font-size:0.7rem;color:#b1bad2;font-weight:600;">Progressive Jackpots: Mini â€¢ Minor â€¢ Major â€¢ Grand</div>
         </div>`;
       break;
   }
@@ -2320,11 +2392,11 @@ async function revealMineTile(tileIndex) {
         window.GameRenderers.renderMinesLoss(data);
       } else {
         const tile = document.getElementById(`mine-tile-${tileIndex}`);
-        if (tile) { tile.style.background = '#ff4d4d'; tile.textContent = '💣'; }
+        if (tile) { tile.style.background = '#ff4d4d'; tile.textContent = 'ðŸ’£'; }
         (data.board || []).forEach((v, i) => {
           if (v === 'BOMB') {
             const b = document.getElementById(`mine-tile-${i}`);
-            if (b && i !== tileIndex) { b.textContent = '💣'; b.style.opacity = '0.55'; }
+            if (b && i !== tileIndex) { b.textContent = 'ðŸ’£'; b.style.opacity = '0.55'; }
           }
         });
       }
@@ -2340,7 +2412,7 @@ async function revealMineTile(tileIndex) {
         window.GameRenderers.renderMinesBoard();
       } else {
         const tile = document.getElementById(`mine-tile-${tileIndex}`);
-        if (tile) { tile.style.background = '#00e701'; tile.style.color = '#000'; tile.textContent = '💎'; }
+        if (tile) { tile.style.background = '#00e701'; tile.style.color = '#000'; tile.textContent = 'ðŸ’Ž'; }
       }
 
       if (data.cashedOut || data.autoCashout || state.crashCashOutEarly) {
@@ -2348,7 +2420,7 @@ async function revealMineTile(tileIndex) {
         if (window.GameRenderers && window.GameRenderers.renderMinesWin) {
           window.GameRenderers.renderMinesWin(data);
         } else {
-           alert(`Board cleared! Auto-cashout ${data.multiplier.toFixed(2)}x — +${formatCoins(data.payout)} ${state.currency}`);
+           alert(`Board cleared! Auto-cashout ${data.multiplier.toFixed(2)}x â€” +${formatCoins(data.payout)} ${state.currency}`);
         }
         setTimeout(() => { state.activeGameState = null; launchGame('mines'); }, 3000);
       } else {
@@ -2449,7 +2521,7 @@ function renderTowerBoard() {
     html += `<div style="display:flex; gap:8px; opacity:${isCurrent || isPassed ? '1' : '0.4'};">`;
     for (let tile = 0; tile < tiles; tile++) {
       html += `<button class="game-btn-action" style="flex:1; padding:12px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-color); border-radius:4px; cursor:pointer;" ${isCurrent ? `onclick="pickTowerTile(${floor}, ${tile})"` : 'disabled'}>
-        ${isPassed ? '✓' : '?'}
+        ${isPassed ? 'âœ“' : '?'}
       </button>`;
     }
     html += '</div>';
@@ -2480,7 +2552,7 @@ async function pickTowerTile(floor, tile) {
         const display = document.getElementById('game-display-area');
         if (display) {
           display.innerHTML = '<div style="text-align:center;padding:24px;">' +
-            '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">✅ TOWER COMPLETED</div>' +
+            '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">âœ… TOWER COMPLETED</div>' +
             '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Final Multiplier: ' + data.multiplier.toFixed(2) + 'x</div>' +
              '<div style="color:#00e701;font-weight:700;margin-top:4px;">Payout: ' + formatCoins(Number(data.payout)) + ' ' + state.currency + '</div>' +
             '</div>';
@@ -2501,7 +2573,7 @@ async function pickTowerTile(floor, tile) {
       const display = document.getElementById('game-display-area');
       if (display) {
         display.innerHTML = '<div style="text-align:center;padding:24px;">' +
-          '<div style="font-size:2.5rem;font-weight:900;color:#ff4d4d;">💥 TRAP HIT</div>' +
+          '<div style="font-size:2.5rem;font-weight:900;color:#ff4d4d;">ðŸ’¥ TRAP HIT</div>' +
           '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Tower collapsed at floor ' + state.activeGameState.currentFloor + '</div>' +
           '<div style="color:#ff4d4d;font-weight:700;margin-top:4px;">Lost ' + formatCoins(state.activeGameState.betAmount) + ' ' + state.currency + '</div>' +
           '</div>';
@@ -2530,7 +2602,7 @@ async function cashoutTower() {
     const display = document.getElementById('game-display-area');
     if (display) {
       display.innerHTML = '<div style="text-align:center;padding:24px;">' +
-        '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">✅ CASHED OUT</div>' +
+        '<div style="font-size:2.5rem;font-weight:900;color:#00e701;">âœ… CASHED OUT</div>' +
         '<div style="color:#b1bad2;font-size:0.9rem;margin-top:8px;">Multiplier: ' + data.multiplier.toFixed(2) + 'x</div>' +
         '            <div style="color:#00e701;font-weight:700;margin-top:4px;">+' + formatCoins(Number(data.payout)) + ' ' + state.currency + '</div>' +
         '</div>';
@@ -2606,7 +2678,7 @@ async function executeLimboBet(betAmount) {
               ${current.toFixed(2)}x
             </div>
             <div style="color:#b1bad2; font-weight:600;">Target: ${targetMultiplier.toFixed(2)}x</div>
-            ${progress === 1 && data.win ? `<div style="margin-top:10px; color:#00e701; font-weight:800;">WIN — paid ${formatCoins(data.payout)} ${state.currency}</div>` : ''}
+            ${progress === 1 && data.win ? `<div style="margin-top:10px; color:#00e701; font-weight:800;">WIN â€” paid ${formatCoins(data.payout)} ${state.currency}</div>` : ''}
           </div>`;
 
         if (progress < 1) {
@@ -2639,7 +2711,7 @@ function updateDiceOdds() {
   const multiplier = winChance > 0 ? (99 / winChance) : 0;
   const out = document.getElementById('dice-payout-preview');
   if (out) {
-    out.innerHTML = `<span style="color:#00e701;font-weight:700">${winChance.toFixed(1)}% win chance</span>  •  <span style="color:#b1bad2">Payout: ${multiplier > 0 ? multiplier.toFixed(4) + 'x' : '—'}</span>`;
+    out.innerHTML = `<span style="color:#00e701;font-weight:700">${winChance.toFixed(1)}% win chance</span>  â€¢  <span style="color:#b1bad2">Payout: ${multiplier > 0 ? multiplier.toFixed(4) + 'x' : 'â€”'}</span>`;
   }
   return multiplier;
 }
@@ -2714,7 +2786,7 @@ function renderDiceResult(details, win) {
         <div style="position:absolute; top:-5px; bottom:-5px; left:calc(${Math.min(99.2, Math.max(0, roll))}% - 2px); width:4px; background:#fff; border-radius:2px;"></div>
         <div style="position:absolute; top:110%; left:${zoneLeft}%; transform:translateX(-50%); font-size:0.7rem; color:#b1bad2;">${target.toFixed(2)}</div>
       </div>
-      <p style="font-weight:700; color:${win ? winColor : loseColor};">${win ? 'WIN' : 'LOSS'}${win ? ' • ' + details.winChance.toFixed(2) + '% chance' : ''}</p>
+      <p style="font-weight:700; color:${win ? winColor : loseColor};">${win ? 'WIN' : 'LOSS'}${win ? ' â€¢ ' + details.winChance.toFixed(2) + '% chance' : ''}</p>
     </div>`;
 
   const autoChk = document.getElementById('auto-bet-toggle');
@@ -2854,7 +2926,7 @@ async function executeStandardBet(betAmount) {
   const actionBtn = document.getElementById('btn-primary-action');
   actionBtn.disabled = true;
 
-  // Optimistic balance debit — show the bet immediately so the user sees the
+  // Optimistic balance debit â€” show the bet immediately so the user sees the
   // cost the moment they hit PLACE BET. The server response will overwrite
   // this with authoritative numbers once the round resolves.
   applyOptimisticDebit(betAmount);
@@ -2882,7 +2954,7 @@ async function executeStandardBet(betAmount) {
   }
 
   try {
-    // Server is the single source of truth — failures surface as alerts,
+    // Server is the single source of truth â€” failures surface as alerts,
     // never as simulated Math.random() results.
     const data = await apiRequest('/api/play/' + state.currentGame, 'POST', {
       currency: state.currency,
@@ -2980,7 +3052,7 @@ function renderKenoResult(details, multiplier, payout) {
 
 
 /* --- SHARED GAME RENDER HELPERS --- */
-const SLOT_SPIN_SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣', '⭐', '🎰'];
+const SLOT_SPIN_SYMBOLS = ['ðŸ’', 'ðŸ‹', 'ðŸ‡', 'ðŸ””', 'ðŸ’Ž', '7ï¸âƒ£', 'â­', 'ðŸŽ°'];
 const PLINKO_CLIENT_TABLES = {
   8:  [13, 3, 1.3, 0.7, 0.4, 0.7, 1.3, 3, 13],
   10: [22, 5, 2, 1.4, 0.6, 0.4, 0.6, 1.4, 2, 5, 22],
@@ -2992,12 +3064,12 @@ const WHEEL_COLORS = {
   GRAY: '#39424d', BLUE: '#1876d2', GREEN: '#00e701',
   PURPLE: '#8248ff', ORANGE: '#ff8b20', GOLD: '#ffc700'
 };
-const SLOT_LINE_NAMES = ['Top Row', 'Middle Row', 'Bottom Row', 'Diagonal ↘', 'Diagonal ↙'];
+const SLOT_LINE_NAMES = ['Top Row', 'Middle Row', 'Bottom Row', 'Diagonal â†˜', 'Diagonal â†™'];
 
 function cardHTML(card, hidden, big) {
-  if (hidden || !card) return '<div class="playing-card face-down"><span>🂠</span></div>';
-  const red = card.suit === '♥' || card.suit === '♦';
-  const suit = card.suit || '♠';
+  if (hidden || !card) return '<div class="playing-card face-down"><span>ðŸ‚ </span></div>';
+  const red = card.suit === 'â™¥' || card.suit === 'â™¦';
+  const suit = card.suit || 'â™ ';
   return `
     <div class="playing-card ${red ? 'red' : ''} ${big ? 'big' : ''}">
       <span class="pc-rank">${card.label || card.value}</span>
@@ -3061,7 +3133,7 @@ function renderSlotsResult(details, multiplier, payout) {
     let html = slotsGridHTML(grid, hot, true);
 
     if (jackpot && jackpot.tier === 'grand') {
-      html += '<div style="text-align:center;margin-top:14px;"><div style="font-size:1.6rem;font-weight:900;color:#ff1744;">🎰 GRAND JACKPOT! 🎰</div>' +
+      html += '<div style="text-align:center;margin-top:14px;"><div style="font-size:1.6rem;font-weight:900;color:#ff1744;">ðŸŽ° GRAND JACKPOT! ðŸŽ°</div>' +
         '<div style="color:#ff4d4d;font-weight:700;">' + formatCoins(jackpot.amount) + ' ' + state.currency + '</div></div>';
     } else if (jackpot) {
       html += '<div style="text-align:center;margin-top:12px;"><div style="font-weight:800;color:#ff4d4d;">' +
@@ -3069,12 +3141,12 @@ function renderSlotsResult(details, multiplier, payout) {
     }
 
     if (winLines.length) {
-      html += '<div style="text-align:center;margin-top:12px;font-weight:800;color:#00e701;font-size:1.1rem;">💰 WIN ' + multiplier.toFixed(2) + 'x</div>';
+      html += '<div style="text-align:center;margin-top:12px;font-weight:800;color:#00e701;font-size:1.1rem;">ðŸ’° WIN ' + multiplier.toFixed(2) + 'x</div>';
       html += '<div style="text-align:center;color:#b1bad2;font-size:0.82rem;margin-top:4px;">' +
-        winLines.map(w => SLOT_LINE_NAMES[w.line] + ' pays ' + w.multiplier.toFixed(2) + 'x').join(' • ') + '</div>';
+        winLines.map(w => SLOT_LINE_NAMES[w.line] + ' pays ' + w.multiplier.toFixed(2) + 'x').join(' â€¢ ') + '</div>';
       playSound('win');
     } else {
-      html += '<div style="text-align:center;margin-top:14px;color:#ff4d4d;font-weight:700;">No winning lines 💀</div>';
+      html += '<div style="text-align:center;margin-top:14px;color:#ff4d4d;font-weight:700;">No winning lines ðŸ’€</div>';
       playSound('loss');
     }
     display.innerHTML = html;
@@ -3096,7 +3168,7 @@ function renderPlinkoResult(details, multiplier, payout) {
     display.innerHTML =
       '<div style="text-align:center;padding:20px;">' +
       '<div style="font-size:1rem;color:#b1bad2;font-weight:700;">Row ' + Math.min(step + 1, rows) + ' / ' + rows + '</div>' +
-      '<div style="font-size:2.2rem;margin-top:6px;">' + '.\u2009'.repeat(pos) + '⚪' + '.\u2009'.repeat(rows - pos) + '</div>' +
+      '<div style="font-size:2.2rem;margin-top:6px;">' + '.\u2009'.repeat(pos) + 'âšª' + '.\u2009'.repeat(rows - pos) + '</div>' +
       '</div>';
   }
   drawMid();
@@ -3186,15 +3258,15 @@ function renderBaccaratResult(details, payout) {
 
   display.innerHTML =
     '<div style="max-width:480px;margin:auto;">' +
-    '<div class="bj-row-label" style="color:' + colorMap.BANKER + '">BANKER • ' + details.bScore + '</div>' +
+    '<div class="bj-row-label" style="color:' + colorMap.BANKER + '">BANKER â€¢ ' + details.bScore + '</div>' +
     '<div class="hand-row">' + details.bankerHand.map(c => cardHTML(c, false)).join('') + '</div>' +
     '<div style="margin:12px 0;height:1px;background:#243542;"></div>' +
-    '<div class="bj-row-label" style="color:' + colorMap.PLAYER + '">PLAYER • ' + details.pScore + '</div>' +
+    '<div class="bj-row-label" style="color:' + colorMap.PLAYER + '">PLAYER â€¢ ' + details.pScore + '</div>' +
     '<div class="hand-row">' + details.playerHand.map(c => cardHTML(c, false)).join('') + '</div>' +
-    '<div style="text-align:center;margin-top:18px;font-size:1.3rem;font-weight:900;color:' + colorMap[outcome] + ';">' + outcome + (outcome === betOn ? ' — YOU WIN' : '') + '</div>' +
+    '<div style="text-align:center;margin-top:18px;font-size:1.3rem;font-weight:900;color:' + colorMap[outcome] + ';">' + outcome + (outcome === betOn ? ' â€” YOU WIN' : '') + '</div>' +
     '<div style="text-align:center;color:#b1bad2;font-size:0.85rem;margin-top:4px;">' +
     (outcome === betOn ? 'Payout: ' + formatCoins(payout) + ' ' + state.currency :
-     (outcome === 'TIE' && betOn !== 'TIE' ? 'Tie — your stake was pushed back' : '')) +
+     (outcome === 'TIE' && betOn !== 'TIE' ? 'Tie â€” your stake was pushed back' : '')) +
      '</div></div>';
    if (outcome === betOn) playSound('win');
    else if (outcome === 'TIE' && betOn !== 'TIE') playSound('chip');
@@ -3207,7 +3279,7 @@ function renderCrashResult(details, win, payout) {
   display.innerHTML =
     '<div style="text-align:center;padding:26px;">' +
     '<div style="font-size:3rem;font-weight:900;color:' + (win ? '#00e701' : '#ff4d4d') + ';">' + details.crashPoint.toFixed(2) + 'x</div>' +
-    '<div style="color:#b1bad2;font-weight:600;margin-top:6px;">Crashed' + (win ? ' after your ' + details.target.toFixed(2) + 'x target ✓' : ' before your ' + details.target.toFixed(2) + 'x target') + '</div>' +
+    '<div style="color:#b1bad2;font-weight:600;margin-top:6px;">Crashed' + (win ? ' after your ' + details.target.toFixed(2) + 'x target âœ“' : ' before your ' + details.target.toFixed(2) + 'x target') + '</div>' +
     (win ? '<div style="margin-top:12px;font-weight:800;color:#00e701;">Paid ' + formatCoins(payout) + ' ' + state.currency + '</div>' : '') +
     '</div>';
   if (win) playSound('win'); else playSound('loss');
@@ -3235,7 +3307,7 @@ function blackjackOutcomeText(outcome, multiplier, payout) {
   switch (outcome) {
     case 'BLACKJACK': return { text: 'BLACKJACK! Paid ' + formatCoins(payout) + ' ' + cur, color: '#00e701' };
     case 'WIN':       return { text: 'You win! Payout ' + formatCoins(payout) + ' ' + cur, color: '#00e701' };
-    case 'PUSH':      return { text: 'Push — stake returned', color: '#ffc700' };
+    case 'PUSH':      return { text: 'Push â€” stake returned', color: '#ffc700' };
     case 'BUST':      return { text: 'Bust! Over 21', color: '#ff4d4d' };
     default:          return { text: 'Dealer wins', color: '#ff4d4d' };
   }
@@ -3259,7 +3331,7 @@ function blackjackHandScore(hand) {
 function renderBlackjackHands(playerHand, dealerShown, holeHidden, msgObj) {
   const display = document.getElementById('game-display-area');
   const playerScore = blackjackHandScore(playerHand);
-  let dealerScoreStr = '—';
+  let dealerScoreStr = 'â€”';
   if (!holeHidden) {
     dealerScoreStr = blackjackHandScore(dealerShown).toString();
   }
@@ -3267,13 +3339,13 @@ function renderBlackjackHands(playerHand, dealerShown, holeHidden, msgObj) {
   display.innerHTML =
     '<div style="max-width:460px;margin:auto;text-align:center;">' +
     '<div class="bj-row-label" style="display:flex;justify-content:space-between;">' +
-      '<span>🂠 DEALER • ' + dealerScoreStr + '</span>' +
+      '<span>ðŸ‚  DEALER â€¢ ' + dealerScoreStr + '</span>' +
       '<span style="color:var(--text-muted);font-size:0.8rem;">Target: 21</span>' +
     '</div>' +
     '<div class="hand-row">' + dealerShown.map(c => cardHTML(c, holeHidden, false)).join('') + '</div>' +
     '<div style="margin:10px 0;height:1px;background:#243542;"></div>' +
     '<div class="bj-row-label" style="display:flex;justify-content:space-between;">' +
-      '<span>🃏 YOU • <span style="color:var(--accent-blue);font-weight:800;">' + playerScore + '</span></span>' +
+      '<span>ðŸƒ YOU â€¢ <span style="color:var(--accent-blue);font-weight:800;">' + playerScore + '</span></span>' +
       '<span style="color:' + (playerScore > 21 ? '#ff4d4d' : playerScore === 21 ? '#00e701' : '#b1bad2') + ';font-size:0.8rem;font-weight:700;">' + (playerScore > 21 ? 'BUST' : playerScore === 21 ? 'BLACKJACK' : '') + '</span>' +
     '</div>' +
     '<div class="hand-row">' + playerHand.map(c => cardHTML(c, false, false)).join('') + '</div>' +
@@ -3325,7 +3397,7 @@ async function startBlackjackGame(betAmount) {
         (GameRenderers.canDoubleDown && GameRenderers.canDoubleDown(data) ? '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'double\')">DOUBLE</button>' : '') +
         (GameRenderers.canSplit && GameRenderers.canSplit(data) ? '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'split\')">SPLIT</button>' : '') +
         (GameRenderers.canInsurance && GameRenderers.canInsurance(data) ? '<button type="button" class="btn-secondary-action game-action-btn" onclick="blackjackAction(\'insurance\')">INSURANCE</button>' : '');
-      resetRoundUI('IN PLAY…');
+      resetRoundUI('IN PLAYâ€¦');
       document.getElementById('btn-primary-action').disabled = true;
     }
   } catch (err) {
@@ -3390,8 +3462,8 @@ function renderHiloControls() {
   const upM = hiloStepMult(rank, 'HIGHER');
   const downM = hiloStepMult(rank, 'LOWER');
   document.getElementById('game-controls-options').innerHTML =
-    '<button type="button" class="btn-play" style="padding:12px 22px;font-weight:800;' + (upM ? '' : 'opacity:.35;pointer-events:none;') + '" onclick="hiloGuess(\'HIGHER\')">▲ HIGHER<div style="font-size:0.7rem;font-weight:600;">' + upM.toFixed(2) + 'x • ' + ((13 - rank) / 13 * 100).toFixed(1) + '%</div></button>' +
-    '<button type="button" class="btn-secondary-action" style="padding:12px 22px;font-weight:800;' + (downM ? '' : 'opacity:.35;pointer-events:none;') + '" onclick="hiloGuess(\'LOWER\')">▼ LOWER<div style="font-size:0.7rem;font-weight:600;">' + downM.toFixed(2) + 'x • ' + ((rank - 1) / 13 * 100).toFixed(1) + '%</div></button>';
+    '<button type="button" class="btn-play" style="padding:12px 22px;font-weight:800;' + (upM ? '' : 'opacity:.35;pointer-events:none;') + '" onclick="hiloGuess(\'HIGHER\')">â–² HIGHER<div style="font-size:0.7rem;font-weight:600;">' + upM.toFixed(2) + 'x â€¢ ' + ((13 - rank) / 13 * 100).toFixed(1) + '%</div></button>' +
+    '<button type="button" class="btn-secondary-action" style="padding:12px 22px;font-weight:800;' + (downM ? '' : 'opacity:.35;pointer-events:none;') + '" onclick="hiloGuess(\'LOWER\')">â–¼ LOWER<div style="font-size:0.7rem;font-weight:600;">' + downM.toFixed(2) + 'x â€¢ ' + ((rank - 1) / 13 * 100).toFixed(1) + '%</div></button>';
 }
 
 function renderHiloBoard(msgObj) {
@@ -3462,7 +3534,7 @@ async function hiloGuess(guess) {
        state.activeGameState.history.push(state.activeGameState.currentCard);
        state.activeGameState.prevCard = state.activeGameState.currentCard;
        state.activeGameState.currentCard = data.nextCard;
-       renderHiloBoard({ text: 'Wrong guess — you needed ' + guess.toLowerCase() + '. Round over.', color: '#ff4d4d' });
+       renderHiloBoard({ text: 'Wrong guess â€” you needed ' + guess.toLowerCase() + '. Round over.', color: '#ff4d4d' });
        playSound('loss');
        document.getElementById('game-controls-options').innerHTML = '';
        setTimeout(() => {
@@ -3475,7 +3547,7 @@ async function hiloGuess(guess) {
        state.activeGameState.multiplier = data.multiplier;
        state.activeGameState.currentCard = data.nextCard;
        state.activeGameState.prevCard = null;
-       renderHiloBoard({ text: 'Board boundary reached — auto-cashout ' + data.multiplier.toFixed(2) + 'x, +' + payout + ' ' + state.currency, color: '#00e701' });
+       renderHiloBoard({ text: 'Board boundary reached â€” auto-cashout ' + data.multiplier.toFixed(2) + 'x, +' + payout + ' ' + state.currency, color: '#00e701' });
        playSound('win');
        document.getElementById('game-controls-options').innerHTML = '';
        setTimeout(() => {
@@ -3512,7 +3584,7 @@ async function cashoutHilo() {
       gameId: state.activeGameState.gameId
     });
     const payout = formatCoins(Number(data.payout || 0));
-    renderHiloBoard({ text: 'Cashed out ' + data.multiplier.toFixed(2) + 'x — +' + payout + ' ' + state.currency, color: '#00e701' });
+    renderHiloBoard({ text: 'Cashed out ' + data.multiplier.toFixed(2) + 'x â€” +' + payout + ' ' + state.currency, color: '#00e701' });
     document.getElementById('game-controls-options').innerHTML = '';
     setTimeout(() => {
       if (data.balances) { state.balances = mergeBalances(data.balances); updateWalletUI(); }
@@ -3575,7 +3647,7 @@ function syncProfileDropdownHeader() {
   const tierEl = document.getElementById('profile-dropdown-tier');
   const avatarEl = document.querySelector('.profile-dropdown-avatar');
   if (nameEl) nameEl.textContent = username;
-  if (tierEl) tierEl.textContent = (vipText || 'Bronze') + ' VIP' + (isGuest ? ' · Guest (Test Mode)' : '');
+  if (tierEl) tierEl.textContent = (vipText || 'Bronze') + ' VIP' + (isGuest ? ' Â· Guest (Test Mode)' : '');
   if (avatarEl) avatarEl.textContent = (username || 'G').charAt(0).toUpperCase();
 
   // Withdraw button is always visible from the dropdown.
@@ -3722,34 +3794,34 @@ function renderAccountPage(page = 'overview') {
             <h1 class="account-username">${escapeHTML(p.username || 'Guest')}</h1>
             <span class="vip-badge vip-${currentTier.toLowerCase()}">${escapeHTML(currentTier)} VIP</span>
           </div>
-          <p class="account-hero-sub">Member since ${memberSince} · ${isGuest ? 'Guest Account' : 'Registered Player'}</p>
+          <p class="account-hero-sub">Member since ${memberSince} Â· ${isGuest ? 'Guest Account' : 'Registered Player'}</p>
         </div>
       </div>
 
       <div class="account-stats-row">
         <div class="stat-card card-hover-lift">
-          <div class="stat-icon">🪙</div>
+          <div class="stat-icon">ðŸª™</div>
           <div class="stat-info">
             <span class="stat-value">${gc}</span>
             <span class="stat-label">Gold Coins</span>
           </div>
         </div>
         <div class="stat-card card-hover-lift">
-          <div class="stat-icon">💎</div>
+          <div class="stat-icon">ðŸ’Ž</div>
           <div class="stat-info">
             <span class="stat-value">${sc}</span>
             <span class="stat-label">Sweeps Coins</span>
           </div>
         </div>
         <div class="stat-card card-hover-lift">
-          <div class="stat-icon">🎯</div>
+          <div class="stat-icon">ðŸŽ¯</div>
           <div class="stat-info">
             <span class="stat-value">${formatCoins(totalWagered)}</span>
             <span class="stat-label">Total Wagered</span>
           </div>
         </div>
         <div class="stat-card card-hover-lift">
-          <div class="stat-icon">💸</div>
+          <div class="stat-icon">ðŸ’¸</div>
           <div class="stat-info">
             <span class="stat-value">${formatCoins(rakebackEarned)}</span>
             <span class="stat-label">Rakeback Earned</span>
@@ -3782,7 +3854,7 @@ function renderAccountPage(page = 'overview') {
           <h3 class="account-card-title">Account</h3>
           <div class="account-detail-list">
             <div class="account-detail-item"><span class="detail-label">Username</span><span class="detail-value">${escapeHTML(p.username || 'Guest')}</span></div>
-            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || (isGuest ? 'guest@casino' : '—'))}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || (isGuest ? 'guest@casino' : 'â€”'))}</span></div>
             <div class="account-detail-item"><span class="detail-label">Member Since</span><span class="detail-value">${memberSince}</span></div>
             <div class="account-detail-item"><span class="detail-label">Account Type</span><span class="detail-value"><span class="status-pill ${isGuest ? 'status-pill-warning' : 'status-pill-success'}">${isGuest ? 'Guest' : 'Registered'}</span></span></div>
           </div>
@@ -3790,10 +3862,10 @@ function renderAccountPage(page = 'overview') {
         <div class="account-card">
           <h3 class="account-card-title">Quick Actions</h3>
           <div class="quick-actions-grid">
-            <button class="btn-quick-action" onclick="openStoreModal()">🪙 <span>Buy Coins</span></button>
-            <button class="btn-quick-action" onclick="openRedeemModal()">💸 <span>Redeem SC</span></button>
-            <button class="btn-quick-action" onclick="openBonusModal()">🎁 <span>Daily Bonus</span></button>
-            <button class="btn-quick-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 <span>Rakeback</span></button>
+            <button class="btn-quick-action" onclick="openStoreModal()">ðŸª™ <span>Buy Coins</span></button>
+            <button class="btn-quick-action" onclick="openRedeemModal()">ðŸ’¸ <span>Redeem SC</span></button>
+            <button class="btn-quick-action" onclick="openBonusModal()">ðŸŽ <span>Daily Bonus</span></button>
+            <button class="btn-quick-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">ðŸ’Ž <span>Rakeback</span></button>
           </div>
         </div>
       </div>`;
@@ -3815,11 +3887,11 @@ function renderAccountPage(page = 'overview') {
           <h3 class="account-card-title">Account Information</h3>
           <div class="account-detail-list">
             <div class="account-detail-item"><span class="detail-label">Username</span><span class="detail-value">${escapeHTML(p.username || 'Guest')}</span></div>
-            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || '—')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || 'â€”')}</span></div>
             <div class="account-detail-item"><span class="detail-label">State</span><span class="detail-value">${escapeHTML(p.state || 'CA')}</span></div>
             <div class="account-detail-item"><span class="detail-label">Member Since</span><span class="detail-value">${memberSince}</span></div>
             <div class="account-detail-item"><span class="detail-label">Account Type</span><span class="detail-value"><span class="status-pill ${isGuest ? 'status-pill-warning' : 'status-pill-success'}">${isGuest ? 'Guest' : 'Registered'}</span></span></div>
-            <div class="account-detail-item"><span class="detail-label">Location</span><span class="detail-value">${escapeHTML(geo.city || '—')}${geo.state ? ', ' + escapeHTML(geo.state) : ''}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Location</span><span class="detail-value">${escapeHTML(geo.city || 'â€”')}${geo.state ? ', ' + escapeHTML(geo.state) : ''}</span></div>
           </div>
         </div>
         <div class="account-card">
@@ -3837,14 +3909,14 @@ function renderAccountPage(page = 'overview') {
             </div>
           </div>
           <div class="profile-actions" style="margin-top: 12px;">
-            <button class="btn-profile-action" onclick="openProvablyFairModal()">🛡️ Provably Fair Settings</button>
+            <button class="btn-profile-action" onclick="openProvablyFairModal()">ðŸ›¡ï¸ Provably Fair Settings</button>
           </div>
         </div>
         <div class="account-card">
           <h3 class="account-card-title">Referral</h3>
           <div class="account-detail-list">
-            <div class="account-detail-item"><span class="detail-label">Referred By</span><span class="detail-value">${p.referredBy ? escapeHTML(p.referredBy) : '—'}</span></div>
-            <div class="account-detail-item"><span class="detail-label">Affiliate Code</span><span class="detail-value">${p.referralCode ? escapeHTML(p.referralCode) : '—'}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Referred By</span><span class="detail-value">${p.referredBy ? escapeHTML(p.referredBy) : 'â€”'}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Affiliate Code</span><span class="detail-value">${p.referralCode ? escapeHTML(p.referralCode) : 'â€”'}</span></div>
           </div>
         </div>
       </div>`;
@@ -3852,7 +3924,7 @@ function renderAccountPage(page = 'overview') {
     const hasPayout = !!p.hasPayoutAccount;
     html = `
       <div class="account-hero">
-        <div class="account-avatar">💰</div>
+        <div class="account-avatar">ðŸ’°</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Wallet</h1>
@@ -3866,12 +3938,12 @@ function renderAccountPage(page = 'overview') {
           <h3 class="account-card-title">Current Balances</h3>
           <div class="balance-cards">
             <div class="balance-card gc card-hover-lift">
-              <div class="balance-card-header"><span class="balance-icon">🪙</span><span class="balance-type">Gold Coins</span></div>
+              <div class="balance-card-header"><span class="balance-icon">ðŸª™</span><span class="balance-type">Gold Coins</span></div>
               <div class="balance-amount">${gc}</div>
               <div class="balance-sub">GC</div>
             </div>
             <div class="balance-card sc card-hover-lift">
-              <div class="balance-card-header"><span class="balance-icon">💎</span><span class="balance-type">Sweeps Coins</span></div>
+              <div class="balance-card-header"><span class="balance-icon">ðŸ’Ž</span><span class="balance-type">Sweeps Coins</span></div>
               <div class="balance-amount">${sc}</div>
               <div class="balance-sub">Total SC</div>
             </div>
@@ -3884,9 +3956,9 @@ function renderAccountPage(page = 'overview') {
         <div class="account-card">
           <h3 class="account-card-title">Manage Funds</h3>
           <div class="wallet-actions">
-            <button class="btn-wallet-action card-hover-lift" onclick="openStoreModal()">🪙 Buy Coin Package</button>
-            <button class="btn-wallet-action card-hover-lift" onclick="openRedeemModal()">💸 Redeem SC</button>
-            <button class="btn-wallet-action card-hover-lift" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">💎 Claim Rakeback</button>
+            <button class="btn-wallet-action card-hover-lift" onclick="openStoreModal()">ðŸª™ Buy Coin Package</button>
+            <button class="btn-wallet-action card-hover-lift" onclick="openRedeemModal()">ðŸ’¸ Redeem SC</button>
+            <button class="btn-wallet-action card-hover-lift" onclick="history.pushState(null,'','/rakeback');handleRouteChange()">ðŸ’Ž Claim Rakeback</button>
           </div>
           <div class="payout-status" style="margin-top:14px;">
             <span class="detail-label">Payout Account</span>
@@ -3902,7 +3974,7 @@ function renderAccountPage(page = 'overview') {
     const rakebackRate = 0.65;
     html = `
       <div class="account-hero">
-        <div class="account-avatar">🎁</div>
+        <div class="account-avatar">ðŸŽ</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Bonuses & Rewards</h1>
@@ -3915,9 +3987,9 @@ function renderAccountPage(page = 'overview') {
         <div class="account-card">
           <h3 class="account-card-title">Daily Bonus</h3>
           <div class="bonus-daily">
-            <div class="bonus-streak">🔥 <span class="streak-count">${streak}</span> Day Streak</div>
+            <div class="bonus-streak">ðŸ”¥ <span class="streak-count">${streak}</span> Day Streak</div>
             <div class="bonus-last-claim">Last claimed: <strong>${lastClaim}</strong></div>
-            <button class="btn-play" onclick="openBonusModal()" style="margin-top:10px;">🎁 Claim Daily Bonus</button>
+            <button class="btn-play" onclick="openBonusModal()" style="margin-top:10px;">ðŸŽ Claim Daily Bonus</button>
           </div>
         </div>
         <div class="account-card">
@@ -3926,7 +3998,7 @@ function renderAccountPage(page = 'overview') {
             <div class="account-detail-item"><span class="detail-label">Earned</span><span class="detail-value sc-val">${formatCoins(rakebackEarned)} SC</span></div>
             <div class="account-detail-item"><span class="detail-label">Rate</span><span class="detail-value">${rakebackRate}%</span></div>
           </div>
-          <button class="btn-profile-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()" style="margin-top:10px;">💎 View Rakeback</button>
+          <button class="btn-profile-action" onclick="history.pushState(null,'','/rakeback');handleRouteChange()" style="margin-top:10px;">ðŸ’Ž View Rakeback</button>
         </div>
         <div class="account-card" style="grid-column: 1 / -1;">
           <h3 class="account-card-title">Active Challenges</h3>
@@ -3934,7 +4006,7 @@ function renderAccountPage(page = 'overview') {
           <div class="challenges-list">
             ${challenges.map(ch => `
               <div class="challenge-item">
-                <span class="challenge-icon">🎯</span>
+                <span class="challenge-icon">ðŸŽ¯</span>
                 <span class="challenge-name">${escapeHTML(ch.name || 'Challenge')}</span>
                 <span class="challenge-reward">+${formatCoins(ch.reward || 0)} SC</span>
               </div>
@@ -3950,12 +4022,12 @@ function renderAccountPage(page = 'overview') {
     const tierStatusClass = kyc.status === 'VERIFIED' ? 'complete' : (kyc.status === 'REJECTED' ? 'rejected' : (kyc.status === 'PENDING' ? 'active' : ''));
     const step1Class = (kyc.tier >= 1 || kyc.status === 'VERIFIED') ? 'is-complete' : (kyc.status === 'PENDING' ? 'is-active' : '');
     const step2Class = (kyc.tier >= 2 || kyc.status === 'VERIFIED') ? 'is-complete' : (kyc.status === 'PENDING' ? 'is-active' : '');
-    const statusIcon = kyc.status === 'VERIFIED' ? '✓' : (kyc.status === 'PENDING' ? '⏳' : (kyc.status === 'REJECTED' ? '✕' : '○'));
+    const statusIcon = kyc.status === 'VERIFIED' ? 'âœ“' : (kyc.status === 'PENDING' ? 'â³' : (kyc.status === 'REJECTED' ? 'âœ•' : 'â—‹'));
     const statusIconClass = kyc.status === 'VERIFIED' ? 'verified' : (kyc.status === 'PENDING' ? 'pending' : (kyc.status === 'REJECTED' ? 'rejected' : ''));
 
     html = `
       <div class="account-hero">
-        <div class="account-avatar">🛡️</div>
+        <div class="account-avatar">ðŸ›¡ï¸</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Identity Verification</h1>
@@ -3969,11 +4041,11 @@ function renderAccountPage(page = 'overview') {
           <h3 class="account-card-title">Verification Status</h3>
           <div class="kyc-progress-stepper">
             <div class="kyc-step ${step1Class}">
-              <div class="kyc-step-icon">${kyc.tier >= 1 || kyc.status === 'VERIFIED' ? '✓' : '1'}</div>
+              <div class="kyc-step-icon">${kyc.tier >= 1 || kyc.status === 'VERIFIED' ? 'âœ“' : '1'}</div>
               <span class="kyc-step-label">Email</span>
             </div>
             <div class="kyc-step ${step2Class}">
-              <div class="kyc-step-icon">${kyc.tier >= 2 || kyc.status === 'VERIFIED' ? '✓' : '2'}</div>
+              <div class="kyc-step-icon">${kyc.tier >= 2 || kyc.status === 'VERIFIED' ? 'âœ“' : '2'}</div>
               <span class="kyc-step-label">ID Document</span>
             </div>
           </div>
@@ -3981,7 +4053,7 @@ function renderAccountPage(page = 'overview') {
             <span class="kyc-status-icon ${statusIconClass}">${statusIcon}</span>
             <span class="kyc-status-badge ${kycClass}" id="kyc-status-badge">${escapeHTML(kycStatusText)}</span>
           </div>
-          ${kyc.rejectionReason ? `<div class="kyc-rejection" id="kyc-rejection-reason"><span class="kyc-rejection-icon">⚠️</span><span>${escapeHTML(kyc.rejectionReason)}</span></div>` : ''}
+          ${kyc.rejectionReason ? `<div class="kyc-rejection" id="kyc-rejection-reason"><span class="kyc-rejection-icon">âš ï¸</span><span>${escapeHTML(kyc.rejectionReason)}</span></div>` : ''}
           <div class="kyc-tier-viz">
             <div class="kyc-tier-bar"><div class="kyc-tier-fill" style="width:${tierPct}%"></div></div>
             <span class="tier-value">Tier ${kyc.tier} of 2</span>
@@ -3991,8 +4063,8 @@ function renderAccountPage(page = 'overview') {
             <span class="${kyc.tier >= 2 ? 'completed' : 'active'}">Tier 2</span>
           </div>
           <div class="kyc-actions" style="margin-top:14px;">
-            ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>✓</span> Identity Verified</button>' : ''}
-            ${kyc.status === 'PENDING' ? '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn-kyc-pending" disabled><span>⏳</span> Verification Pending</button><button class="btn-secondary-action" onclick="playSound(\'click\'); resetKYC()">🔄 Reset & Retry</button></div>' : ''}
+            ${kyc.status === 'VERIFIED' ? '<button class="btn-kyc-verified" disabled><span>âœ“</span> Identity Verified</button>' : ''}
+            ${kyc.status === 'PENDING' ? '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn-kyc-pending" disabled><span>â³</span> Verification Pending</button><button class="btn-secondary-action" onclick="playSound(\'click\'); resetKYC()">ðŸ”„ Reset & Retry</button></div>' : ''}
             ${(kyc.status === 'REJECTED' || kyc.status === 'UNVERIFIED') ? '<button type="button" class="btn-kyc-action" onclick="playSound(\'click\'); startKycVerification()">' + (kyc.status === 'REJECTED' ? 'Retry Verification' : 'Start Verification') + '</button>' : ''}
           </div>
           ${isPolling ? `
@@ -4007,31 +4079,31 @@ function renderAccountPage(page = 'overview') {
         <div class="account-card why-verify-card">
           <h3 class="account-card-title">Why Verify?</h3>
           <div class="why-verify-item">
-            <div class="why-verify-icon">📧</div>
+            <div class="why-verify-icon">ðŸ“§</div>
             <div class="why-verify-content">
               <div class="why-verify-label">Tier 1</div>
               <div class="why-verify-value">Email & basic info verification</div>
             </div>
           </div>
           <div class="why-verify-item">
-            <div class="why-verify-icon">🪪</div>
+            <div class="why-verify-icon">ðŸªª</div>
             <div class="why-verify-content">
               <div class="why-verify-label">Tier 2</div>
               <div class="why-verify-value">Government ID document scan</div>
             </div>
           </div>
           <div class="why-verify-item">
-            <div class="why-verify-icon">💸</div>
+            <div class="why-verify-icon">ðŸ’¸</div>
             <div class="why-verify-content">
               <div class="why-verify-label">Required to</div>
               <div class="why-verify-value">Redeem Sweeps Coins for cash prizes</div>
             </div>
           </div>
           <div class="why-verify-item">
-            <div class="why-verify-icon">🔒</div>
+            <div class="why-verify-icon">ðŸ”’</div>
             <div class="why-verify-content">
               <div class="why-verify-label">Provider</div>
-              <div class="why-verify-value">Didit — secure, encrypted verification</div>
+              <div class="why-verify-value">Didit â€” secure, encrypted verification</div>
             </div>
           </div>
         </div>
@@ -4040,7 +4112,7 @@ function renderAccountPage(page = 'overview') {
   } else if (page === 'affiliates') {
     html = `
       <div class="account-hero">
-        <div class="account-avatar">🤝</div>
+        <div class="account-avatar">ðŸ¤</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Affiliates</h1>
@@ -4114,7 +4186,7 @@ function renderAccountPage(page = 'overview') {
   } else if (page === 'transactions') {
     html = `
       <div class="account-hero">
-        <div class="account-avatar">📋</div>
+        <div class="account-avatar">ðŸ“‹</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Transactions</h1>
@@ -4139,7 +4211,7 @@ function renderAccountPage(page = 'overview') {
     const sec = state.securityData || {};
     html = `
       <div class="account-hero">
-        <div class="account-avatar">🔒</div>
+        <div class="account-avatar">ðŸ”’</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Account Security</h1>
@@ -4152,12 +4224,12 @@ function renderAccountPage(page = 'overview') {
         <div class="account-card">
           <h3 class="account-card-title">Authentication</h3>
           <div class="account-detail-list">
-            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || '—')}</span></div>
+            <div class="account-detail-item"><span class="detail-label">Email</span><span class="detail-value">${escapeHTML(p.email || 'â€”')}</span></div>
             <div class="account-detail-item"><span class="detail-label">Two-Factor Auth</span><span class="detail-value"><span class="status-pill ${sec.twoFactorEnabled ? 'status-pill-success' : 'status-pill-warning'}">${sec.twoFactorEnabled ? 'Enabled' : 'Disabled'}</span></span></div>
           </div>
           <div class="security-actions" style="margin-top:14px;">
-            <button class="btn-security" onclick="playSound('click'); toggle2FA()">${sec.twoFactorEnabled ? '🔓 Disable 2FA' : '🔐 Enable 2FA'}</button>
-            <button class="btn-security" onclick="playSound('click'); openForgotPasswordModal()">🔑 Change Password</button>
+            <button class="btn-security" onclick="playSound('click'); toggle2FA()">${sec.twoFactorEnabled ? 'ðŸ”“ Disable 2FA' : 'ðŸ” Enable 2FA'}</button>
+            <button class="btn-security" onclick="playSound('click'); openForgotPasswordModal()">ðŸ”‘ Change Password</button>
           </div>
         </div>
         <div class="account-card">
@@ -4166,12 +4238,12 @@ function renderAccountPage(page = 'overview') {
             ${(sec.activeSessions || []).map(s => `
               <div class="account-detail-item">
                 <span class="detail-label">${escapeHTML(s.device || 'Browser')}</span>
-                <span class="detail-value">${escapeHTML(s.ip || 'Unknown')} · ${new Date(s.lastActive).toLocaleTimeString()}</span>
+                <span class="detail-value">${escapeHTML(s.ip || 'Unknown')} Â· ${new Date(s.lastActive).toLocaleTimeString()}</span>
               </div>
             `).join('') || '<div class="account-placeholder">No active sessions</div>'}
           </div>
           <div class="security-actions" style="margin-top:14px;">
-            <button class="btn-security logout" onclick="playSound('click'); logout()">🚪 Logout</button>
+            <button class="btn-security logout" onclick="playSound('click'); logout()">ðŸšª Logout</button>
           </div>
         </div>
       </div>`;
@@ -4185,7 +4257,7 @@ function renderAccountPage(page = 'overview') {
     const defaultCurr = s.defaultCurrency || 'GC';
     html = `
       <div class="account-hero">
-        <div class="account-avatar">⚙️</div>
+        <div class="account-avatar">âš™ï¸</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Settings</h1>
@@ -4235,7 +4307,7 @@ function renderAccountPage(page = 'overview') {
   } else if (page === 'support') {
     html = `
       <div class="account-hero">
-        <div class="account-avatar">💬</div>
+        <div class="account-avatar">ðŸ’¬</div>
         <div class="account-hero-info">
           <div class="account-hero-top">
             <h1 class="account-username">Support</h1>
@@ -4253,8 +4325,8 @@ function renderAccountPage(page = 'overview') {
             <div class="account-detail-item"><span class="detail-label">Response Time</span><span class="detail-value">&lt; 5 minutes</span></div>
           </div>
           <div class="support-actions" style="margin-top:14px;">
-            <button class="btn-profile-action" onclick="playSound('click'); window.open('mailto:support@stakeoriginals.com')">📧 Email Support</button>
-            <button class="btn-profile-action" onclick="playSound('click'); openLiveChat()">💬 Live Chat</button>
+            <button class="btn-profile-action" onclick="playSound('click'); window.open('mailto:support@stakeoriginals.com')">ðŸ“§ Email Support</button>
+            <button class="btn-profile-action" onclick="playSound('click'); openLiveChat()">ðŸ’¬ Live Chat</button>
           </div>
         </div>
         <div class="account-card">
@@ -4319,7 +4391,7 @@ function openLiveChat() {
         .chat-message.support { background: rgba(255,255,255,0.08); }
         .chat-message .author { font-size: 0.75rem; color: #b1bad2; margin-bottom: 4px; }
       </style></head><body>
-      <div class="chat-header"><h2>💬 Stake Originals Support</h2><p style="margin: 4px 0 0; color: #001a0a; opacity: 0.8;">Average response time: &lt; 5 minutes</p></div>
+      <div class="chat-header"><h2>ðŸ’¬ Stake Originals Support</h2><p style="margin: 4px 0 0; color: #001a0a; opacity: 0.8;">Average response time: &lt; 5 minutes</p></div>
       <div class="chat-messages" id="chat-messages">
         <div class="chat-message support"><div class="author">Support Agent</div>Hello! Welcome to Stake Originals support. How can I help you today?</div>
       </div>
@@ -4486,7 +4558,7 @@ async function toggle2FA() {
       <div class="modal-box" style="max-width:420px; text-align:center;">
         <div class="modal-header-flex" style="justify-content:center;">
           <div>
-            <h3 style="margin:0 0 6px;">🔐 Setup Two-Factor Authentication</h3>
+            <h3 style="margin:0 0 6px;">ðŸ” Setup Two-Factor Authentication</h3>
             <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">Scan the QR code with your authenticator app, then enter the 6-digit code</p>
           </div>
         </div>
@@ -4499,8 +4571,8 @@ async function toggle2FA() {
           <p style="font-size:0.78rem; color:var(--text-muted); margin:0;">Enter this secret manually if you can't scan the QR code.</p>
           <div style="text-align:left; background:var(--bg-tertiary); border:1px solid var(--glass-border); border-radius:10px; padding:12px 14px; font-size:0.78rem; color:var(--text-secondary); line-height:1.5;">
             <strong style="color:var(--text-primary);">Compatible apps:</strong><br>
-            📱 <strong>Mobile:</strong> Apple Passwords / Google Authenticator / Authy / Microsoft Authenticator<br>
-            💻 <strong>PC:</strong> Authy / WinAuth / Google Authenticator (Chrome)
+            ðŸ“± <strong>Mobile:</strong> Apple Passwords / Google Authenticator / Authy / Microsoft Authenticator<br>
+            ðŸ’» <strong>PC:</strong> Authy / WinAuth / Google Authenticator (Chrome)
           </div>
           <input type="text" id="2fa-verify-code" placeholder="Enter 6-digit code" maxlength="6" style="width:100%; max-width:220px; padding:12px; border-radius:10px; border:1px solid var(--glass-border); background:var(--bg-tertiary); color:var(--text-primary); font-size:1.2rem; text-align:center; letter-spacing:4px; font-family:monospace;" />
           <button class="btn btn-primary" id="btn-2fa-verify" style="min-width:160px; margin-top:4px;">Verify and Enable</button>
@@ -4641,7 +4713,7 @@ async function pollKycStatus(manual) {
     const next = data.kyc || { status: 'UNVERIFIED', tier: 0 };
     if (!state.profile) state.profile = {};
     state.profile.kyc = next;
-    // If status changed away from PENDING, stop polling — the user is done.
+    // If status changed away from PENDING, stop polling â€” the user is done.
     if (next.status !== 'PENDING') {
       stopKycPolling();
       if (manual && next.status === 'VERIFIED') {
@@ -4659,7 +4731,7 @@ async function pollKycStatus(manual) {
         updateUserProfileBadge();
       }
     } else if (manual) {
-      // Status unchanged but user asked for a manual refresh — show a small
+      // Status unchanged but user asked for a manual refresh â€” show a small
       // confirmation so they know the call succeeded.
       try { playSound('click'); } catch (e) {}
     }
@@ -4684,11 +4756,11 @@ function closeAllModals() {
 
 function showKycCallbackResult(status) {
   const messages = {
-    Approved: { title: 'Identity Verified!', subtitle: 'Your identity has been successfully verified.', icon: '✓' },
+    Approved: { title: 'Identity Verified!', subtitle: 'Your identity has been successfully verified.', icon: 'âœ“' },
     Declined: { title: 'Verification Incomplete', subtitle: 'Your identity verification was not approved. Please review your documents and try again.', icon: '!' },
-    'In Review': { title: 'Under Review', subtitle: 'Your identity verification is being reviewed. We will notify you once it is complete.', icon: '⏳' }
+    'In Review': { title: 'Under Review', subtitle: 'Your identity verification is being reviewed. We will notify you once it is complete.', icon: 'â³' }
   };
-  const msg = messages[status] || { title: 'Verification Update', subtitle: 'Verification status: ' + status, icon: 'ℹ' };
+  const msg = messages[status] || { title: 'Verification Update', subtitle: 'Verification status: ' + status, icon: 'â„¹' };
 
   closeAllModals();
   let overlay = document.getElementById('kyc-identity-overlay');
@@ -4729,7 +4801,7 @@ function showGuestVerificationAnimation() {
   overlay.innerHTML =
     '<div class="modal-box identity-verify-box">' +
       '<div class="identity-verify-content" style="text-align:center;">' +
-        '<div class="verification-step" style="margin:0 auto 16px;width:56px;height:56px;font-size:28px;">✓</div>' +
+        '<div class="verification-step" style="margin:0 auto 16px;width:56px;height:56px;font-size:28px;">âœ“</div>' +
         '<div class="verification-text" style="font-size:1.4rem;">Identity Verified</div>' +
         '<div class="verification-subtext" style="margin-left:0;">Your identity has been successfully verified.</div>' +
       '</div>' +
@@ -4760,7 +4832,7 @@ function showReferralWelcome(code) {
   overlay.innerHTML =
     '<div class="modal-box identity-verify-box" style="max-width:420px;">' +
       '<div class="identity-verify-content" style="text-align:center;">' +
-        '<div class="verification-step" style="margin:0 auto 14px;width:56px;height:56px;font-size:28px;background:linear-gradient(135deg,var(--accent-gold),var(--accent-orange));color:#0a0e1a;">🎁</div>' +
+        '<div class="verification-step" style="margin:0 auto 14px;width:56px;height:56px;font-size:28px;background:linear-gradient(135deg,var(--accent-gold),var(--accent-orange));color:#0a0e1a;">ðŸŽ</div>' +
         '<div class="verification-text" style="font-size:1.35rem;">You were invited!</div>' +
         '<div class="verification-subtext" style="margin-left:0;">' +
           'You arrived via referral code <strong style="color:var(--accent-gold);">' + escapeHTML(code) + '</strong>.<br>' +
@@ -4844,7 +4916,7 @@ async function loadAffiliateData() {
 
     const twBtn = document.getElementById('affiliate-share-twitter');
     const tgBtn = document.getElementById('affiliate-share-telegram');
-    const text = encodeURIComponent('Join me on this casino — use my referral link!');
+    const text = encodeURIComponent('Join me on this casino â€” use my referral link!');
     if (twBtn) twBtn.href = `https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(data.referralLink)}`;
     if (tgBtn) tgBtn.href = `https://t.me/share/url?url=${encodeURIComponent(data.referralLink)}&text=${text}`;
 
@@ -4868,7 +4940,7 @@ async function loadAffiliateData() {
     const referredList = document.getElementById('affiliate-referred-list');
     if (referredList) {
       if (!data.referredUsers || data.referredUsers.length === 0) {
-        referredList.innerHTML = '<div class="account-placeholder">No referred users yet — share your code to start earning.</div>';
+        referredList.innerHTML = '<div class="account-placeholder">No referred users yet â€” share your code to start earning.</div>';
       } else {
         referredList.innerHTML = '<div class="tx-list">' + data.referredUsers.map(u => (
           '<div class="tx-item">' +
@@ -4959,7 +5031,7 @@ function injectMobileAndNavigationDOM() {
       <div class="modal-box auth-modal">
         <div class="modal-header-flex">
           <h3 id="auth-title">Login to Your Account</h3>
-          <button class="x-close" onclick="closeAuthModal()">×</button>
+          <button class="x-close" onclick="closeAuthModal()">Ã—</button>
         </div>
         <p class="modal-subtitle" id="auth-subtitle">Enter your credentials to access your account.</p>
         <div id="auth-form-login" class="auth-form-section">
@@ -4969,7 +5041,7 @@ function injectMobileAndNavigationDOM() {
           </div>
           <div class="form-group">
             <label class="form-label">Password</label>
-            <input type="password" id="auth-password" class="form-input" placeholder="••••••••">
+            <input type="password" id="auth-password" class="form-input" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢">
           </div>
           <div id="auth-login-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
           <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
@@ -5037,7 +5109,7 @@ function injectMobileAndNavigationDOM() {
     agegate.innerHTML = `
       <div class="modal-box" style="max-width: 400px; text-align: center;">
         <div class="modal-header-flex">
-          <h3>🔞 Age Verification</h3>
+          <h3>ðŸ”ž Age Verification</h3>
         </div>
         <p class="modal-subtitle">This casino contains gambling content and is restricted to adults 18 and older.</p>
         <div style="margin: 20px 0; padding: 16px; background:#14222d; border-radius:8px; border:1px solid #243542;">
@@ -5060,7 +5132,7 @@ function injectMobileAndNavigationDOM() {
     geoModal.innerHTML = `
       <div class="modal-box" style="max-width: 400px; text-align: center;">
         <div class="modal-header-flex">
-          <h3>🌍 Jurisdiction Restricted</h3>
+          <h3>ðŸŒ Jurisdiction Restricted</h3>
         </div>
         <p class="modal-subtitle">Sweepstakes play is unavailable in your jurisdiction.</p>
         <p id="geo-restriction-details" style="color:#e57373; margin:10px 0;"></p>
@@ -5081,8 +5153,8 @@ function injectMobileAndNavigationDOM() {
     forgotModal.innerHTML = `
       <div class="modal-box" style="max-width: 400px;">
         <div class="modal-header-flex">
-          <h3>🔑 Reset Password</h3>
-          <button class="x-close" onclick="closeForgotPasswordModal()">×</button>
+          <h3>ðŸ”‘ Reset Password</h3>
+          <button class="x-close" onclick="closeForgotPasswordModal()">Ã—</button>
         </div>
         <p class="modal-subtitle">Enter your email to receive a password reset link.</p>
         <div class="form-group">
@@ -5170,19 +5242,19 @@ const milestones = [
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
             <span>Back to Lobby</span>
           </button>
-          <h2 class="page-title">🎁 Daily Bonus</h2>
+          <h2 class="page-title">ðŸŽ Daily Bonus</h2>
         </div>
 
         <div class="promo-hero promo-hero-bonus">
           <div class="promo-hero-bg"></div>
           <div class="promo-hero-content">
-            <div class="promo-hero-icon">🎁</div>
+            <div class="promo-hero-icon">ðŸŽ</div>
             <div class="promo-hero-text">
               <h3 class="promo-hero-title">Daily Rewards</h3>
               <p class="promo-hero-sub">Log in every day to build your streak and unlock bigger rewards.</p>
             </div>
             <div class="promo-hero-streak">
-              <div class="streak-fire">🔥</div>
+              <div class="streak-fire">ðŸ”¥</div>
               <div class="streak-num">${streak}</div>
               <div class="streak-cap">DAY STREAK</div>
             </div>
@@ -5207,8 +5279,8 @@ const milestones = [
           </div>
           <div class="claim-card-footer">
             ${canClaim
-              ? '<button type="button" class="btn-claim-main" onclick="claimDaily()">🎁 Claim Daily Bonus</button>'
-              : '<div class="claim-locked"><span class="lock-icon">⏱️</span><div><div class="lock-title">Next bonus in</div><div class="countdown-timer" id="daily-countdown">' + formatCountdown(nextClaimMs) + '</div></div></div>'}
+              ? '<button type="button" class="btn-claim-main" onclick="claimDaily()">ðŸŽ Claim Daily Bonus</button>'
+              : '<div class="claim-locked"><span class="lock-icon">â±ï¸</span><div><div class="lock-title">Next bonus in</div><div class="countdown-timer" id="daily-countdown">' + formatCountdown(nextClaimMs) + '</div></div></div>'}
           </div>
         </div>
 
@@ -5226,15 +5298,15 @@ const milestones = [
                   <div class="milestone-day">Day ${m.day}</div>
                   <div class="milestone-reward">${m.reward}</div>
                   <div class="milestone-note">${m.note}</div>
-                  <div class="milestone-mark">${achieved ? '✓' : isNext ? '★' : ''}</div>
+                  <div class="milestone-mark">${achieved ? 'âœ“' : isNext ? 'â˜…' : ''}</div>
                 </div>`;
             }).join('')}
           </div>
         </div>
 
         <div class="promo-tip">
-          <span class="tip-icon">💡</span>
-          <span>Tip: Missing a day resets your streak to 1 — set a reminder to keep it growing!</span>
+          <span class="tip-icon">ðŸ’¡</span>
+          <span>Tip: Missing a day resets your streak to 1 â€” set a reminder to keep it growing!</span>
         </div>
       </div>`;
 
@@ -5254,32 +5326,32 @@ async function loadChallengesPage() {
   try {
     const challenges = await apiRequest('/api/challenges').catch(() => null);
     const taskIcons = {
-      slot_bonus: '🎰',
-      dice_over90_win: '🎲',
-      dice_under10_win: '🎲',
-      dice_exact_50: '🎯',
-      dice_rounds: '🎲',
-      crash_2x_count: '💥',
-      crash_5x_count: '💥',
-      crash_10x_count: '💥',
-      crash_snipe: '💥',
-      rounds: '🎮',
-      win_streak: '🔥',
-      hit_multiplier: '⚡',
-      sc_net_profit: '📈',
-      single_round_win: '💎',
-      bj_natural: '♠️',
-      bj_double_win: '🃏',
-      bj_dealer_bust: '♠️',
-      bj_hands: '♠️',
-      mines_tiles: '💣',
-      mines_hard_win: '💣',
-      plinko_outer: '⚪',
-      sc_wagered: '💎',
-      gc_wagered: '🪙',
-      unique_games: '🎯',
-      unique_wins: '🏆',
-      speed_rounds: '⚡'
+      slot_bonus: 'ðŸŽ°',
+      dice_over90_win: 'ðŸŽ²',
+      dice_under10_win: 'ðŸŽ²',
+      dice_exact_50: 'ðŸŽ¯',
+      dice_rounds: 'ðŸŽ²',
+      crash_2x_count: 'ðŸ’¥',
+      crash_5x_count: 'ðŸ’¥',
+      crash_10x_count: 'ðŸ’¥',
+      crash_snipe: 'ðŸ’¥',
+      rounds: 'ðŸŽ®',
+      win_streak: 'ðŸ”¥',
+      hit_multiplier: 'âš¡',
+      sc_net_profit: 'ðŸ“ˆ',
+      single_round_win: 'ðŸ’Ž',
+      bj_natural: 'â™ ï¸',
+      bj_double_win: 'ðŸƒ',
+      bj_dealer_bust: 'â™ ï¸',
+      bj_hands: 'â™ ï¸',
+      mines_tiles: 'ðŸ’£',
+      mines_hard_win: 'ðŸ’£',
+      plinko_outer: 'âšª',
+      sc_wagered: 'ðŸ’Ž',
+      gc_wagered: 'ðŸª™',
+      unique_games: 'ðŸŽ¯',
+      unique_wins: 'ðŸ†',
+      speed_rounds: 'âš¡'
     };
 
     const list = (challenges && challenges.challenges) || [];
@@ -5294,13 +5366,13 @@ async function loadChallengesPage() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
             <span>Back to Lobby</span>
           </button>
-          <h2 class="page-title">🎯 Challenges</h2>
+          <h2 class="page-title">ðŸŽ¯ Challenges</h2>
         </div>
 
         <div class="promo-hero promo-hero-challenges">
           <div class="promo-hero-bg"></div>
           <div class="promo-hero-content">
-            <div class="promo-hero-icon">🎯</div>
+            <div class="promo-hero-icon">ðŸŽ¯</div>
             <div class="promo-hero-text">
               <h3 class="promo-hero-title">Daily Challenges</h3>
               <p class="promo-hero-sub">Complete challenges to bank up to <strong>${formatCoins(totalRewardMax)} SC</strong> per day. New challenges every 24 hours.</p>
@@ -5323,7 +5395,7 @@ async function loadChallengesPage() {
               const isComplete = c.completed && !c.claimed;
               const isClaimed = c.claimed;
               const rewardTier = c.maxReward >= 10 ? 'high' : c.maxReward >= 5 ? 'medium' : 'low';
-              const icon = taskIcons[c.task] || '🎯';
+              const icon = taskIcons[c.task] || 'ðŸŽ¯';
               return `
                 <div class="challenge-card-new tier-${rewardTier} ${isComplete ? 'is-complete' : ''} ${isClaimed ? 'is-claimed' : ''}">
                   <div class="challenge-card-top">
@@ -5332,7 +5404,7 @@ async function loadChallengesPage() {
                       <div class="challenge-tier-tag tier-tag-${rewardTier}">${rewardTier.toUpperCase()}</div>
                       <h4 class="challenge-title-new">${escapeHTML(c.desc)}</h4>
                     </div>
-                    ${isClaimed ? '<div class="challenge-claimed-mark">✓</div>' : ''}
+                    ${isClaimed ? '<div class="challenge-claimed-mark">âœ“</div>' : ''}
                   </div>
                   <div class="challenge-progress-new">
                     <div class="progress-bar-new"><div class="progress-fill-new" style="width:${pct}%"></div></div>
@@ -5340,13 +5412,13 @@ async function loadChallengesPage() {
                   </div>
                   <div class="challenge-card-foot">
                     <div class="challenge-reward-pill">
-                      <span class="pill-icon">💎</span>
-                      <span class="pill-text">${formatCoins(c.minReward)} – ${formatCoins(c.maxReward)} SC</span>
+                      <span class="pill-icon">ðŸ’Ž</span>
+                      <span class="pill-text">${formatCoins(c.minReward)} â€“ ${formatCoins(c.maxReward)} SC</span>
                     </div>
                     ${isComplete
                       ? `<button type="button" class="btn-challenge-claim" onclick="claimChallenge('${c.id}')">Claim ${formatCoins(calcChallengeRewardDisplay(c))} SC</button>`
                       : isClaimed
-                        ? '<span class="challenge-claimed-pill">✓ Claimed</span>'
+                        ? '<span class="challenge-claimed-pill">âœ“ Claimed</span>'
                         : '<span class="challenge-inprogress">Keep playing</span>'}
                   </div>
                 </div>`;
@@ -5372,9 +5444,9 @@ async function loadRakebackPage() {
     const rakeback = await apiRequest('/api/rakeback/status').catch(() => null);
     const tiers = (rakeback && rakeback.rakeback) || {};
     const tierMeta = {
-      daily:   { label: 'Daily',   icon: '📅', accent: 'cyan',   period: 'Refreshes every 24 hours' },
-      weekly:  { label: 'Weekly',  icon: '📆', accent: 'purple', period: 'Refreshes every 7 days' },
-      monthly: { label: 'Monthly', icon: '📈', accent: 'gold',   period: 'Refreshes every 30 days' }
+      daily:   { label: 'Daily',   icon: 'ðŸ“…', accent: 'cyan',   period: 'Refreshes every 24 hours' },
+      weekly:  { label: 'Weekly',  icon: 'ðŸ“†', accent: 'purple', period: 'Refreshes every 7 days' },
+      monthly: { label: 'Monthly', icon: 'ðŸ“ˆ', accent: 'gold',   period: 'Refreshes every 30 days' }
     };
     const totalClaimable = Object.values(tiers).reduce((s, r) => s + (r.claimable || 0), 0);
     const totalTracked = Object.values(tiers).reduce((s, r) => s + (r.lossTracked || 0), 0);
@@ -5386,16 +5458,16 @@ async function loadRakebackPage() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
             <span>Back to Lobby</span>
           </button>
-          <h2 class="page-title">💎 Rakeback</h2>
+          <h2 class="page-title">ðŸ’Ž Rakeback</h2>
         </div>
 
         <div class="promo-hero promo-hero-rakeback">
           <div class="promo-hero-bg"></div>
           <div class="promo-hero-content">
-            <div class="promo-hero-icon">💎</div>
+            <div class="promo-hero-icon">ðŸ’Ž</div>
             <div class="promo-hero-text">
               <h3 class="promo-hero-title">Cashback on Every Bet</h3>
-              <p class="promo-hero-sub">We track your net losses and give back <strong>3%–10%</strong> as Sweeps Coins. Capped at 50% of losses so the house always has the edge — but you always get a slice back.</p>
+              <p class="promo-hero-sub">We track your net losses and give back <strong>3%â€“10%</strong> as Sweeps Coins. Capped at 50% of losses so the house always has the edge â€” but you always get a slice back.</p>
             </div>
             <div class="promo-hero-stats">
               <div class="hero-stat"><div class="hero-stat-num sc-val">${formatCoins(totalClaimable)}</div><div class="hero-stat-cap">CLAIMABLE</div></div>
@@ -5434,7 +5506,7 @@ async function loadRakebackPage() {
                     </div>
                     <div class="rakeback-stat">
                       <span class="rs-cap">Rate Range</span>
-                      <span class="rs-val">${r.rateMin || 3}% – ${r.rateMax || 10}%</span>
+                      <span class="rs-val">${r.rateMin || 3}% â€“ ${r.rateMax || 10}%</span>
                     </div>
                   </div>
                   <div class="rakeback-progress-new">
@@ -5444,7 +5516,7 @@ async function loadRakebackPage() {
                     ${r.canClaim && r.claimable > 0
                       ? `<button type="button" class="btn-rake-claim" onclick="claimRakeback('${tierKey}')">Claim ${formatCoins(r.claimable)} SC</button>`
                       : !r.canClaim && r.claimable > 0
-                        ? `<div class="rakeback-countdown"><span>⏱</span><span class="countdown-timer" id="rakeback-countdown-${tierKey}">${formatCountdown(r.nextClaimMs || 0)}</span></div>`
+                        ? `<div class="rakeback-countdown"><span>â±</span><span class="countdown-timer" id="rakeback-countdown-${tierKey}">${formatCountdown(r.nextClaimMs || 0)}</span></div>`
                         : '<span class="rakeback-empty">Play some SC games to start tracking losses.</span>'}
                   </div>
                 </div>`;
@@ -5453,7 +5525,7 @@ async function loadRakebackPage() {
         </div>
 
         <div class="promo-tip">
-          <span class="tip-icon">💡</span>
+          <span class="tip-icon">ðŸ’¡</span>
           <span>Tip: Higher VIP tiers unlock bigger rakeback caps. Keep climbing!</span>
         </div>
       </div>`;
@@ -5649,7 +5721,9 @@ async function submitLogin() {
     state.balances = mergeBalances(data.balances);
     localStorage.setItem('casino_username', data.user?.username || '');
     updateUserProfileBadge();
+    updateAuthUI();
     closeAuthModal();
+    showLobby();
     await initSessionFromToken();
   } catch (err) {
     if (err.geoRestricted) {
@@ -5701,7 +5775,9 @@ async function submitRegister() {
     state.balances = mergeBalances(data.balances);
     localStorage.setItem('casino_username', data.user?.username || '');
     updateUserProfileBadge();
+    updateAuthUI();
     closeAuthModal();
+    showLobby();
     await initSessionFromToken();
    } catch (err) {
     if (err.geoRestricted) {
@@ -5818,8 +5894,8 @@ function updateSidebarUserCard() {
   if (cardEl) {
     const tierEl = cardEl.querySelector('.user-tier');
     const avatarEl = cardEl.querySelector('.avatar-emoji');
-    if (tierEl) tierEl.textContent = (vipText || 'Bronze') + ' VIP' + (isGuest ? ' · Guest' : '');
-    if (avatarEl) avatarEl.textContent = (username && username !== 'Guest') ? username.charAt(0).toUpperCase() : '👤';
+    if (tierEl) tierEl.textContent = (vipText || 'Bronze') + ' VIP' + (isGuest ? ' Â· Guest' : '');
+    if (avatarEl) avatarEl.textContent = (username && username !== 'Guest') ? username.charAt(0).toUpperCase() : 'ðŸ‘¤';
   }
 }
 
@@ -5828,8 +5904,8 @@ function updateUserProfileBadge() {
   const badge = document.getElementById('user-badge');
   if (!badge) return;
   const username = state.profile?.username || localStorage.getItem('casino_username') || 'Guest';
-  const firstChar = username.charAt(0) || '👤';
-  badge.title = username + ' — Profile & Settings';
+  const firstChar = username.charAt(0) || 'ðŸ‘¤';
+  badge.title = username + ' â€” Profile & Settings';
   const avatar = badge.querySelector('.avatar-circle');
   if (avatar) avatar.textContent = firstChar.toUpperCase();
   syncProfileDropdownHeader();
@@ -5846,7 +5922,9 @@ function logout() {
   updateUserProfileBadge();
   state.ws?.close();
   state.ws = null;
-  openAuthModal();
+  closeAuthModal();
+  updateAuthUI();
+  showLanding();
 }
 
 // ==========================================================================
@@ -5989,6 +6067,10 @@ function routeViewForPath(path) {
 function handleRouteChange() {
   closeProfileDropdown();
   closeWalletDropdown();
+  if (!isAuthenticated()) {
+    showLanding();
+    return;
+  }
   const path = window.location.pathname;
   setActiveSidebarLink(path);
 
@@ -6023,7 +6105,7 @@ function handleRouteChange() {
     const sessionId = params.get('verificationSessionId');
     const status = params.get('status');
     window.history.replaceState({}, document.title, '/account/kyc');
-    // The Didit-provided status is treated as a UI hint only — the source of
+    // The Didit-provided status is treated as a UI hint only â€” the source of
     // truth is the server, which re-fetches the canonical decision via the
     // Didit v3 /decision/ endpoint and updates our local kyc row. We show the
     // overlay immediately so the user gets feedback, but the poll below will
@@ -6100,7 +6182,7 @@ function handleRouteChange() {
 }
 
 function hideAllViews() {
-  ['view-lobby','view-game','view-account','view-bonus','view-challenges','view-rakeback']
+  ['view-landing','view-lobby','view-game','view-account','view-bonus','view-challenges','view-rakeback']
     .forEach(id => document.getElementById(id)?.classList.add('hidden'));
 }
 
@@ -6125,7 +6207,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // it can lay out the page; we need a populated state before we render any
   // account/game view. If we don't have a token, initSession() will route to
   // continueAsGuest() and call reapplyCurrentRoute() once the guest token
-  // arrives — that second pass replaces the placeholder content.
+  // arrives â€” that second pass replaces the placeholder content.
   const initialPath = window.location.pathname.slice(1);
   const initialHash = window.location.hash.slice(1);
   const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
@@ -6173,7 +6255,7 @@ async function connectPhantom() {
   }
 
   try {
-    statusEl.textContent = 'Connecting…';
+    statusEl.textContent = 'Connectingâ€¦';
     statusEl.style.color = 'var(--text-secondary)';
 
     const conn = await provider.connect();

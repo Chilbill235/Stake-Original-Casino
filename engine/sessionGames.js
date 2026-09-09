@@ -77,7 +77,13 @@ function register(app, deps) {
     updateTelemetry(user, gameType, session.currency, session.betAmount, won, payout || 0, {});
   }
 
-  const post = (path, handler) => app.post(path, deps.verifyToken, handler);
+  const post = (path, handler) => app.post(path, deps.verifyToken, async (req, res, next) => {
+    try {
+      await handler(req, res);
+    } catch (err) {
+      next(err);
+    }
+  });
 
   const nextFloats = (userId, count) => {
     const seedPair = getUserSeedPair(userId);
@@ -88,8 +94,8 @@ function register(app, deps) {
   // ------------------------------------------------------------------
   // MINES
   // ------------------------------------------------------------------
-  post('/api/play/mines/start', (req, res) => {
-    const wager = validateWager(req, res);
+  post('/api/play/mines/start', async (req, res) => {
+    const wager = await validateWager(req, res);
     if (!wager) return;
     const { user, currency, amount } = wager;
 
@@ -208,8 +214,8 @@ function register(app, deps) {
   // ------------------------------------------------------------------
   const TOWER_FLOORS = 8;
 
-  post('/api/play/tower/start', (req, res) => {
-    const wager = validateWager(req, res);
+  post('/api/play/tower/start', async (req, res) => {
+    const wager = await validateWager(req, res);
     if (!wager) return;
     const { user, currency, amount } = wager;
 
@@ -344,8 +350,8 @@ function register(app, deps) {
   const BJ_PAYOUT = round2(2 * (1 - HOUSE_EDGE));            // standard win
   const BJ_NATURAL = round2(2.5 * (1 - HOUSE_EDGE));         // blackjack pays 3:2 (edge-adjusted)
 
-  post('/api/play/blackjack/start', (req, res) => {
-    const wager = validateWager(req, res);
+  post('/api/play/blackjack/start', async (req, res) => {
+    const wager = await validateWager(req, res);
     if (!wager) return;
     const { user, currency, amount } = wager;
 
@@ -479,11 +485,48 @@ function register(app, deps) {
     return finishBlackjack(session, res, 'DEALER_WINS', 0);
   });
 
+  post('/api/play/blackjack/double', (req, res) => {
+    const { gameId } = req.body || {};
+    const session = activeSessions.get(gameId);
+    if (!session || !session.active || session.game !== 'blackjack') return res.status(400).json({ error: 'No active Blackjack hand found.' });
+    if (session.userId !== req.user.id) return res.status(403).json({ error: 'This hand belongs to another player.' });
+    if (session.playerHand.length !== 2) return res.status(400).json({ error: 'Double is only allowed on the first two cards.' });
+    if (session.doubled) return res.status(400).json({ error: 'You have already doubled this hand.' });
+
+    const user = depsUsers(deps, session.userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+
+    const balance = session.currency === 'GC' ? user.gc_balance : user.sc_unplayed;
+    if (session.betAmount > balance) {
+      return res.status(400).json({ error: `Insufficient ${session.currency} balance to double.` });
+    }
+
+    // Take an additional stake equal to the original bet
+    debitBet(user, session.currency, session.betAmount);
+    logTransaction(user.id, 'BET', 'Blackjack DOUBLE (additional stake)',
+      session.currency === 'GC' ? -session.betAmount : 0, session.currency === 'SC' ? -session.betAmount : 0);
+    session.betAmount = round2(session.betAmount * 2);
+    session.doubled = true;
+
+    // Exactly one card is drawn, then the hand is forced to stand
+    session.playerHand.push(session.deck[session.cardIdx++]);
+    const score = handScore(session.playerHand);
+    if (score > 21) return finishBlackjack(session, res, 'BUST', 0);
+
+    while (handScore(session.dealerHand) < 17) {
+      session.dealerHand.push(session.deck[session.cardIdx++]);
+    }
+    const dScore = handScore(session.dealerHand);
+    if (dScore > 21 || score > dScore) return finishBlackjack(session, res, 'WIN', BJ_PAYOUT);
+    if (score === dScore) return finishBlackjack(session, res, 'PUSH', 1.00);
+    return finishBlackjack(session, res, 'DEALER_WINS', 0);
+  });
+
   // ------------------------------------------------------------------
   // HILO — interactive higher/lower card climb with cashout
   // ------------------------------------------------------------------
-  post('/api/play/hilo/start', (req, res) => {
-    const wager = validateWager(req, res);
+  post('/api/play/hilo/start', async (req, res) => {
+    const wager = await validateWager(req, res);
     if (!wager) return;
     const { user, currency, amount } = wager;
 

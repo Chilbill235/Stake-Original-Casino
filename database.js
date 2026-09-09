@@ -349,7 +349,11 @@ const REAL_DB = {
     const keys = Object.keys(fields);
     if (keys.length === 0) return;
     const setClause = keys.map(k => `${k} = ?`).join(', ');
-    const values = keys.map(k => fields[k]);
+    // sql.js rejects `undefined` bind values with a plain string
+    // ("Wrong API use : tried to bind a value of an unknown type (undefined)."),
+    // so coerce them to NULL here — callers pass raw user objects where
+    // optional fields (email, geo, stripe, kyc details) are often undefined.
+    const values = keys.map(k => (fields[k] === undefined ? null : fields[k]));
     values.push(id);
     database.run(`UPDATE users SET ${setClause} WHERE id = ?`, values);
     scheduleSave();

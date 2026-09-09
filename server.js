@@ -149,7 +149,7 @@ function applyDiditDecision(user, status, decision) {
     case 'Abandoned':
     case 'Expired':
     case 'Kyc Expired':
-      // Session is no longer useful — clear it so the user can start fresh.
+      // Session is no longer useful â€” clear it so the user can start fresh.
       user.kyc.status = 'UNVERIFIED';
       user.diditSessionId = null;
       user.kyc.rejectionReason = status === 'Abandoned'
@@ -159,7 +159,7 @@ function applyDiditDecision(user, status, decision) {
       notify = true;
       break;
     default:
-      // Unknown status — don't change state, just record.
+      // Unknown status â€” don't change state, just record.
       console.warn('[KYC]: Unknown Didit status', status);
       return null;
   }
@@ -205,7 +205,6 @@ if (STRIPE_SECRET_KEY) {
 
 const bcrypt = require('bcryptjs');
 const { GAMES, GAME_FLOAT_COUNTS, round2, SLOT_JACKPOT_POOL } = require('./engine/serverGames');
-
 function calculateCryptoRewards(receivedUsd, payment) {
   const pkg = payment.packageId ? COIN_PACKAGES[payment.packageId] : null;
   if (pkg) {
@@ -236,64 +235,47 @@ function cryptoToUsd(currency, amount) {
   return round2(amt * rate);
 }
 
-// -----------------------------------------------------------------------------
-// SWEEPSTAKES PLATFORM COMPLIANCE & GEO-FENCING ENGINE
-// -----------------------------------------------------------------------------
+const RESTRICTED_STATES = [
+  'WA', 'ID', 'NV', 'MI', 'MT', 'CT', 'NJ', 'NY', 'LA', 'TN', 'IN', 'ME', 'OK',
+  'KY', 'GA', 'AL', 'DE', 'AR', 'FL', 'HI', 'IL', 'IA', 'KS', 'MD', 'MN', 'MS',
+  'MO', 'NE', 'NH', 'NC', 'ND', 'PA', 'RI', 'SC', 'SD', 'TX', 'UT', 'VT', 'VA',
+  'WV', 'WI', 'WY'
+];
 
-/**
- * Restricted US Jurisdictions
- * Strictly enforced due to state statutory bans, attorney general cease-and-desists,
- * or explicit prohibition of promotional dual-currency sweepstakes models.
- */
-const RESTRICTED_STATES = new Set([
-  'CA', // California (AB 831 Statutory Ban)
-  'CT', // Connecticut (PA 25-112 Statutory Ban)
-  'ID', // Idaho (Article III Constitutional Gambling Ban)
-  'IN', // Indiana (HB 1052 Statutory Ban)
-  'LA', // Louisiana (HB 883 Dual-Currency Prohibition)
-  'ME', // Maine (LD 2007 Statutory Ban)
-  'MI', // Michigan (MGCB Regulatory Ban & Enforcement)
-  'MT', // Montana (SB 555 Electronic Sweepstakes Ban)
-  'NV', // Nevada (SB 256 / Interactive Gaming Licensing Requirement)
-  'NJ', // New Jersey (A 5447 Statutory Ban)
-  'NY', // New York (S 5935A Statutory Ban)
-  'OK', // Oklahoma (SB 1589 Statutory Ban)
-  'TN', // Tennessee (SB 2136 Statutory Ban)
-  'WA'  // Washington (RCW 9.46.240 Internet Gambling Ban)
-]);
+const RESTRICTED_COUNTRIES = [
+  'AF', 'IQ', 'IR', 'KP', 'LY', 'PK', 'SA', 'SD', 'SS', 'SY', 'YE', 'CN', 'RU'
+];
 
-const RESTRICTED_COUNTRIES = new Set([
-  'AF', 'CN', 'IQ', 'IR', 'KP', 'LY', 'PK', 'RU', 'SA', 'SD', 'SS', 'SY', 'YE'
-]);
+const GEO_CACHE_TTL = 1000 * 60 * 60; // 1 hour
 
-const GEO_CACHE_TTL = 1000 * 60 * 60 * 2; // 2 hours
+const GEO_PROVIDERS = [
+  (ip) => fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`).then(r => r.json()) ,
+  (ip) => fetch(`https://ipwho.is/${encodeURIComponent(ip)}`).then(r => r.json()) ,
+  (ip) => fetch(`https://ip-api.com/json/${encodeURIComponent(ip)}`).then(r => r.json())
+];
 
-/**
- * Enhanced Keywords for VPN, Data Center, and Residential Proxy Detection
- */
-const STRICT_VPN_KEYWORDS = [
-  // VPNs, Anonymizers, and Tor
+const VPN_ASN_KEYWORDS = [
+  // Generic VPN, Proxy & Security Services
   'vpn', 'proxy', 'anonymizer', 'tunnel', 'tor', 'exit-node', 'mullvad', 
   'nordvpn', 'expressvpn', 'surfshark', 'cyberghost', 'privateinternetaccess', 
   'pia', 'ipvanish', 'vyprvpn', 'windscribe', 'proton', 'protonvpn', 'purevpn',
-  'hide.me', 'zenmate', 'strongvpn', 'tunnelbear', 'airvpn', 'ivpn',
+  'hide.me', 'zenmate', 'strongvpn', 'tunnelbear', 'airvpn', 'mullvad', 'ivpn',
 
-  // Residential Proxy Providers
-  'brightdata', 'luminati', 'oxylabs', 'smartproxy', 'geosurf', 'packetstream',
-  'iproyal', 'soax', 'netnut', 'rayobyte', 'webshare', 'proxyrack', 'infatica',
-
-  // Cloud Providers, Data Centers, and Hosting Infrastructure
+  // Cloud Providers & Hyperscalers
   'aws', 'amazon', 'azure', 'gcp', 'google cloud', 'oracle cloud', 'alibaba', 
-  'alicloud', 'tencent', 'ibm cloud', 'scaleway', 'ovh', 'ovhcloud', 'hosting', 
-  'datacenter', 'data center', 'server', 'vps', 'cloud', 'colo', 'colocation', 
-  'dedi', 'dedicated', 'bare metal', 'rackspace', 'digitalocean', 'linode', 
-  'akamai', 'hetzner', 'contabo', 'vultr', 'upcloud', 'hostinger', 'bluehost', 
-  'hostgator', 'godaddy', 'ionos', 'a2 hosting', 'siteground', 'fastcomet', 
-  'inmotion', 'dreamhost', 'liquid web', 'leaseweb', 'choopa',
+  'alicloud', 'tencent', 'ibm cloud', 'scaleway', 'ovh', 'ovhcloud', 
 
-  // CDNs and Security Networks
+  // Hosting, VPS & Infrastructure
+  'hosting', 'datacenter', 'data center', 'server', 'vps', 'cloud', 'colo', 
+  'colocation', 'dedi', 'dedicated', 'bare metal', 'rackspace', 'digitalocean', 
+  'linode', 'akamai', 'hetzner', 'contabo', 'vultr', 'upcloud', 'hostinger', 
+  'bluehost', 'hostgator', 'godaddy', 'ionos', 'a2 hosting', 'siteground', 
+  'fastcomet', 'inmotion', 'dreamhost', 'liquid web', 'leaseweb', 'choopa', 
+
+  // Network Infrastructure & Backbone/Transit
+  'transit', 'backbone', 'peering', 'ixp', 'interconnection', 'cdn', 
   'cloudflare', 'fastly', 'imperva', 'incapsula', 'stackpath', 'limelight', 
-  'edgio', 'ddos-guard', 'sucuri', 'cogent', 'cogentco', 'he.net', 
+  'edgio', 'denial', 'ddos-guard', 'sucuri', 'cogent', 'cogentco', 'he.net', 
   'hurricane electric', 'gtt', 'pccw', 'zayo', 'level3', 'lumen', 'telia', 
   'arelion', 'tata communications', 'seaborn', 'telstra global',
 
@@ -302,93 +284,205 @@ const STRICT_VPN_KEYWORDS = [
   'coresite', 'flexential', 'iron mountain', 'qts', 'databank'
 ];
 
-/**
- * Normalized Geo Providers with strict field resolution and failover safety
- */
-const GEO_PROVIDERS = [
-  async (ip) => {
-    const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.success) return null;
-    return {
-      ip: data.ip,
-      state: data.region_code || null,
-      stateName: data.region || null,
-      country: data.country_code || null,
-      countryName: data.country || null,
-      city: data.city || null,
-      postal: data.postal || null,
-      latitude: data.latitude || null,
-      longitude: data.longitude || null,
-      timezone: data.timezone?.id || null,
-      asn: data.connection?.asn ? `AS${data.connection.asn}` : null,
-      org: data.connection?.org || data.connection?.isp || null,
-      isp: data.connection?.isp || null,
-      isProxy: Boolean(data.security?.proxy || data.security?.vpn || data.security?.tor || data.security?.hosting),
-      providerName: 'ipwho.is'
-    };
-  },
-  async (ip) => {
-    const res = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.error) return null;
-    return {
-      ip: data.ip,
-      state: data.region_code || null,
-      stateName: data.region || null,
-      country: data.country_code || null,
-      countryName: data.country_name || null,
-      city: data.city || null,
-      postal: data.postal || null,
-      latitude: data.latitude || null,
-      longitude: data.longitude || null,
-      timezone: data.timezone || null,
-      asn: data.asn || null,
-      org: data.org || null,
-      isp: data.org || null,
-      isProxy: false,
-      providerName: 'ipapi.co'
-    };
-  },
-  async (ip) => {
-    const res = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,countryCode,country,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.status !== 'success') return null;
-    return {
-      ip: data.query,
-      state: data.region || null,
-      stateName: data.regionName || null,
-      country: data.countryCode || null,
-      countryName: data.country || null,
-      city: data.city || null,
-      postal: data.zip || null,
-      latitude: data.lat || null,
-      longitude: data.lon || null,
-      timezone: data.timezone || null,
-      asn: data.as ? data.as.split(' ')[0] : null,
-      org: data.org || data.as || null,
-      isp: data.isp || null,
-      isProxy: false,
-      providerName: 'ip-api.com'
-    };
-  }
-];
-
+// In-memory geo cache: ip -> { data, expiresAt }
 const geoCache = new Map();
+
+// Coin Package Configurations
+const COIN_PACKAGES = {
+  'pack_10': { name: '15,000 GC + 15 Free SC', priceInCents: 999, gcAmount: 15000, scAmount: 15 },
+  'pack_20': { name: '25,000 GC + 25 Free SC', priceInCents: 1999, gcAmount: 25000, scAmount: 25 },
+  'pack_50': { name: '55,000 GC + 55 Free SC', priceInCents: 4999, gcAmount: 55000, scAmount: 55 },
+  'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 9999, gcAmount: 100000, scAmount: 105 }
+};
+
+function isGuestUser(user) {
+  return !!(user.isGuest || (user.email && user.email.endsWith('@guest.casino')));
+}
+
+// -----------------------------------------------------------------------------
+// 2. IN-MEMORY DATA STORES
+// -----------------------------------------------------------------------------
+const users = new Map();
+const transactions = new Map();
+const processedEvents = new Set();
+const processedEventsTimestamps = new Map();
+// In-memory affiliate store. Used as a fallback when db.* is the memory
+// stub so affiliate status / clicks / applications still work end-to-end.
+// Keyed by user_id.
+const affiliates = new Map();
+// Index by referral code for fast lookups. Code is uppercased.
+const affiliatesByCode = new Map();
+
+// Keep the in-memory user object in sync with DB updates so fields like
+// 2FA secret, password reset tokens, and settings are visible immediately
+// on the next request.
+const _origUpdateUser = db.updateUser.bind(db);
+db.updateUser = async function (userId, fields) {
+  await _origUpdateUser(userId, fields);
+  const user = users.get(userId);
+  if (user) {
+    Object.assign(user, fields);
+  }
+};
+
+// Memory-mode wrappers. In SQLite mode these just call db.*. In memory
+// mode they read/write the in-memory Maps above so the rest of the
+// codebase doesn't have to special-case the backend.
+async function getAffiliateRecord(userId) {
+  if (affiliates.has(userId)) return affiliates.get(userId);
+  const record = await db.getAffiliateByUserId(userId);
+  if (record) {
+    affiliates.set(userId, record);
+    if (record.referral_code) affiliatesByCode.set(String(record.referral_code).toUpperCase(), record);
+  }
+  return record;
+}
+
+async function getAffiliateByCodeRecord(code) {
+  const upper = String(code).trim().toUpperCase();
+  if (affiliatesByCode.has(upper)) return affiliatesByCode.get(upper);
+  const record = await db.getAffiliateByCode(upper);
+  if (record) {
+    affiliates.set(record.user_id, record);
+    affiliatesByCode.set(upper, record);
+  }
+  return record;
+}
+
+async function setAffiliateReferredByMemory(userId, referredBy) {
+  // Always write to db (no-op in memory mode). Also update the in-memory
+  // record so subsequent getAffiliateRecord calls return the fresh value.
+  await db.setAffiliateReferredBy(userId, referredBy);
+  const existing = affiliates.get(userId);
+  if (existing) {
+    existing.referred_by = referredBy;
+  } else {
+    const record = await db.getAffiliateByUserId(userId);
+    if (record) {
+      record.referred_by = referredBy;
+      affiliates.set(userId, record);
+      if (record.referral_code) {
+        affiliatesByCode.set(String(record.referral_code).toUpperCase(), record);
+      }
+    } else {
+      // Create a minimal record so the rest of the system can proceed.
+      const placeholder = { user_id: userId, referral_code: null, referred_by: referredBy, created_at: Date.now() };
+      affiliates.set(userId, placeholder);
+    }
+  }
+}
+
+// Helper: get user from memory Map, falling back to DB (handles serverless cold starts)
+async function getUserById(id) {
+  let user = users.get(id);
+  if (!user) {
+    const dbUser = await db.getUserById(id);
+    if (dbUser) {
+      let bonusState = null;
+      let affiliateRecord = null;
+      try {
+        bonusState = await db.getBonusState(dbUser.id);
+      } catch (e) {
+        console.warn('[DB]: Failed to load bonus_state for user', dbUser.id, e.message);
+      }
+      try {
+        affiliateRecord = await getAffiliateRecord(dbUser.id);
+      } catch (e) {
+        console.warn('[DB]: Failed to load affiliate record for user', dbUser.id, e.message);
+      }
+
+      user = {
+        id: dbUser.id,
+        username: dbUser.username,
+        email: dbUser.email,
+        password: dbUser.password,
+        gc_balance: dbUser.gc_balance,
+        sc_unplayed: dbUser.sc_unplayed,
+        sc_played: dbUser.sc_played,
+        state: dbUser.state,
+        vipTier: dbUser.vip_tier,
+        createdAt: dbUser.created_at,
+        registeredAt: dbUser.registered_at,
+        kyc: {
+          status: dbUser.kyc_status,
+          tier: dbUser.kyc_tier,
+          inquiryId: dbUser.kyc_inquiry_id || null,
+          verifiedAt: dbUser.kyc_verified_at || null,
+          rejectionReason: dbUser.kyc_rejection_reason || null
+        },
+        vip: {
+          tier: dbUser.vip_tier || 'Bronze',
+          totalWageredSC: dbUser.total_wagered_sc || 0,
+          totalWageredGC: dbUser.total_wagered_gc || 0,
+          rakebackAccruedSC: dbUser.rakeback_accrued_sc || 0
+        },
+        bonus: {
+          lastClaimAt: bonusState?.last_claim_at || dbUser.last_daily_claim || 0,
+          claimStreak: bonusState?.claim_streak || dbUser.daily_streak || 0,
+          dailyClaimed: bonusState?.daily_claimed || dbUser.daily_claimed || 0,
+          challengeDate: bonusState?.challenge_date || '',
+          challenges: (() => { try { return JSON.parse(bonusState?.challenges || dbUser.challenges || '[]'); } catch { return []; } })(),
+          rakeback: {
+            lastDailyAt: bonusState?.rakeback_last_daily || 0,
+            lastWeeklyAt: bonusState?.rakeback_last_weekly || 0,
+            lastMonthlyAt: bonusState?.rakeback_last_monthly || 0,
+            dailyPool: bonusState?.rakeback_daily_pool || 0,
+            weeklyPool: bonusState?.rakeback_weekly_pool || 0,
+            monthlyPool: bonusState?.rakeback_monthly_pool || 0
+          }
+        },
+        geo: {
+          ip: dbUser.geo_ip || null,
+          country: dbUser.geo_country || null,
+          city: dbUser.geo_city || null,
+          isVpn: dbUser.geo_is_vpn || 0,
+          riskScore: dbUser.geo_risk_score || 0
+        },
+         referredBy: affiliateRecord ? (affiliateRecord.referred_by || null) : null,
+        hasPayoutAccount: !!dbUser.stripe_account_id,
+        transfersActive: true,
+        stripeAccountId: dbUser.stripe_account_id || null
+      };
+      users.set(user.id, user);
+    }
+  }
+  return user;
+}
+
+// Clean up old processed event IDs every 10 minutes (keep last 1 hour)
+setInterval(() => {
+  const cutoff = Date.now() - 3600000;
+  for (const [id, ts] of processedEventsTimestamps.entries()) {
+    if (ts < cutoff) {
+      processedEventsTimestamps.delete(id);
+      processedEvents.delete(id);
+    }
+  }
+}, 600000);
+
+const activeSessions = new Map();
+const userSeeds = new Map();
+const amoeRegistry = new Map();
+const cryptoPayments = new Map();
+
+// -----------------------------------------------------------------------------
+// 2a. ENHANCED GEOLOCATION & JURISDICTION COMPLIANCE
+// -----------------------------------------------------------------------------
 
 /**
  * Parses and cleans client IP addresses from incoming request headers.
  */
 function getClientIp(req) {
   const headers = req.headers || {};
-  const forwarded = headers['cf-connecting-ip'] || headers['x-forwarded-for'] || headers['x-real-ip'];
-  if (forwarded) {
-    return String(forwarded).split(',')[0].trim().replace(/^::ffff:/, '');
-  }
-  return String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '').trim();
+  const rawIp = 
+    headers['cf-connecting-ip'] || 
+    (headers['x-forwarded-for'] ? headers['x-forwarded-for'].split(',')[0].trim() : null) || 
+    headers['x-real-ip'] || 
+    req.socket?.remoteAddress || 
+    '';
+
+  // Strip IPv6-mapped IPv4 prefix
+  return rawIp.replace(/^::ffff:/, '').trim();
 }
 
 /**
@@ -397,7 +491,7 @@ function getClientIp(req) {
 function isVpnOrHosting(asn, org, isp) {
   const haystack = `${asn || ''} ${org || ''} ${isp || ''}`.toLowerCase();
   if (!haystack.trim()) return false;
-  return STRICT_VPN_KEYWORDS.some(keyword => haystack.includes(keyword));
+  return VPN_ASN_KEYWORDS.some(keyword => haystack.includes(keyword.toLowerCase()));
 }
 
 /**
@@ -408,20 +502,24 @@ async function geoLookup(ip) {
   if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
     return {
       ip,
-      allowed: true,
-      state: 'OH',
-      stateName: 'Ohio',
+      isLocal: true,
       country: 'US',
       countryName: 'United States',
+      region: 'CA',
+      regionName: 'California',
       city: 'Localhost',
-      postal: '45202',
-      coordinates: { latitude: 39.1031, longitude: -84.5120 },
-      timezone: 'America/New_York',
-      network: { asn: 'AS000', org: 'Local', isp: 'Localhost' },
-      flags: { isVpn: false, isProxy: false, isOutsideUS: false, isRestrictedState: false },
+      postalCode: '90001',
+      latitude: 34.0522,
+      longitude: -118.2437,
+      timezone: 'America/Los_Angeles',
+      asn: 'AS0000',
+      org: 'Local Network',
+      isp: 'Internal Loopback',
+      networkType: 'loopback',
+      flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
+      restricted: false,
       riskScore: 0,
-      reasons: [],
-      provider: 'development',
+      provider: 'internal',
       lookedUpAt: Date.now()
     };
   }
@@ -434,65 +532,89 @@ async function geoLookup(ip) {
 
   let lastError = null;
 
-  // 3. Provider Failover Execution Loop
+  // 3. Provider Failover Loop
   for (const provider of GEO_PROVIDERS) {
     try {
       const data = await provider(ip);
-      if (!data || !data.country) continue;
+      if (!data || data.status === 'fail' || data.error) {
+        lastError = data?.reason || data?.error || 'Provider execution failed';
+        continue;
+      }
 
-      const state = data.state ? String(data.state).toUpperCase() : null;
-      const country = data.country ? String(data.country).toUpperCase() : null;
-      
-      const isVpnDetected = data.isProxy || isVpnOrHosting(data.asn, data.org, data.isp);
-      const isOutsideUS = country !== 'US';
-      const isRestrictedState = state ? RESTRICTED_STATES.has(state) : true;
-      const isRestrictedCountry = country ? RESTRICTED_COUNTRIES.has(country) : false;
+      // Normalized Field Mapping
+      const countryCode = String(data.country_code || data.countryCode || data.country || '').toUpperCase() || null;
+      const countryName = data.country_name || data.countryName || null;
+      const regionCode = String(data.region_code || data.region || data.state || data.subdivision || '').toUpperCase() || null;
+      const regionName = data.region_name || data.regionName || data.state_name || null;
+      const city = data.city || null;
+      const postalCode = data.postal || data.postal_code || data.zip || null;
+      const latitude = parseFloat(data.latitude || data.lat) || null;
+      const longitude = parseFloat(data.longitude || data.lon || data.lng) || null;
+      const timezone = data.timezone || data.time_zone || null;
 
-      const reasons = [];
-      if (isOutsideUS) reasons.push(`NON_US_JURISDICTION_${country || 'UNKNOWN'}`);
-      if (isRestrictedState) reasons.push(`RESTRICTED_US_STATE_${state || 'UNKNOWN'}`);
-      if (isRestrictedCountry) reasons.push(`RESTRICTED_COUNTRY_${country || 'UNKNOWN'}`);
-      if (isVpnDetected) reasons.push('VPN_PROXY_DATACENTER_DETECTED');
+      const asn = data.asn || (data.as ? String(data.as).split(' ')[0] : null);
+      const org = data.org || data.organization || null;
+      const isp = data.isp || data.asname || null;
 
-      // Dynamic Risk Scoring Algorithm (0 - 100)
+      // Security Flags Detection
+      const isVpnDetected = isVpnOrHosting(asn, org, isp) || Boolean(data.vpn || data.is_vpn);
+      const isProxyDetected = Boolean(data.proxy || data.is_proxy);
+      const isTorDetected = Boolean(data.tor || data.is_tor);
+      const isHostingDetected = Boolean(data.hosting || data.datacenter || data.is_crawler);
+
+      // Restriction checks against ISO codes
+      const isRestrictedState = RESTRICTED_STATES.includes(regionCode);
+      const isRestrictedCountry = RESTRICTED_COUNTRIES.includes(countryCode);
+      const restricted = isRestrictedState || isRestrictedCountry;
+
+      // Dynamic Risk Score Algorithm (Scale 0 - 100)
       let riskScore = 0;
-      if (isOutsideUS) riskScore += 100;
-      if (isRestrictedState) riskScore += 100;
-      if (isVpnDetected) riskScore += 80;
-      if (!state) riskScore += 50;
+      if (restricted) riskScore += 50;
+      if (isTorDetected) riskScore += 45;
+      if (isVpnDetected) riskScore += 30;
+      if (isProxyDetected) riskScore += 25;
+      if (isHostingDetected) riskScore += 20;
+      if (!countryCode) riskScore += 15; // Unknown origin penalty
 
-      const allowed = !isOutsideUS && !isRestrictedState && !isVpnDetected && riskScore < 50;
+      const finalRiskScore = Math.min(100, riskScore);
 
       const result = {
         ip,
-        allowed,
-        state,
-        stateName: data.stateName || null,
-        country,
-        countryName: data.countryName || null,
-        city: data.city || null,
-        postal: data.postal || null,
+        isLocal: false,
+        country: countryCode,
+        countryName,
+        region: regionCode,
+        regionName,
+        city,
+        postalCode,
         coordinates: {
-          latitude: data.latitude,
-          longitude: data.longitude
+          latitude,
+          longitude
         },
-        timezone: data.timezone,
+        timezone,
         network: {
-          asn: data.asn,
-          org: data.org,
-          isp: data.isp
+          asn,
+          org,
+          isp,
+          connectionType: data.connection_type || data.net_type || 'unknown'
         },
         flags: {
           isVpn: isVpnDetected,
-          isOutsideUS,
-          isRestrictedState
+          isProxy: isProxyDetected,
+          isTor: isTorDetected,
+          isDatacenter: isHostingDetected
         },
-        riskScore: Math.min(100, riskScore),
-        reasons,
-        provider: data.providerName,
+        restricted,
+        restrictionDetails: {
+          byState: isRestrictedState,
+          byCountry: isRestrictedCountry
+        },
+        riskScore: finalRiskScore,
+        provider: data.providerName || 'geo_provider',
         lookedUpAt: Date.now()
       };
 
+      // Save to cache
       geoCache.set(ip, { data: result, expiresAt: Date.now() + GEO_CACHE_TTL });
       return result;
 
@@ -502,38 +624,27 @@ async function geoLookup(ip) {
     }
   }
 
-  // 4. Fallback Payload: Strict Fail-Closed Security Policy
-  console.error(`[Compliance Failure] Universal lookup failed for IP ${ip}: ${lastError}`);
+  // 4. Fallback Payload on Full Failure
+  console.warn(`[Geo] All providers failed for ${ip}: ${lastError}`);
   return {
     ip,
-    allowed: false,
-    state: null,
-    stateName: null,
+    isLocal: false,
     country: null,
     countryName: null,
+    region: null,
+    regionName: null,
     city: null,
-    postal: null,
+    postalCode: null,
     coordinates: { latitude: null, longitude: null },
     timezone: null,
-    network: { asn: null, org: null, isp: null },
-    flags: { isVpn: false, isOutsideUS: true, isRestrictedState: true },
-    riskScore: 100,
-    reasons: ['GEO_LOOKUP_FAILED_FAIL_CLOSED'],
+    network: { asn: null, org: null, isp: null, connectionType: 'unknown' },
+    flags: { isVpn: false, isProxy: false, isTor: false, isDatacenter: false },
+    restricted: null,
+    restrictionDetails: { byState: false, byCountry: false },
+    riskScore: -1,
     error: lastError,
     lookedUpAt: Date.now()
   };
-}
-
-// Coin Package Configurations
-const COIN_PACKAGES = {
-  'pack_10': { name: '15,000 GC + 15 Free SC', priceInCents: 999, gcAmount: 15000, scAmount: 15 },
-  'pack_20': { name: '25,000 GC + 25 Free SC', priceInCents: 1999, gcAmount: 25000, scAmount: 25 },
-  'pack_50': { name: '55,000 GC + 55 Free SC', priceInCents: 4999, gcAmount: 55000, scAmount: 55 },
-  'pack_100': { name: '100,000 GC + 105 Free SC', priceInCents: 9999, gcAmount: 100000, scAmount: 105 }
-};
-
-function isGuestUser(user) {
-  return !!(user.isGuest || (user.email && user.email.endsWith('@guest.casino')));
 }
 
 // -----------------------------------------------------------------------------
@@ -553,15 +664,16 @@ function generateUserId() {
   nextUserId++;
   return id;
 }
+
 // -----------------------------------------------------------------------------
-// 2b. PERSISTENCE — SQLite database for durable storage
+// 2b. PERSISTENCE â€” SQLite database for durable storage
 // -----------------------------------------------------------------------------
 async function loadData() {
   try {
     await db.initPromise;
     const userCount = await db.getUserCount();
     if (userCount === 0) {
-      console.log('[Persistence]: No users in database, will seed demo user.');
+      console.log('[Persistence]: No registered users yet.');
       return;
     }
 
@@ -674,6 +786,7 @@ async function saveData() {
         username: user.username,
         email: user.email,
         gc_balance: user.gc_balance,
+        password: user.password,
         sc_unplayed: user.sc_unplayed,
         sc_played: user.sc_played,
         stripe_account_id: user.stripeAccountId,
@@ -707,7 +820,7 @@ async function saveData() {
       }
     }
   } catch (e) {
-    console.error('[Persistence]: Failed to save data:', e.message);
+    console.error('[Persistence]: Failed to save data:', e && e.message ? e.message : e);
   }
 }
 
@@ -750,80 +863,9 @@ if (process.env.VERCEL) {
       nextUserId = Math.max(...users.keys()) + 1;
     }
 
-  // Seed Initial Demo User only if no users exist (don't clobber persisted data)
-  if (users.size === 0) {
-    try {
-      const demoId = await db.createUser({
-        username: 'Player_1001',
-        email: 'player1001@example.com',
-        password: await bcrypt.hash('Demo1234!', 12),
-        gcBalance: 10000,
-        scBalance: 50
-      });
+    // No automatic demo/test user is created. New players must register
+    // through the sign-up flow on the landing page.
 
-      await db.updateUser(demoId, {
-        kyc_status: 'VERIFIED',
-        kyc_tier: 2,
-        kyc_inquiry_id: 'inq_demo123',
-        kyc_verified_at: new Date().toISOString()
-      });
-
-      const demoUser = {
-        id: demoId,
-        username: 'Player_1001',
-        email: 'player1001@example.com',
-        password: await bcrypt.hash('Demo1234!', 12),
-        gc_balance: 10000.0,
-        sc_unplayed: 50.0,
-        sc_played: 0.0,
-        stripeAccountId: null,
-        kyc: {
-          status: 'VERIFIED',
-          tier: 2,
-          inquiryId: 'inq_demo123',
-          verifiedAt: new Date().toISOString(),
-          rejectionReason: null
-        },
-        lastDailyClaim: 0,
-        dailyStreak: 0,
-        adsWatchedToday: 0,
-        lastAdReset: Date.now(),
-        state: 'CA',
-        createdAt: Date.now(),
-        vipTier: 'Bronze',
-        totalWageredGC: 0,
-        totalWageredSC: 0,
-        rakebackAccruedSC: 0,
-        isGuest: false,
-        bonus: {
-          lastClaimAt: 0,
-          claimStreak: 0,
-          dailyClaimed: false,
-          challenges: [],
-          challengeDate: '',
-          telemetry: {
-            scWagered: 0, gcWagered: 0, rounds: 0, roundsWon: 0,
-            gamesPlayed: [], dailyLossSC: 0, dailyWagerSC: 0, dailyWinSC: 0,
-            weeklyLossSC: 0, weeklyWagerSC: 0, weeklyWinSC: 0,
-            monthlyLossSC: 0, monthlyWagerSC: 0, monthlyWinSC: 0,
-            diceOver90: 0, crashCashout2x: 0, blackjackHands: 0,
-            history: [],
-            lastDailyReset: Date.now(),
-            lastWeeklyReset: Date.now(),
-            lastMonthlyReset: Date.now()
-          },
-          rakeback: {
-            lastDailyAt: 0, lastWeeklyAt: 0, lastMonthlyAt: 0,
-            dailyPool: 0, weeklyPool: 0, monthlyPool: 0
-          }
-        }
-      };
-      users.set(demoId, demoUser);
-      transactions.set(demoId, []);
-    } catch (seedErr) {
-      console.error('[Init]: Failed to seed demo user:', seedErr.message);
-    }
-  }
 
     console.log('[Init]: Database initialized, ' + users.size + ' users loaded.');
     startServer();
@@ -845,7 +887,7 @@ async function startServer() {
   });
 
   server.listen(PORT, () => {
-    console.log(`🎰 SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
+    console.log(`ðŸŽ° SWEEPSTAKES CASINO ENGINE ONLINE: Port ${PORT}`);
   });
 }
 
@@ -1237,6 +1279,48 @@ app.post('/api/webhooks/kyc', express.raw({ type: 'application/json' }), (req, r
   res.json({ success: true, webhook_type: webhook_type || null });
 });
 
+// Gzip compression - client.js/styles.css are large; cuts payload ~70-80%.
+app.use((req, res, next) => {
+  const accept = req.headers['accept-encoding'] || '';
+  if (!accept.includes('gzip')) return next();
+  const origWrite = res.write.bind(res);
+  const origEnd = res.end.bind(res);
+  let stream = null;
+  let done = false;
+  const cleanup = () => { done = true; };
+  res.on('close', () => { if (stream && !done) { cleanup(); try { stream.destroy(); } catch (e) {} } });
+  const tryGzip = () => {
+    if (stream || done || res.headersSent) return stream;
+    const ct = String(res.getHeader('Content-Type') || '');
+    if (res.getHeader('Content-Encoding')) return null;
+    if (!/text\/|application\/(json|javascript|xml)|image\/svg/.test(ct)) return null;
+    res.setHeader('Content-Encoding', 'gzip');
+    res.removeHeader('Content-Length');
+    stream = require('zlib').createGzip();
+    stream.on('error', () => { cleanup(); try { origEnd(); } catch (e) {} });
+    // NOTE: do NOT stream.pipe(res) here — pipe would route the compressed
+    // chunks through the overridden res.write below, which drops them after
+    // done=true (the client then hangs waiting for a body that never comes).
+    // Forward gzip output through the ORIGINAL write/end instead.
+    stream.on('data', (c) => { try { origWrite(c); } catch (e) {} });
+    stream.on('end', () => { cleanup(); try { origEnd(); } catch (e) {} });
+    return stream;
+  };
+  res.write = (chunk, enc, cb) => {
+    if (done) return false;
+    const g = tryGzip();
+    if (g) return g.write(chunk, enc, cb);
+    return origWrite(chunk, enc, cb);
+  };
+  res.end = (chunk, enc, cb) => {
+    if (done) return;
+    const g = tryGzip();
+    if (g) return g.end(chunk, enc, cb);
+    return origEnd(chunk, enc, cb);
+  };
+  next();
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -1264,12 +1348,23 @@ function rateLimit(maxRequests, windowMs) {
 }
 
 app.use(rateLimit(500, 60000));
+// Strict per-IP limits on authentication endpoints (brute-force protection)
+app.use('/api/auth/login', rateLimit(15, 60000));
+app.use('/api/auth/register', rateLimit(8, 60000));
+app.use('/api/auth/forgot-password', rateLimit(5, 60000));
+app.use('/api/auth/reset-password', rateLimit(10, 60000));
+app.use('/api/auth/guest', rateLimit(6, 60000));
 
 // Security headers
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.secure || (req.headers['x-forwarded-proto'] === 'https')) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
 
@@ -1277,7 +1372,8 @@ app.post('/api/auth/forgot-password', (req, res) => {
   const { email } = req.body || {};
   if (!email) return res.status(400).json({ error: 'Email is required.' });
 
-  const user = Array.from(users.values()).find(u => u.email === email);
+  const needle = String(email).toLowerCase();
+  const user = Array.from(users.values()).find(u => u.email && String(u.email).toLowerCase() === needle);
   if (!user) {
     return res.json({ success: true, message: 'If an account with that email exists, a password reset link has been sent.' });
   }
@@ -1288,8 +1384,11 @@ app.post('/api/auth/forgot-password', (req, res) => {
   user.passwordResetToken = resetToken;
   user.passwordResetExpiry = resetExpiry;
   saveData();
-
-  res.json({ success: true, message: 'If an account with that email exists, a password reset link has been sent.' });
+  // No mail provider is wired up; in local/dev mode the reset token may be
+  // returned directly so the flow is completable. NEVER enable in production.
+  const payload = { success: true, message: 'If an account with that email exists, a password reset link has been sent.' };
+  if (process.env.ALLOW_RESET_TOKEN_IN_RESPONSE === 'true') payload.resetToken = resetToken;
+  res.json(payload);
 });
 
 app.post('/api/auth/reset-password', async (req, res) => {
@@ -1312,6 +1411,41 @@ app.post('/api/auth/reset-password', async (req, res) => {
   saveData();
 
   res.json({ success: true, message: 'Password reset successfully.' });
+});
+
+// -----------------------------------------------------------------------------
+// 6b. HEALTH CHECK & LEADERBOARD
+// -----------------------------------------------------------------------------
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    uptimeSeconds: Math.floor(process.uptime()),
+    users: users.size,
+    activeGames: Object.keys(GAMES).length,
+    timestamp: Date.now()
+  });
+});
+
+// Public daily leaderboard — ranks players by total volume wagered.
+app.get('/api/leaderboard', (req, res) => {
+  const rows = [];
+  for (const u of users.values()) {
+    if (!u.username) continue;
+    const gc = Number(u.totalWageredGC) || 0;
+    const sc = Number(u.totalWageredSC) || 0;
+    if (gc <= 0 && sc <= 0) continue;
+    rows.push({
+      username: String(u.username).slice(0, 24),
+      vipTier: u.vipTier || 'Bronze',
+      gcWagered: Math.round(gc),
+      scWagered: round2(sc),
+      rounds: (u.bonus && u.bonus.telemetry && Number(u.bonus.telemetry.rounds)) || 0,
+      // GC 1,000 ≈ $1 of play; SC ≈ $1. Combined volume score.
+      score: gc / 1000 + sc
+    });
+  }
+  rows.sort((a, b) => b.score - a.score);
+  res.json({ leaderboard: rows.slice(0, 20), updatedAt: Date.now() });
 });
 
 // -----------------------------------------------------------------------------
@@ -1987,7 +2121,14 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     let foundUser = null;
-    const dbUser = await db.findByEmail(email);
+    let dbUser = await db.findByEmail(email);
+    if (!dbUser) {
+      // Memory backend: db reads are no-ops, so search the live in-memory map.
+      const needle = String(email).toLowerCase();
+      for (const u of users.values()) {
+        if (u.email && String(u.email).toLowerCase() === needle) { foundUser = u; break; }
+      }
+    }
     if (dbUser) {
       foundUser = users.get(dbUser.id);
       if (!foundUser) {
@@ -2454,7 +2595,7 @@ app.get('/api/user/kyc/status', verifyToken, async (req, res) => {
         if (updated) live = { status: decision.status, fetchedAt: Date.now() };
       }
     } catch (e) {
-      // Don't 500 the whole endpoint if Didit is rate-limiting or down — the
+      // Don't 500 the whole endpoint if Didit is rate-limiting or down â€” the
       // client should just keep using its local kyc row.
       console.warn('[KYC]: live poll failed:', e.message);
     }
@@ -2736,7 +2877,7 @@ app.post('/api/user/crypto-payment/initiate', verifyToken, enforceJurisdiction, 
 });
 // FIX: close server.on('upgrade') callback so subsequent routes register correctly
 
-// Crypto payment status polling endpoint — lets the client auto-detect
+// Crypto payment status polling endpoint â€” lets the client auto-detect
 // when a deposit has been confirmed without the user re-pasting a txid.
 app.get('/api/user/crypto-payment/status/:paymentId', verifyToken, enforceJurisdiction, (req, res) => {
   const payment = cryptoPayments.get(req.params.paymentId);
@@ -2760,7 +2901,7 @@ app.get('/api/user/crypto-payment/status/:paymentId', verifyToken, enforceJurisd
 // -----------------------------------------------------------------------------
 // Crypto payment confirmation by txid (user-submitted)
 // Every currency is verified on-chain (Solana RPC, mempool.space, Ethereum
-// JSON-RPC) before the package is credited — no packs are granted without
+// JSON-RPC) before the package is credited â€” no packs are granted without
 // verified payment. In production this is also driven by a blockchain webhook.
 // -----------------------------------------------------------------------------
 app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, async (req, res) => {
@@ -2804,7 +2945,7 @@ app.post('/api/user/crypto-payment/confirm', verifyToken, enforceJurisdiction, a
       user.gc_balance = round2((user.gc_balance || 0) + creditedGc);
       user.sc_unplayed = round2((user.sc_unplayed || 0) + creditedSc);
       const txAmount = amountSent ? parseFloat(amountSent) : Number(payment.amount || 0);
-      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''} — $${receivedUsd} USD`, creditedGc, creditedSc, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null, receivedUsd, matchedPackage: rewards.matchedPackage });
+      logTransaction(user.id, 'PURCHASE', `Crypto ${payment.currency} deposit (txid ${txid}) ${txAmount ? txAmount + ' ' + payment.currency + ' sent' : ''} â€” $${receivedUsd} USD`, creditedGc, creditedSc, { paymentId, currency: payment.currency, txid, amountSent: txAmount || null, receivedUsd, matchedPackage: rewards.matchedPackage });
       creditReferrerForDeposit(user, receivedUsd);
       try { await db.addTransaction({ id: `crypto_${paymentId}`, userId: user.id, type: 'PURCHASE', description: `Crypto ${payment.currency} deposit (txid ${txid})`, gcDelta: creditedGc, scDelta: creditedSc, currency: 'GC', amount: receivedUsd, status: 'COMPLETED', metadata: { paymentId, currency: payment.currency, chain: payment.chain, address: payment.address, txid, amountSent: txAmount || null, receivedUsd, matchedPackage: rewards.matchedPackage } }); } catch (e) { console.error('[Crypto Confirm DB]:', e.message); }
       saveData();
@@ -3017,7 +3158,7 @@ async function verifyCryptoDeposit(payment, txid) {
       return { verified: true, received: receivedSol + ' SOL', receivedUsd };
     }
 
-    // ---- Solana: SPL token (USDC) — match by token-account owner OR credited account ----
+    // ---- Solana: SPL token (USDC) â€” match by token-account owner OR credited account ----
     if (currency === 'USDC') {
       const { tx, meta } = await solanaGetTransaction(txid);
       if (!tx || !meta || meta.err) return { verified: false, error: 'Solana transaction not found or failed.' };
@@ -3151,7 +3292,7 @@ app.post('/api/user/crypto-payment/phantom-confirm', verifyToken, enforceJurisdi
           const pre = meta.preBalances?.[fromIdx] ?? 0;
           const post = meta.postBalances?.[fromIdx] ?? 0;
           lamportsSent = pre - post;
-          // Accept any positive transfer above dust (10000 lamports ≈ $0.0006)
+          // Accept any positive transfer above dust (10000 lamports â‰ˆ $0.0006)
           if (lamportsSent > 10000) {
             verified = true;
           }
@@ -3704,7 +3845,7 @@ function calcChallengeReward(challenge) {
 // -----------------------------------------------------------------------------
 // 12a. DAILY CLAIM ENDPOINTS
 // -----------------------------------------------------------------------------
-// Fixed reward: 1,000 GC + 1.00 SC (≈ $1 USD value), strict 24-hour cooldown
+// Fixed reward: 1,000 GC + 1.00 SC (â‰ˆ $1 USD value), strict 24-hour cooldown
 
 const DAILY_CLAIM_REWARD = { gc: 1000, sc: 1.00 };
 

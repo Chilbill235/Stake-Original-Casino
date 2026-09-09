@@ -1,5 +1,13 @@
 window.GameRenderers = window.GameRenderers || {};
 
+GameRenderers.canDoubleDown = function (data) {
+  return !!data && !data.resolved && Array.isArray(data.playerHand) && data.playerHand.length === 2;
+};
+
+// SPLIT and INSURANCE are not supported by the game engine yet — keep hidden.
+GameRenderers.canSplit = function () { return false; };
+GameRenderers.canInsurance = function () { return false; };
+
 /* ==========================================================================
    1. DYNAMIC CSS STYLES INJECTION
    ========================================================================== */

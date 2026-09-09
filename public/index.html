@@ -32,7 +32,7 @@
       </div>
     </div>
 
-<div class="navbar-center">
+<div class="navbar-center" id="nav-wallet-area">
       <div class="wallet-toolbar">
         <!-- Wallet Selector with integrated balance -->
         <div class="wallet-selector" id="wallet-selector">
@@ -54,6 +54,12 @@
     </div>
 
     <div class="navbar-right">
+      <!-- Shown only when signed OUT -->
+      <div class="nav-auth-actions" id="nav-auth-actions" style="display:none;">
+        <button type="button" class="btn-secondary-action nav-auth-btn" onclick="openAuthModal()">Sign In</button>
+        <button type="button" class="btn-play nav-auth-btn" onclick="switchAuthMode('register'); openAuthModal()">Create Account</button>
+      </div>
+      <!-- Shown only when signed IN -->
       <button class="btn-wallet-connect" id="btn-wallet-connect" onclick="openWalletConnectModal()" title="Connect wallet for crypto payments">
         <span class="wc-icon">👻</span>
         <span class="wc-label">Connect</span>
@@ -254,7 +260,73 @@
     <main class="content-stage">
       
       <!-- LOBBY VIEW -->
-      <div id="view-lobby" class="game-view">
+      <!-- LANDING PAGE (unauthenticated visitors) -->
+  <div id="view-landing" class="game-view hidden">
+    <section class="lp-hero">
+      <div class="lp-hero-inner">
+        <div class="lp-hero-badge">⚡ 12 Provably Fair Originals</div>
+        <h1 class="lp-hero-title">Play the best<br><span class="lp-gradient">original casino games</span></h1>
+        <p class="lp-hero-sub">Slots, Blackjack, Mines, Crash, Plinko and more — every round verifiable, every win instant. Create a free account to get started.</p>
+        <div class="lp-hero-actions">
+          <button type="button" class="btn-play lp-btn-big" onclick="switchAuthMode('register'); openAuthModal()">Create Free Account</button>
+          <button type="button" class="btn-secondary-action lp-btn-big" onclick="openAuthModal()">Sign In</button>
+        </div>
+        <div class="lp-hero-stats">
+          <div class="lp-stat"><span class="lp-stat-num">12</span><span class="lp-stat-label">Original Games</span></div>
+          <div class="lp-stat"><span class="lp-stat-num">100%</span><span class="lp-stat-label">Provably Fair</span></div>
+          <div class="lp-stat"><span class="lp-stat-num">24/7</span><span class="lp-stat-label">Instant Play</span></div>
+          <div class="lp-stat"><span class="lp-stat-num">SSL</span><span class="lp-stat-label">Secured</span></div>
+        </div>
+      </div>
+      <div id="lp-particles" class="lp-particles" aria-hidden="true"></div>
+    </section>
+
+    <section class="lp-section">
+      <div class="lp-section-head">
+        <h2>🎮 The Full Casino Floor</h2>
+        <p>Sign in to play every original — all in one lobby.</p>
+      </div>
+      <div class="lp-games-grid">
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🎰</span><span class="lp-game-name">Slots</span><span class="lp-game-tag">Jackpots</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🃏</span><span class="lp-game-name">Blackjack</span><span class="lp-game-tag">3:2 Payout</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">💣</span><span class="lp-game-name">Mines</span><span class="lp-game-tag">Cashout</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">📈</span><span class="lp-game-name">Crash</span><span class="lp-game-tag">Multipliers</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🔻</span><span class="lp-game-name">Plinko</span><span class="lp-game-tag">Up to 110x</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🎯</span><span class="lp-game-name">Keno</span><span class="lp-game-tag">Pick 10</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🎲</span><span class="lp-game-name">Dice</span><span class="lp-game-tag">99% RTP</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🚀</span><span class="lp-game-name">Limbo</span><span class="lp-game-tag">High Risk</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🎡</span><span class="lp-game-name">Wheel</span><span class="lp-game-tag">50x Gold</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🃏</span><span class="lp-game-name">Baccarat</span><span class="lp-game-tag">Live Odds</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">🗼</span><span class="lp-game-name">Tower</span><span class="lp-game-tag">8 Floors</span></div>
+        <div class="lp-game-card" onclick="switchAuthMode('register'); openAuthModal()"><span class="lp-game-icon">⬆️</span><span class="lp-game-name">HiLo</span><span class="lp-game-tag">Streaks</span></div>
+      </div>
+    </section>
+
+    <section class="lp-section lp-features">
+      <div class="lp-section-head">
+        <h2>🏆 Why Players Choose Us</h2>
+      </div>
+      <div class="lp-features-grid">
+        <div class="lp-feature"><span class="lp-feature-icon">🔐</span><h3>Provably Fair</h3><p>Every bet uses HMAC-SHA256 seeds you can verify yourself — no trust required.</p></div>
+        <div class="lp-feature"><span class="lp-feature-icon">🎁</span><h3>Daily Rewards</h3><p>Free daily coins, challenges, rakeback and VIP tiers that grow with your play.</p></div>
+        <div class="lp-feature"><span class="lp-feature-icon">⚡</span><h3>Instant Play</h3><p>No downloads. Runs in your browser on desktop and mobile, anywhere.</p></div>
+        <div class="lp-feature"><span class="lp-feature-icon">🛡️</span><h3>Safe & Secure</h3><p>Encrypted connections, verified age checks and responsible gaming tools.</p></div>
+      </div>
+    </section>
+
+    <section class="lp-cta">
+      <h2>Ready to play?</h2>
+      <p>It takes less than a minute to create your free account.</p>
+      <button type="button" class="btn-play lp-btn-big" onclick="switchAuthMode('register'); openAuthModal()">Get Started — It's Free</button>
+    </section>
+
+    <footer class="lp-footer">
+      <span>© 2026 Stake Originals — Social casino for entertainment only. No real-money gambling.</span>
+      <span class="lp-footer-links"><a href="/legal/terms.html">Terms</a> · <a href="/legal/privacy.html">Privacy</a> · <a href="/legal/sweepstakes-rules.html">Sweepstakes Rules</a></span>
+    </footer>
+  </div>
+
+  <div id="view-lobby" class="game-view">
         <!-- Hero Section -->
         <section class="hero-section">
           <div class="hero-particles" id="hero-particles"></div>
@@ -294,6 +366,15 @@
 
         <!-- Guest Verification Banner -->
         <div id="guest-verification-container" class="hidden"></div>
+
+        <!-- Daily Leaderboard -->
+        <section class="leaderboard-section" id="leaderboard-section">
+          <div class="lb-header">
+            <h3>🏆 Daily Leaderboard</h3>
+            <span class="lb-sub">Top players by total volume wagered</span>
+          </div>
+          <div id="leaderboard-list" class="lb-list"><div class="lb-empty">Loading leaderboard…</div></div>
+        </section>
 
         <!-- Category Filter -->
         <div class="lobby-toolbar">
@@ -1088,7 +1169,6 @@
          <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
            <button type="button" onclick="submitLogin()" class="btn-play btn-full">LOGIN</button>
            <button type="button" onclick="switchAuthMode('register')" class="btn-secondary-action btn-full">Create New Account</button>
-           <button type="button" onclick="continueAsGuest()" class="btn-secondary-action btn-full guest-btn">Continue as Guest</button>
          </div>
       </div>
 
