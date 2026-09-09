@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Reset Password — Stake Originals</title>
+  <link rel="icon" href="/favicon.ico" />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-darker:#070d14; --bg-input:#0d1a2d; --bg-elevated:#243654; --border-color:#2a4a6b;
+      --accent-green:#00ff41; --accent-cyan:#00b4ff; --text-primary:#fff; --text-secondary:#94a3b8; --text-muted:#64748b;
+      --font:'Plus Jakarta Sans',-apple-system,'Segoe UI',sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:var(--font);background:radial-gradient(1200px 600px at 80% -10%,rgba(0,255,65,.12),transparent 60%),linear-gradient(160deg,#070d14 0%,#0a1628 60%,#0b1422 100%);color:var(--text-primary);display:flex;align-items:center;justify-content:center;padding:24px 16px;min-height:100vh;}
+    .auth-wrap{position:relative;z-index:2;width:100%;max-width:440px;}
+    .brand{text-align:center;margin-bottom:24px;}
+    .brand a{text-decoration:none;color:inherit;display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:1.4rem;}
+    .brand-logo{display:inline-flex;width:42px;height:42px;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(135deg,#00ff41,#00b4ff);font-size:22px;box-shadow:0 6px 22px rgba(0,255,65,.35);}
+    .brand .highlight{color:var(--accent-green);}
+    .card{background:linear-gradient(145deg,rgba(26,43,68,.9),rgba(17,29,50,.92));border:1px solid var(--border-color);border-radius:14px;padding:32px 28px;box-shadow:0 24px 70px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.04);}
+    .card h1{font-size:1.4rem;}
+    .card .subtitle{color:var(--text-secondary);font-size:.88rem;margin-top:6px;line-height:1.5;}
+    .field{margin-top:18px;}
+    .field label{display:block;font-size:.78rem;font-weight:600;color:var(--text-secondary);letter-spacing:.03em;text-transform:uppercase;margin-bottom:7px;}
+    .input-wrap{position:relative;}
+    .input-wrap input{width:100%;padding:13px 12px 13px 42px;font-size:.95rem;color:#fff;background:var(--bg-input);border:1px solid var(--border-color);border-radius:10px;transition:border-color .2s,box-shadow .2s;font-family:var(--font);}
+    .input-wrap .icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:16px;opacity:.6;font-style:normal;}
+    .input-wrap input:focus{outline:none;border-color:var(--accent-green);box-shadow:0 0 0 3px rgba(0,255,65,.12);}
+    .btn{width:100%;padding:14px;margin-top:20px;font-size:.95rem;font-weight:700;border:none;border-radius:10px;cursor:pointer;color:#04120a;background:linear-gradient(135deg,var(--accent-green),var(--accent-cyan));box-shadow:0 8px 24px rgba(0,255,65,.28);font-family:var(--font);}
+    .btn:disabled{opacity:.55;cursor:not-allowed;}
+    .ok{display:none;align-items:flex-start;gap:8px;margin-top:16px;padding:12px 14px;background:rgba(0,255,65,.08);border:1px solid rgba(0,255,65,.35);color:#b9f6c9;border-radius:10px;font-size:.85rem;line-height:1.5;}
+    .ok.show{display:flex;}
+    .error{display:none;align-items:flex-start;gap:8px;margin-top:16px;padding:11px 13px;background:rgba(255,51,102,.1);border:1px solid rgba(255,51,102,.4);color:#ff9db8;border-radius:10px;font-size:.84rem;line-height:1.45;}
+    .error.show{display:flex;}
+    .foot{text-align:center;margin-top:22px;color:var(--text-muted);font-size:.82rem;}
+    .foot a{color:var(--text-secondary);text-decoration:none;}
+    .foot a:hover{color:#fff;}
+  </style>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="brand">
+      <a href="/" aria-label="Stake Originals Home">
+        <span class="brand-logo">&#9889;</span>
+        <span>STAKE<span class="highlight">&nbsp;ORIGINALS</span></span>
+      </a>
+    </div>
+
+    <section class="card">
+      <h1>Reset your password</h1>
+      <p class="subtitle" id="intro">Enter your account email and we will send a secure, single-use reset link that expires in 60 minutes.</p>
+
+      <form id="req-form" novalidate>
+        <div class="field">
+          <label for="email">Email address</label>
+          <div class="input-wrap">
+            <span class="icon">&#9993;</span>
+            <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required />
+          </div>
+        </div>
+        <div class="error" id="error" role="alert"></div>
+        <div class="ok" id="ok"></div>
+        <button type="submit" class="btn" id="reqBtn"><span class="label">SEND RESET LINK</span></button>
+      </form>
+
+      <form id="reset-form" novalidate style="display:none;">
+        <div class="field">
+          <label for="np">New password</label>
+          <div class="input-wrap">
+            <span class="icon">&#128274;</span>
+            <input type="password" id="np" name="np" placeholder="Min 8 characters" autocomplete="new-password" required />
+          </div>
+        </div>
+        <div class="field">
+          <label for="np2">Confirm new password</label>
+          <div class="input-wrap">
+            <span class="icon">&#128274;</span>
+            <input type="password" id="np2" name="np2" placeholder="Repeat password" autocomplete="new-password" required />
+          </div>
+        </div>
+        <div class="error" id="rerror" role="alert"></div>
+        <div class="ok" id="rok"></div>
+        <button type="submit" class="btn" id="resetBtn"><span class="label">UPDATE PASSWORD</span></button>
+      </form>
+    </section>
+
+    <div class="foot"><a href="/login">&#8592; Back to Sign In</a></div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+    var params = new URLSearchParams(window.location.search);
+    var urlToken = params.get('token') || '';
+    var reqForm = document.getElementById('req-form');
+    var resetForm = document.getElementById('reset-form');
+    var errorEl = document.getElementById('error');
+    var okEl = document.getElementById('ok');
+    var rerrorEl = document.getElementById('rerror');
+    var rokEl = document.getElementById('rok');
+
+    function show(el, msg) { el.className = el.className.replace('show', '') + ' show'; el.textContent = msg; }
+    function hide(el) { el.className = el.className.replace('show', ''); el.textContent = ''; }
+    function setLoading(btn, l, txt) { btn.disabled = l; btn.querySelector('.label').textContent = txt; }
+    function strongEnough(v) { return v.length >= 8 && /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v); }
+
+    // Deep-link reset: /forgot-password?token=... skips straight to the form.
+    if (urlToken) {
+      document.getElementById('intro').textContent = 'Choose a new password for your account.';
+      reqForm.style.display = 'none';
+      resetForm.style.display = 'block';
+    }
+
+    reqForm.addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      hide(errorEl); hide(okEl);
+      var email = document.getElementById('email').value.trim();
+      if (!email) { show(errorEl, 'Please enter your email address.'); return; }
+      var btn = document.getElementById('reqBtn');
+      setLoading(btn, true, 'SENDING...');
+      try {
+        var res = await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email }) });
+        var data = {};
+        try { data = await res.json(); } catch (e) {}
+        setLoading(btn, false, 'SEND RESET LINK');
+        if (res.ok) {
+          show(okEl, data.message || 'If an account with that email exists, a reset link has been sent.');
+          reqForm.querySelector('#email').value = '';
+          if (data.resetToken) {
+            // Dev mode: token returned directly, continue in place.
+            location.replace('/forgot-password?token=' + encodeURIComponent(data.resetToken));
+          }
+        } else {
+          show(errorEl, data.error || 'Could not process the request.');
+        }
+      } catch (e) {
+        setLoading(btn, false, 'SEND RESET LINK');
+        show(errorEl, 'A network error occurred. Please try again.');
+      }
+    });
+
+    resetForm.addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      hide(rerrorEl); hide(rokEl);
+      var np = document.getElementById('np').value;
+      var np2 = document.getElementById('np2').value;
+      if (!np) { show(rerrorEl, 'Please enter a new password.'); return; }
+      if (!strongEnough(np)) { show(rerrorEl, 'Password must be 8+ characters with uppercase, lowercase, and a number.'); return; }
+      if (np !== np2) { show(rerrorEl, 'Passwords do not match.'); return; }
+      var btn = document.getElementById('resetBtn');
+      setLoading(btn, true, 'UPDATING...');
+      try {
+        var res = await fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: urlToken, newPassword: np }) });
+        var data = {};
+        try { data = await res.json(); } catch (e) {}
+        setLoading(btn, false, 'UPDATE PASSWORD');
+        if (res.ok) {
+          show(rokEl, 'Password updated. You can now sign in with your new password.');
+          setTimeout(function () { location.replace('/login'); }, 1800);
+        } else {
+          show(rerrorEl, data.error || 'Invalid or expired reset link.');
+        }
+      } catch (e) {
+        setLoading(btn, false, 'UPDATE PASSWORD');
+        show(rerrorEl, 'A network error occurred. Please try again.');
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

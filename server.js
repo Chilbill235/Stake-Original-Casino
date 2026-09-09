@@ -1372,6 +1372,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// Security headers applied to every response (HTML, API, assets).
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  if (IS_PRODUCTION) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -4477,6 +4490,18 @@ app.get('/account', (req, res) => res.type('html').send(renderPage('account')));
 app.get('/bonus', (req, res) => res.type('html').send(renderPage('bonus')));
 app.get('/challenges', (req, res) => res.type('html').send(renderPage('challenges')));
 app.get('/rakeback', (req, res) => res.type('html').send(renderPage('rakeback')));
+
+// 2b. Standalone auth pages — real, crawlable URLs for Sign In / Sign Up.
+const AUTH_PAGES = {
+  login: path.join(__dirname, 'public', 'login.html'),
+  register: path.join(__dirname, 'public', 'register.html')
+};
+app.get(['/login', '/signin'], (req, res) => res.sendFile(AUTH_PAGES.login));
+app.get(['/register', '/signup'], (req, res) => res.sendFile(AUTH_PAGES.register));
+app.get('/login.html', (req, res) => res.redirect(301, '/login'));
+app.get('/register.html', (req, res) => res.redirect(301, '/register'));
+app.get('/signup.html', (req, res) => res.redirect(301, '/register'));
+app.get('/forgot-password', (req, res) => res.sendFile(path.join(__dirname, 'public', 'forgot.html')));
 
 // 3. Sub-route Wildcard (only if /account has internal SPA sub-routes like /account/settings)
 app.get('/account/*', (req, res, next) => {

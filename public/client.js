@@ -5662,21 +5662,18 @@ function confirmAge() {
   initSession();
 }
 
-function openAuthModal() {
-  const loginErr = document.getElementById('auth-login-error');
-  if (loginErr) loginErr.textContent = '';
-  const regErr = document.getElementById('auth-register-error');
-  if (regErr) regErr.textContent = '';
-  const loginForm = document.getElementById('auth-form-login');
-  const registerForm = document.getElementById('auth-form-register');
-  const authTitle = document.getElementById('auth-title');
-  const authSubtitle = document.getElementById('auth-subtitle');
-
-  if (loginForm) loginForm.classList.remove('hidden');
-  if (registerForm) registerForm.classList.add('hidden');
-  if (authTitle) authTitle.textContent = 'Login to Your Account';
-  if (authSubtitle) authSubtitle.textContent = 'Enter your credentials to access your account.';
-  document.getElementById('modal-auth')?.classList.remove('hidden');
+function openAuthModal(mode) {
+  // Auth now lives on standalone, crawlable pages (/login, /register).
+  // Legacy in-page modal triggers redirect there, preserving the caller's
+  // intent (login vs register) and a safe return path for deep links.
+  const intent = mode || state.authIntent || 'login';
+  state.authIntent = null;
+  const p = window.location.pathname;
+  const gameIds = ['wheel','baccarat','dice','crash','slots','plinko','keno','tower','mines','blackjack','hilo','limbo'];
+  const isDeepPath = p && p !== '/' && p !== '/login' && p !== '/register' && p !== '/signin' && p !== '/signup' && !gameIds.includes(p.slice(1));
+  let url = intent === 'register' ? '/register' : '/login';
+  if (isDeepPath) url += '?redirect=' + encodeURIComponent(p + window.location.search);
+  window.location.href = url;
 }
 
 function closeAuthModal() {
@@ -5684,24 +5681,8 @@ function closeAuthModal() {
 }
 
 function switchAuthMode(mode) {
-  const loginForm = document.getElementById('auth-form-login');
-  const registerForm = document.getElementById('auth-form-register');
-  const authTitle = document.getElementById('auth-title');
-  const authSubtitle = document.getElementById('auth-subtitle');
-
-  if (!loginForm || !registerForm) return;
-
-  if (mode === 'register') {
-    loginForm.classList.add('hidden');
-    registerForm.classList.remove('hidden');
-    if (authTitle) authTitle.textContent = 'Create New Account';
-    if (authSubtitle) authSubtitle.textContent = 'Register to unlock full features and higher limits.';
-  } else {
-    loginForm.classList.remove('hidden');
-    registerForm.classList.add('hidden');
-    if (authTitle) authTitle.textContent = 'Login to Your Account';
-    if (authSubtitle) authSubtitle.textContent = 'Enter your credentials to access your account.';
-  }
+  // Records which standalone page the next openAuthModal() call should hit.
+  state.authIntent = mode === 'register' ? 'register' : 'login';
 }
 
 async function submitLogin() {
