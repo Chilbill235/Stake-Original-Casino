@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Account Dashboard — Stake Originals</title>
+  <title>Account Dashboard — Sweepstakes Casino</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -236,6 +236,13 @@
     }
 
     /* Component Cards / Grids */
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
     .grid-3 {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -272,6 +279,14 @@
       font-size: 1.4rem;
       font-weight: 800;
       color: var(--text-primary);
+    }
+
+    .stat-value.gold {
+      color: var(--accent-gold);
+    }
+
+    .stat-value.sweeps {
+      color: var(--accent-cyan);
     }
 
     .stat-value.highlight {
@@ -385,13 +400,37 @@
       opacity: 0.9;
     }
 
+    .btn-gold {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #000000;
+    }
+
+    /* Currency Badges */
+    .badge-gc {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--accent-gold);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .badge-sc {
+      background: rgba(0, 180, 255, 0.15);
+      color: var(--accent-cyan);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
     /* Responsive Design */
     @media (max-width: 900px) {
       .account-layout {
         grid-template-columns: 1fr;
       }
 
-      .grid-3, .grid-2 {
+      .grid-4, .grid-3, .grid-2 {
         grid-template-columns: 1fr;
       }
     }
@@ -424,15 +463,15 @@
             </a>
             <a class="account-nav-link" data-account-page="wallet" onclick="navigateToAccount('wallet')">
               <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-              <span>Wallet</span>
+              <span>Wallet & Store</span>
             </a>
             <a class="account-nav-link" data-account-page="bonuses" onclick="navigateToAccount('bonuses')">
               <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V6a2 2 0 10-2 2h2zm0 13C10.832 19.877 8 17.03 8 13a4 4 0 118 0c0 4.03-2.832 6.877-4 8z"/></svg>
-              <span>Bonuses</span>
+              <span>Daily Rewards & Rakeback</span>
             </a>
             <a class="account-nav-link" data-account-page="kyc" onclick="navigateToAccount('kyc')">
               <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-              <span>Verification</span>
+              <span>Verification (KYC)</span>
             </a>
             <a class="account-nav-link" data-account-page="transactions" onclick="navigateToAccount('transactions')">
               <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -468,7 +507,27 @@
         <div class="account-page active" id="page-overview">
           <div class="page-header">
             <h2 class="page-title">Dashboard Overview</h2>
-            <p class="page-desc">Track your lifetime stats, activity, and VIP progress.</p>
+            <p class="page-desc">Track your Gold Coins, Sweeps Coins, wager history, and VIP progress.</p>
+          </div>
+
+          <!-- Currency Balances Summary -->
+          <div class="grid-4">
+            <div class="stat-card">
+              <span class="stat-label">Gold Coins (GC)</span>
+              <span class="stat-value gold">🪙 10.00K</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Sweeps Coins (SC)</span>
+              <span class="stat-value sweeps">💎 10.00</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Total Wagered (SC)</span>
+              <span class="stat-value">🎯 0.00 SC</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Rakeback Earned</span>
+              <span class="stat-value highlight">💸 0.00 SC</span>
+            </div>
           </div>
 
           <div class="vip-card">
@@ -484,27 +543,13 @@
             </div>
           </div>
 
-          <div class="grid-3">
-            <div class="stat-card">
-              <span class="stat-label">Total Wagered</span>
-              <span class="stat-value highlight">$12,450.00</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Total Bets</span>
-              <span class="stat-value">1,284</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Profit / Loss</span>
-              <span class="stat-value" style="color: var(--accent-cyan);">+$340.50</span>
-            </div>
-          </div>
-
-          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 12px;">Recent Bets</h3>
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 12px;">Recent Gameplay</h3>
           <div class="data-table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>Game</th>
+                  <th>Currency</th>
                   <th>Wager</th>
                   <th>Multiplier</th>
                   <th>Payout</th>
@@ -513,15 +558,17 @@
               <tbody>
                 <tr>
                   <td>Plinko</td>
-                  <td>$10.00</td>
+                  <td><span class="badge-sc">SC</span></td>
+                  <td>1.00 SC</td>
                   <td>2.1x</td>
-                  <td style="color: var(--accent-green); font-weight: 700;">+$21.00</td>
+                  <td style="color: var(--accent-green); font-weight: 700;">+2.10 SC</td>
                 </tr>
                 <tr>
                   <td>Mines</td>
-                  <td>$5.00</td>
+                  <td><span class="badge-gc">GC</span></td>
+                  <td>500 GC</td>
                   <td>0.0x</td>
-                  <td style="color: var(--text-muted);">$0.00</td>
+                  <td style="color: var(--text-muted);">0.00 GC</td>
                 </tr>
               </tbody>
             </table>
@@ -532,7 +579,7 @@
         <div class="account-page" id="page-profile">
           <div class="page-header">
             <h2 class="page-title">Profile Settings</h2>
-            <p class="page-desc">Manage your public account identity and credentials.</p>
+            <p class="page-desc">Manage your account identity and sweepstakes eligibility details.</p>
           </div>
           <div class="grid-2">
             <div class="form-group">
@@ -547,20 +594,24 @@
           <button class="btn-action">Save Changes</button>
         </div>
 
-        <!-- Wallet -->
+        <!-- Wallet & Store -->
         <div class="account-page" id="page-wallet">
           <div class="page-header">
-            <h2 class="page-title">Wallet Balance</h2>
-            <p class="page-desc">Deposit and withdraw funds securely across network assets.</p>
+            <h2 class="page-title">Coin Store & Redemptions</h2>
+            <p class="page-desc">Purchase Gold Coins packages (with bonus SC) or redeem eligible Sweeps Coins.</p>
           </div>
           <div class="grid-2">
             <div class="stat-card">
-              <span class="stat-label">Available Balance</span>
-              <span class="stat-value highlight">$520.00</span>
+              <span class="stat-label">Gold Coins Balance</span>
+              <span class="stat-value gold">🪙 10.00K GC</span>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">For play-for-fun games only.</p>
+              <button class="btn-action btn-gold" style="margin-top: 12px;">Buy GC Packages</button>
             </div>
             <div class="stat-card">
-              <span class="stat-label">Vault Balance</span>
-              <span class="stat-value">$1,000.00</span>
+              <span class="stat-label">Sweeps Coins Balance</span>
+              <span class="stat-value sweeps">💎 10.00 SC</span>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Redeemable for cash or gift cards once playthrough is met.</p>
+              <button class="btn-action" style="margin-top: 12px;">Redeem Sweeps Coins</button>
             </div>
           </div>
         </div>
@@ -568,25 +619,35 @@
         <!-- Bonuses -->
         <div class="account-page" id="page-bonuses">
           <div class="page-header">
-            <h2 class="page-title">Bonuses & Rakeback</h2>
-            <p class="page-desc">Claim instant cashback and promotional rewards.</p>
+            <h2 class="page-title">Daily Rewards & Rakeback</h2>
+            <p class="page-desc">Claim daily sweepstakes login bonuses and instant rakeback.</p>
           </div>
-          <div class="stat-card" style="margin-bottom: 16px;">
-            <span class="stat-label">Available Rakeback</span>
-            <span class="stat-value highlight">$14.20</span>
+          <div class="grid-2">
+            <div class="stat-card">
+              <span class="stat-label">Daily Login Bonus</span>
+              <span class="stat-value highlight">+1,000 GC / +1.00 SC</span>
+              <button class="btn-action" style="margin-top: 12px;">Claim Daily Reward</button>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Available Rakeback</span>
+              <span class="stat-value sweeps">💎 0.00 SC</span>
+              <button class="btn-action" style="margin-top: 12px; opacity: 0.5; cursor: not-allowed;" disabled>No Rakeback Available</button>
+            </div>
           </div>
-          <button class="btn-action">Claim Rakeback</button>
         </div>
 
         <!-- KYC Verification -->
         <div class="account-page" id="page-kyc">
           <div class="page-header">
-            <h2 class="page-title">KYC Verification</h2>
-            <p class="page-desc">Verify your account identity to unlock higher withdrawal limits.</p>
+            <h2 class="page-title">Identity Verification (KYC)</h2>
+            <p class="page-desc">Verify your identity and state residence to unlock Sweeps Coins redemptions.</p>
           </div>
           <div class="stat-card">
-            <span class="stat-label">Current Level</span>
+            <span class="stat-label">Sweepstakes Status</span>
             <span class="stat-value" style="color: var(--accent-gold);">Level 1 (Basic)</span>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px;">
+              Government-issued ID and Proof of Address are required before processing cash or gift card redemptions.
+            </p>
           </div>
         </div>
 
@@ -594,24 +655,24 @@
         <div class="account-page" id="page-transactions">
           <div class="page-header">
             <h2 class="page-title">Transaction History</h2>
-            <p class="page-desc">View all past deposits, withdrawals, and bonus credits.</p>
+            <p class="page-desc">View past coin purchases, prize redemptions, and daily bonus claims.</p>
           </div>
           <div class="data-table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>Type</th>
-                  <th>Amount</th>
+                  <th>Package / Reward</th>
                   <th>Date</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>Deposit</td>
-                  <td>$100.00</td>
-                  <td>2026-03-01</td>
-                  <td style="color: var(--accent-green);">Completed</td>
+                  <td>Daily Bonus</td>
+                  <td>1,000 GC + 1.00 SC</td>
+                  <td>2026-09-11</td>
+                  <td style="color: var(--accent-green);">Claimed</td>
                 </tr>
               </tbody>
             </table>
@@ -621,8 +682,8 @@
         <!-- Affiliates -->
         <div class="account-page" id="page-affiliates">
           <div class="page-header">
-            <h2 class="page-title">Affiliate Program</h2>
-            <p class="page-desc">Earn commission by inviting friends using your referral link.</p>
+            <h2 class="page-title">Affiliate & Referral Program</h2>
+            <p class="page-desc">Earn commission bonus coins by inviting friends using your referral link.</p>
           </div>
           <div class="form-group">
             <label class="form-label">Your Referral Link</label>
