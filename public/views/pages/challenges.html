@@ -1,8 +1,522 @@
-<!-- CHALLENGES PAGE -->
-      <div id="view-challenges" class="game-view hidden">
-        <div class="game-display" id="challenges-display-area">
-          <div class="game-placeholder-text">Loading challenges...</div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Challenges & Races — Stake Originals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-base: #070d14;
+      --bg-surface: #0d1a2d;
+      --bg-elevated: #16263d;
+      --border-color: rgba(42, 74, 107, 0.4);
+
+      --accent-green: #00ff41;
+      --accent-cyan: #00b4ff;
+      --accent-purple: #a855f7;
+      --accent-gold: #f59e0b;
+
+      --text-primary: #ffffff;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+
+      --font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --radius-lg: 16px;
+      --radius-md: 12px;
+      --radius-sm: 8px;
+      --transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .game-view {
+      width: 100%;
+      max-width: 1100px;
+    }
+
+    /* Container Layout */
+    .challenges-container {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Hero Banner */
+    .challenges-hero {
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(0, 180, 255, 0.08)), var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .challenges-hero::before {
+      content: '';
+      position: absolute;
+      top: -40%;
+      right: -5%;
+      width: 320px;
+      height: 320px;
+      background: radial-gradient(circle, rgba(168, 85, 247, 0.2) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-content {
+      max-width: 540px;
+      z-index: 2;
+    }
+
+    .hero-title {
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-title span {
+      color: var(--accent-purple);
+    }
+
+    .hero-subtitle {
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    .hero-stats {
+      display: flex;
+      gap: 24px;
+      margin-top: 18px;
+    }
+
+    .hero-stat-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .stat-val {
+      font-size: 1.3rem;
+      font-weight: 800;
+      color: var(--accent-gold);
+    }
+
+    /* Tab Filter Bar */
+    .challenge-tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 12px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-secondary);
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .tab-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .tab-btn.active {
+      background: rgba(0, 255, 65, 0.1);
+      color: var(--accent-green);
+      border-color: rgba(0, 255, 65, 0.3);
+    }
+
+    /* Challenge Grid */
+    .challenges-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+    }
+
+    .challenge-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 20px;
+      transition: all var(--transition);
+      position: relative;
+    }
+
+    .challenge-card:hover {
+      border-color: rgba(0, 180, 255, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .game-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+
+    .prize-tag {
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: var(--accent-green);
+    }
+
+    .card-body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .challenge-title {
+      font-size: 1.1rem;
+      font-weight: 800;
+    }
+
+    .challenge-desc {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    .requirements-box {
+      background: var(--bg-elevated);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+    }
+
+    .req-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .req-label {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .req-val {
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    /* Progress & Action */
+    .card-bottom {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .progress-bar-bg {
+      height: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+      border-radius: 3px;
+    }
+
+    .btn-play {
+      width: 100%;
+      padding: 12px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-weight: 800;
+      font-size: 0.85rem;
+      cursor: pointer;
+      border: none;
+      background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
+      color: #04120a;
+      transition: all var(--transition);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-play:hover {
+      box-shadow: 0 6px 20px rgba(0, 255, 65, 0.3);
+      filter: brightness(1.05);
+    }
+
+    .btn-completed {
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+      border: 1px solid var(--border-color);
+      cursor: default;
+    }
+
+    .btn-completed:hover {
+      box-shadow: none;
+      filter: none;
+    }
+
+    /* Responsive */
+    @media (max-width: 850px) {
+      .challenges-grid {
+        grid-template-columns: 1fr;
+      }
+      .challenges-hero {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- CHALLENGES PAGE -->
+  <div id="view-challenges" class="game-view">
+    <div class="challenges-container" id="challenges-display-area">
+      
+      <!-- Hero Banner -->
+      <div class="challenges-hero">
+        <div class="hero-content">
+          <h1 class="hero-title">Community <span>Challenges</span></h1>
+          <p class="hero-subtitle">Hit target multipliers on specified games to claim instant cash bounty prizes.</p>
+          
+          <div class="hero-stats">
+            <div class="hero-stat-item">
+              <span class="stat-label">Active Bounties</span>
+              <span class="stat-val">$2,500.00</span>
+            </div>
+            <div class="hero-stat-item">
+              <span class="stat-label">Completed Today</span>
+              <span class="stat-val" style="color: var(--accent-cyan);">142</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      
+      <!-- Navigation / Filters -->
+      <div class="challenge-tabs">
+        <button class="tab-btn active" onclick="filterChallenges('all', this)">All Challenges</button>
+        <button class="tab-btn" onclick="filterChallenges('active', this)">Active</button>
+        <button class="tab-btn" onclick="filterChallenges('highroller', this)">High Roller</button>
+        <button class="tab-btn" onclick="filterChallenges('completed', this)">Completed</button>
+      </div>
+
+      <!-- Challenge Cards Grid -->
+      <div class="challenges-grid" id="challenges-grid">
+        
+        <!-- Challenge Card 1 -->
+        <div class="challenge-card" data-category="active">
+          <div class="card-top">
+            <span class="game-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+              Plinko
+            </span>
+            <span class="prize-tag">$150.00</span>
+          </div>
+
+          <div class="card-body">
+            <h3 class="challenge-title">The 1000x Drop</h3>
+            <p class="challenge-desc">Land on the 1000x multiplier pin in High Risk mode with a qualifying minimum bet.</p>
+          </div>
+
+          <div class="requirements-box">
+            <div class="req-item">
+              <span class="req-label">Min Bet</span>
+              <span class="req-val">$0.20</span>
+            </div>
+            <div class="req-item">
+              <span class="req-label">Target Multiplier</span>
+              <span class="req-val" style="color: var(--accent-green);">1,000.00x</span>
+            </div>
+            <div class="req-item">
+              <span class="req-label">First Winner</span>
+              <span class="req-val">0 / 1</span>
+            </div>
+          </div>
+
+          <div class="card-bottom">
+            <div class="progress-header">
+              <span style="color: var(--text-secondary);">Progress</span>
+              <span style="color: var(--accent-cyan);">Unclaimed</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+            <button class="btn-play" onclick="launchGame('plinko')">Play Game & Hunt</button>
+          </div>
+        </div>
+
+        <!-- Challenge Card 2 -->
+        <div class="challenge-card" data-category="highroller">
+          <div class="card-top">
+            <span class="game-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+              Mines
+            </span>
+            <span class="prize-tag">$500.00</span>
+          </div>
+
+          <div class="card-body">
+            <h3 class="challenge-title">Diamond Sweeper</h3>
+            <p class="challenge-desc">Clear 10 diamonds in a single round with at least 5 mines active on the field.</p>
+          </div>
+
+          <div class="requirements-box">
+            <div class="req-item">
+              <span class="req-label">Min Bet</span>
+              <span class="req-val">$2.00</span>
+            </div>
+            <div class="req-item">
+              <span class="req-label">Target Multiplier</span>
+              <span class="req-val" style="color: var(--accent-green);">14.20x</span>
+            </div>
+            <div class="req-item">
+              <span class="req-label">Winners Needed</span>
+              <span class="req-val">1 / 5</span>
+            </div>
+          </div>
+
+          <div class="card-bottom">
+            <div class="progress-header">
+              <span style="color: var(--text-secondary);">Progress</span>
+              <span style="color: var(--accent-cyan);">1/5 Claimed</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width: 20%;"></div>
+            </div>
+            <button class="btn-play" onclick="launchGame('mines')">Play Game & Hunt</button>
+          </div>
+        </div>
+
+        <!-- Challenge Card 3 (Completed) -->
+        <div class="challenge-card" data-category="completed">
+          <div class="card-top">
+            <span class="game-badge" style="color: var(--text-muted);">
+              Dice
+            </span>
+            <span class="prize-tag" style="color: var(--text-muted);">$50.00</span>
+          </div>
+
+          <div class="card-body">
+            <h3 class="challenge-title" style="color: var(--text-secondary);">Roll the 99.00</h3>
+            <p class="challenge-desc">Hit a target roll above 99.00 on the Dice board.</p>
+          </div>
+
+          <div class="requirements-box">
+            <div class="req-item">
+              <span class="req-label">Min Bet</span>
+              <span class="req-val">$0.10</span>
+            </div>
+            <div class="req-item">
+              <span class="req-label">Target Multiplier</span>
+              <span class="req-val">99.00x</span>
+            </div>
+            <div class="req-item">
+              <span class="req-label">Status</span>
+              <span class="req-val" style="color: var(--accent-gold);">Claimed</span>
+            </div>
+          </div>
+
+          <div class="card-bottom">
+            <div class="progress-header">
+              <span style="color: var(--text-secondary);">Winner</span>
+              <span style="color: var(--text-muted);">CryptoKing99</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width: 100%; background: var(--text-muted);"></div>
+            </div>
+            <button class="btn-play btn-completed" disabled>Challenge Completed</button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function filterChallenges(category, btn) {
+      // Toggle Active Tab
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      // Filter Cards
+      const cards = document.querySelectorAll('.challenge-card');
+      cards.forEach(card => {
+        const cardCat = card.getAttribute('data-category');
+        if (category === 'all' || cardCat === category) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    function launchGame(gameName) {
+      alert(`Launching ${gameName.toUpperCase()} to start hunting this challenge!`);
+    }
+  </script>
+</body>
+</html>

@@ -1,70 +1,681 @@
-<!-- ACCOUNT PAGE -->
-      <div id="view-account" class="game-view hidden">
-        <div class="account-layout">
-          <!-- Account Sidebar -->
-          <aside class="account-sidebar">
-            <div class="account-sidebar-header">
-              <div class="account-sidebar-avatar">👤</div>
-              <div class="account-sidebar-info">
-                <div class="account-sidebar-name" id="account-sidebar-name">Guest</div>
-                <div class="account-sidebar-tier" id="account-sidebar-tier">Bronze VIP</div>
-              </div>
-            </div>
-            <nav class="account-nav">
-              <a class="account-nav-link active" data-account-page="overview" onclick="navigateToAccount('overview')">
-                <span class="account-nav-icon">📊</span>
-                <span>Overview</span>
-              </a>
-              <a class="account-nav-link" data-account-page="profile" onclick="navigateToAccount('profile')">
-                <span class="account-nav-icon">👤</span>
-                <span>Profile</span>
-              </a>
-              <a class="account-nav-link" data-account-page="wallet" onclick="navigateToAccount('wallet')">
-                <span class="account-nav-icon">💰</span>
-                <span>Wallet</span>
-              </a>
-              <a class="account-nav-link" data-account-page="bonuses" onclick="navigateToAccount('bonuses')">
-                <span class="account-nav-icon">🎁</span>
-                <span>Bonuses</span>
-              </a>
-              <a class="account-nav-link" data-account-page="kyc" onclick="navigateToAccount('kyc')">
-                <span class="account-nav-icon">🛡️</span>
-                <span>Verification</span>
-              </a>
-              <a class="account-nav-link" data-account-page="transactions" onclick="navigateToAccount('transactions')">
-                <span class="account-nav-icon">📋</span>
-                <span>Transactions</span>
-              </a>
-              <a class="account-nav-link" data-account-page="affiliates" onclick="navigateToAccount('affiliates')">
-                <span class="account-nav-icon">🤝</span>
-                <span>Affiliates</span>
-              </a>
-              <a class="account-nav-link" data-account-page="security" onclick="navigateToAccount('security')">
-                <span class="account-nav-icon">🔒</span>
-                <span>Security</span>
-              </a>
-              <a class="account-nav-link" data-account-page="settings" onclick="navigateToAccount('settings')">
-                <span class="account-nav-icon">⚙️</span>
-                <span>Settings</span>
-              </a>
-              <a class="account-nav-link" data-account-page="support" onclick="navigateToAccount('support')">
-                <span class="account-nav-icon">💬</span>
-                <span>Support</span>
-              </a>
-            </nav>
-            <div class="account-sidebar-footer">
-              <button class="account-sidebar-back" onclick="showLobby()">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-                <span>Back to Lobby</span>
-              </button>
-            </div>
-          </aside>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Account Dashboard — Stake Originals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-base: #070d14;
+      --bg-surface: #0d1a2d;
+      --bg-elevated: #16263d;
+      --border-color: rgba(42, 74, 107, 0.4);
+      --border-focus: #00ff41;
 
-          <!-- Account Content -->
-          <main class="account-content" id="account-content">
-            <div class="account-placeholder">Loading account...</div>
-          </main>
-        </div>
-      </div>
+      --accent-green: #00ff41;
+      --accent-cyan: #00b4ff;
+      --accent-purple: #a855f7;
+      --accent-gold: #f59e0b;
 
+      --text-primary: #ffffff;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+
+      --font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --radius-lg: 16px;
+      --radius-md: 10px;
+      --radius-sm: 6px;
+      --transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .game-view {
+      width: 100%;
+      max-width: 1200px;
+    }
+
+    /* Account Dashboard Grid */
+    .account-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 24px;
+      min-height: 720px;
+    }
+
+    /* Sidebar Styling */
+    .account-sidebar {
+      background: linear-gradient(180deg, rgba(13, 26, 45, 0.8) 0%, rgba(7, 13, 20, 0.9) 100%);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      backdrop-filter: blur(12px);
+    }
+
+    .account-sidebar-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 16px;
+    }
+
+    .account-sidebar-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #04120a;
+      font-weight: 800;
+      font-size: 1.2rem;
+      box-shadow: 0 0 20px rgba(0, 255, 65, 0.25);
+    }
+
+    .account-sidebar-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .account-sidebar-name {
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--text-primary);
+    }
+
+    .account-sidebar-tier {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--accent-gold);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Sidebar Navigation */
+    .account-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .account-nav-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .account-nav-link svg {
+      width: 18px;
+      height: 18px;
+      stroke: var(--text-secondary);
+      fill: none;
+      transition: stroke var(--transition);
+    }
+
+    .account-nav-link:hover {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-primary);
+    }
+
+    .account-nav-link:hover svg {
+      stroke: var(--text-primary);
+    }
+
+    .account-nav-link.active {
+      background: rgba(0, 255, 65, 0.08);
+      color: var(--accent-green);
+      border: 1px solid rgba(0, 255, 65, 0.2);
+    }
+
+    .account-nav-link.active svg {
+      stroke: var(--accent-green);
+    }
+
+    .account-sidebar-footer {
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .account-sidebar-back {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      font-family: var(--font);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .account-sidebar-back:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-primary);
+    }
+
+    /* Content Area Styling */
+    .account-content {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      position: relative;
+    }
+
+    .account-page {
+      display: none;
+      animation: fadeIn 0.25s ease-out forwards;
+    }
+
+    .account-page.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Page Header */
+    .page-header {
+      margin-bottom: 24px;
+    }
+
+    .page-title {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .page-desc {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      margin-top: 4px;
+    }
+
+    /* Component Cards / Grids */
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .stat-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .stat-value {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--text-primary);
+    }
+
+    .stat-value.highlight {
+      color: var(--accent-green);
+    }
+
+    /* VIP Progress Bar */
+    .vip-card {
+      background: linear-gradient(135deg, rgba(22, 38, 61, 0.9), rgba(13, 26, 45, 0.9));
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .vip-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .progress-bar-bg {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan));
+      border-radius: 4px;
+    }
+
+    /* Tables */
+    .data-table-wrap {
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.88rem;
+    }
+
+    .data-table th {
+      background: var(--bg-elevated);
+      padding: 14px 18px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .data-table td {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .data-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* Form Elements inside pages */
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 0.9rem;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--accent-green);
+    }
+
+    .btn-action {
+      background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
+      color: #04120a;
+      border: none;
+      padding: 12px 20px;
+      border-radius: var(--radius-sm);
+      font-weight: 700;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: opacity var(--transition);
+    }
+
+    .btn-action:hover {
+      opacity: 0.9;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 900px) {
+      .account-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .grid-3, .grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="view-account" class="game-view">
+    <div class="account-layout">
       
+      <!-- Account Sidebar -->
+      <aside class="account-sidebar">
+        <div>
+          <div class="account-sidebar-header">
+            <div class="account-sidebar-avatar" id="account-avatar">G</div>
+            <div class="account-sidebar-info">
+              <div class="account-sidebar-name" id="account-sidebar-name">Guest User</div>
+              <div class="account-sidebar-tier" id="account-sidebar-tier">Bronze VIP</div>
+            </div>
+          </div>
+
+          <nav class="account-nav">
+            <a class="account-nav-link active" data-account-page="overview" onclick="navigateToAccount('overview')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+              <span>Overview</span>
+            </a>
+            <a class="account-nav-link" data-account-page="profile" onclick="navigateToAccount('profile')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              <span>Profile</span>
+            </a>
+            <a class="account-nav-link" data-account-page="wallet" onclick="navigateToAccount('wallet')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+              <span>Wallet</span>
+            </a>
+            <a class="account-nav-link" data-account-page="bonuses" onclick="navigateToAccount('bonuses')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V6a2 2 0 10-2 2h2zm0 13C10.832 19.877 8 17.03 8 13a4 4 0 118 0c0 4.03-2.832 6.877-4 8z"/></svg>
+              <span>Bonuses</span>
+            </a>
+            <a class="account-nav-link" data-account-page="kyc" onclick="navigateToAccount('kyc')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+              <span>Verification</span>
+            </a>
+            <a class="account-nav-link" data-account-page="transactions" onclick="navigateToAccount('transactions')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              <span>Transactions</span>
+            </a>
+            <a class="account-nav-link" data-account-page="affiliates" onclick="navigateToAccount('affiliates')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              <span>Affiliates</span>
+            </a>
+            <a class="account-nav-link" data-account-page="security" onclick="navigateToAccount('security')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              <span>Security</span>
+            </a>
+            <a class="account-nav-link" data-account-page="settings" onclick="navigateToAccount('settings')">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Settings</span>
+            </a>
+          </nav>
+        </div>
+
+        <div class="account-sidebar-footer">
+          <button class="account-sidebar-back" onclick="showLobby()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            <span>Back to Lobby</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Account Content Viewports -->
+      <main class="account-content" id="account-content">
+        
+        <!-- Overview -->
+        <div class="account-page active" id="page-overview">
+          <div class="page-header">
+            <h2 class="page-title">Dashboard Overview</h2>
+            <p class="page-desc">Track your lifetime stats, activity, and VIP progress.</p>
+          </div>
+
+          <div class="vip-card">
+            <div class="vip-header">
+              <div>
+                <span class="stat-label">VIP Progress</span>
+                <h3 style="font-size: 1.1rem; font-weight: 700;">Bronze ➔ Silver VIP</h3>
+              </div>
+              <span style="font-weight: 800; color: var(--accent-green);">64%</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width: 64%;"></div>
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <div class="stat-card">
+              <span class="stat-label">Total Wagered</span>
+              <span class="stat-value highlight">$12,450.00</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Total Bets</span>
+              <span class="stat-value">1,284</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Profit / Loss</span>
+              <span class="stat-value" style="color: var(--accent-cyan);">+$340.50</span>
+            </div>
+          </div>
+
+          <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 12px;">Recent Bets</h3>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Game</th>
+                  <th>Wager</th>
+                  <th>Multiplier</th>
+                  <th>Payout</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Plinko</td>
+                  <td>$10.00</td>
+                  <td>2.1x</td>
+                  <td style="color: var(--accent-green); font-weight: 700;">+$21.00</td>
+                </tr>
+                <tr>
+                  <td>Mines</td>
+                  <td>$5.00</td>
+                  <td>0.0x</td>
+                  <td style="color: var(--text-muted);">$0.00</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Profile -->
+        <div class="account-page" id="page-profile">
+          <div class="page-header">
+            <h2 class="page-title">Profile Settings</h2>
+            <p class="page-desc">Manage your public account identity and credentials.</p>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="form-label">Username</label>
+              <input type="text" class="form-input" value="GuestUser_82" readonly />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email Address</label>
+              <input type="email" class="form-input" value="user@example.com" />
+            </div>
+          </div>
+          <button class="btn-action">Save Changes</button>
+        </div>
+
+        <!-- Wallet -->
+        <div class="account-page" id="page-wallet">
+          <div class="page-header">
+            <h2 class="page-title">Wallet Balance</h2>
+            <p class="page-desc">Deposit and withdraw funds securely across network assets.</p>
+          </div>
+          <div class="grid-2">
+            <div class="stat-card">
+              <span class="stat-label">Available Balance</span>
+              <span class="stat-value highlight">$520.00</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Vault Balance</span>
+              <span class="stat-value">$1,000.00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bonuses -->
+        <div class="account-page" id="page-bonuses">
+          <div class="page-header">
+            <h2 class="page-title">Bonuses & Rakeback</h2>
+            <p class="page-desc">Claim instant cashback and promotional rewards.</p>
+          </div>
+          <div class="stat-card" style="margin-bottom: 16px;">
+            <span class="stat-label">Available Rakeback</span>
+            <span class="stat-value highlight">$14.20</span>
+          </div>
+          <button class="btn-action">Claim Rakeback</button>
+        </div>
+
+        <!-- KYC Verification -->
+        <div class="account-page" id="page-kyc">
+          <div class="page-header">
+            <h2 class="page-title">KYC Verification</h2>
+            <p class="page-desc">Verify your account identity to unlock higher withdrawal limits.</p>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Current Level</span>
+            <span class="stat-value" style="color: var(--accent-gold);">Level 1 (Basic)</span>
+          </div>
+        </div>
+
+        <!-- Transactions -->
+        <div class="account-page" id="page-transactions">
+          <div class="page-header">
+            <h2 class="page-title">Transaction History</h2>
+            <p class="page-desc">View all past deposits, withdrawals, and bonus credits.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Amount</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Deposit</td>
+                  <td>$100.00</td>
+                  <td>2026-03-01</td>
+                  <td style="color: var(--accent-green);">Completed</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Affiliates -->
+        <div class="account-page" id="page-affiliates">
+          <div class="page-header">
+            <h2 class="page-title">Affiliate Program</h2>
+            <p class="page-desc">Earn commission by inviting friends using your referral link.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Your Referral Link</label>
+            <input type="text" class="form-input" value="https://stakeoriginals.com?c=guestuser" readonly />
+          </div>
+        </div>
+
+        <!-- Security -->
+        <div class="account-page" id="page-security">
+          <div class="page-header">
+            <h2 class="page-title">Security & 2FA</h2>
+            <p class="page-desc">Protect your account with Two-Factor Authentication.</p>
+          </div>
+          <button class="btn-action">Enable 2FA</button>
+        </div>
+
+        <!-- Settings -->
+        <div class="account-page" id="page-settings">
+          <div class="page-header">
+            <h2 class="page-title">Preferences</h2>
+            <p class="page-desc">Adjust sound effects, animations, and privacy settings.</p>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <script>
+    function navigateToAccount(pageKey) {
+      // 1. Update Navigation Link Active State
+      const links = document.querySelectorAll('.account-nav-link');
+      links.forEach(link => {
+        if (link.getAttribute('data-account-page') === pageKey) {
+          link.classList.add('active');
+        } else {
+          link.classList.remove('active');
+        }
+      });
+
+      // 2. Hide All Pages & Show Active View
+      const pages = document.querySelectorAll('.account-page');
+      pages.forEach(page => page.classList.remove('active'));
+
+      const activePage = document.getElementById(`page-${pageKey}`);
+      if (activePage) {
+        activePage.classList.add('active');
+      }
+    }
+
+    function showLobby() {
+      alert("Navigating back to Lobby...");
+    }
+  </script>
+</body>
+</html>

@@ -1,8 +1,444 @@
-<!-- BONUS PAGE -->
-      <div id="view-bonus" class="game-view hidden">
-        <div class="game-display" id="bonus-display-area">
-          <div class="game-placeholder-text">Loading bonuses...</div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bonuses & Rewards — Stake Originals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-base: #070d14;
+      --bg-surface: #0d1a2d;
+      --bg-elevated: #16263d;
+      --border-color: rgba(42, 74, 107, 0.4);
+
+      --accent-green: #00ff41;
+      --accent-cyan: #00b4ff;
+      --accent-purple: #a855f7;
+      --accent-gold: #f59e0b;
+      --accent-danger: #ff4d6d;
+
+      --text-primary: #ffffff;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+
+      --font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --radius-lg: 16px;
+      --radius-md: 12px;
+      --radius-sm: 8px;
+      --transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .game-view {
+      width: 100%;
+      max-width: 1100px;
+    }
+
+    /* Bonus Container */
+    .bonus-container {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Hero Banner */
+    .bonus-hero {
+      background: linear-gradient(135deg, rgba(0, 255, 65, 0.12), rgba(0, 180, 255, 0.08)), var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .bonus-hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -10%;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(0, 255, 65, 0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .bonus-hero-content {
+      max-width: 520px;
+      z-index: 2;
+    }
+
+    .bonus-hero-title {
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .bonus-hero-title span {
+      color: var(--accent-green);
+    }
+
+    .bonus-hero-subtitle {
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    /* Redeem Code Section */
+    .redeem-box {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .redeem-input {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      color: #fff;
+      font-family: var(--font);
+      font-size: 0.9rem;
+      width: 260px;
+      transition: border-color var(--transition);
+    }
+
+    .redeem-input:focus {
+      outline: none;
+      border-color: var(--accent-green);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
+      color: #04120a;
+      border: none;
+      padding: 12px 22px;
+      border-radius: var(--radius-sm);
+      font-weight: 800;
+      font-family: var(--font);
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(0, 255, 65, 0.3);
+    }
+
+    /* VIP Tier Banner */
+    .vip-banner {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+    }
+
+    .vip-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .vip-tier-tag {
+      color: var(--accent-gold);
+      font-weight: 800;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .progress-bar-bg {
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan));
+      border-radius: 5px;
+      transition: width 0.4s ease;
+    }
+
+    /* Bonus Grid */
+    .bonus-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .bonus-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all var(--transition);
+    }
+
+    .bonus-card:hover {
+      border-color: rgba(0, 255, 65, 0.3);
+      transform: translateY(-2px);
+    }
+
+    .bonus-card-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--bg-elevated);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .bonus-card-icon svg {
+      width: 24px;
+      height: 24px;
+      stroke: var(--accent-green);
+      fill: none;
+    }
+
+    .bonus-card-title {
+      font-size: 1.1rem;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .bonus-card-desc {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      margin-bottom: 20px;
+    }
+
+    .bonus-card-val {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--accent-green);
+      margin-bottom: 16px;
+    }
+
+    .btn-claim {
+      width: 100%;
+      padding: 12px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      border: 1px solid var(--accent-green);
+      background: rgba(0, 255, 65, 0.1);
+      color: var(--accent-green);
+      transition: all var(--transition);
+    }
+
+    .btn-claim:hover:not(:disabled) {
+      background: var(--accent-green);
+      color: #04120a;
+    }
+
+    .btn-claim:disabled {
+      border-color: var(--border-color);
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+      cursor: not-allowed;
+    }
+
+    /* Alerts */
+    .bonus-alert {
+      display: none;
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      margin-top: 10px;
+    }
+
+    .bonus-alert.show {
+      display: block;
+    }
+
+    .bonus-alert-success {
+      background: rgba(0, 255, 65, 0.1);
+      border: 1px solid rgba(0, 255, 65, 0.3);
+      color: #b9f6c9;
+    }
+
+    .bonus-alert-error {
+      background: rgba(255, 77, 109, 0.1);
+      border: 1px solid rgba(255, 77, 109, 0.3);
+      color: #ff9db8;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .bonus-grid {
+        grid-template-columns: 1fr;
+      }
+      .bonus-hero {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 20px;
+      }
+      .redeem-box {
+        flex-direction: column;
+        width: 100%;
+      }
+      .redeem-input {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- BONUS PAGE -->
+  <div id="view-bonus" class="game-view">
+    <div class="bonus-container" id="bonus-display-area">
+      
+      <!-- Hero & Code Redemption -->
+      <div class="bonus-hero">
+        <div class="bonus-hero-content">
+          <h1 class="bonus-hero-title">Claim Your <span>Rewards</span></h1>
+          <p class="bonus-hero-subtitle">Unlock instant rakeback, redeem promo codes, and elevate your VIP status to gain exclusive perks.</p>
+          
+          <form id="promo-form" onsubmit="handleRedeemPromo(event)">
+            <div class="redeem-box">
+              <input type="text" id="promo-input" class="redeem-input" placeholder="Enter Promo Code..." autocomplete="off" />
+              <button type="submit" class="btn-primary">Redeem</button>
+            </div>
+            <div class="bonus-alert bonus-alert-success" id="promo-success">Code redeemed! $10.00 added to your balance.</div>
+            <div class="bonus-alert bonus-alert-error" id="promo-error">Invalid or expired promo code.</div>
+          </form>
         </div>
       </div>
 
-      
+      <!-- VIP Status Progress -->
+      <div class="vip-banner">
+        <div class="vip-info">
+          <div>
+            <span class="vip-tier-tag">VIP Level 2: Silver</span>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 2px;">Wager $3,550.00 more to unlock Gold VIP perks.</p>
+          </div>
+          <span style="font-weight: 800; color: var(--accent-green); font-size: 1.1rem;">64.5%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" style="width: 64.5%;"></div>
+        </div>
+      </div>
+
+      <!-- Active Bonus Cards -->
+      <div class="bonus-grid">
+        
+        <!-- Rakeback Card -->
+        <div class="bonus-card">
+          <div>
+            <div class="bonus-card-icon">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            </div>
+            <h3 class="bonus-card-title">Instant Rakeback</h3>
+            <p class="bonus-card-desc">Earn 10% cash back on every wagered bet, win or lose.</p>
+          </div>
+          <div>
+            <div class="bonus-card-val" id="rakeback-val">$18.45</div>
+            <button class="btn-claim" id="rakeback-btn" onclick="claimReward('rakeback')">Claim Rakeback</button>
+          </div>
+        </div>
+
+        <!-- Daily Reload Card -->
+        <div class="bonus-card">
+          <div>
+            <div class="bonus-card-icon">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <h3 class="bonus-card-title">Daily Reload</h3>
+            <p class="bonus-card-desc">Available once every 24 hours based on your previous day's wagers.</p>
+          </div>
+          <div>
+            <div class="bonus-card-val">$5.00</div>
+            <button class="btn-claim" id="daily-btn" onclick="claimReward('daily')">Claim Daily</button>
+          </div>
+        </div>
+
+        <!-- Weekly Level Up -->
+        <div class="bonus-card">
+          <div>
+            <div class="bonus-card-icon">
+              <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V6a2 2 0 10-2 2h2zm0 13C10.832 19.877 8 17.03 8 13a4 4 0 118 0c0 4.03-2.832 6.877-4 8z"/></svg>
+            </div>
+            <h3 class="bonus-card-title">Weekly Boost</h3>
+            <p class="bonus-card-desc">Calculated every Saturday based on overall account activity.</p>
+          </div>
+          <div>
+            <div class="bonus-card-val" style="color: var(--text-muted);">Locked</div>
+            <button class="btn-claim" disabled>Unlocks in 2d 14h</button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function handleRedeemPromo(e) {
+      e.preventDefault();
+      const code = document.getElementById('promo-input').value.trim();
+      const successEl = document.getElementById('promo-success');
+      const errorEl = document.getElementById('promo-error');
+
+      successEl.classList.remove('show');
+      errorEl.classList.remove('show');
+
+      if (code.toLowerCase() === 'stake2026') {
+        successEl.classList.add('show');
+        document.getElementById('promo-input').value = '';
+      } else {
+        errorEl.classList.add('show');
+      }
+    }
+
+    function claimReward(type) {
+      if (type === 'rakeback') {
+        const btn = document.getElementById('rakeback-btn');
+        const val = document.getElementById('rakeback-val');
+        btn.disabled = true;
+        btn.innerText = 'Claimed!';
+        val.innerText = '$0.00';
+        val.style.color = 'var(--text-muted)';
+      } else if (type === 'daily') {
+        const btn = document.getElementById('daily-btn');
+        btn.disabled = true;
+        btn.innerText = 'Claimed';
+      }
+    }
+  </script>
+</body>
+</html>
