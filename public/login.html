@@ -37,11 +37,48 @@
     .fc3{bottom:16%;left:14%;animation-delay:3s;} .fc4{bottom:12%;right:16%;color:#00b4ff;animation-delay:2.2s;}
     .fc5{top:55%;left:4%;color:#ffd700;animation-delay:4s;}
     @keyframes float{0%,100%{transform:translateY(0) rotate(0);}50%{transform:translateY(-18px) rotate(8deg);}}
-    .auth-wrap{position:relative;z-index:2;width:100%;max-width:440px;}
-    .brand{text-align:center;margin-bottom:24px;}
+    .auth-wrap{position:relative;z-index:2;width:100%;max-width:440px;padding:0 4px;}
+    .brand{text-align:center;margin-bottom:22px;}
     .brand a{text-decoration:none;color:inherit;display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:1.4rem;letter-spacing:.02em;}
     .brand-logo{display:inline-flex;width:42px;height:42px;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(135deg,#00ff41,#00b4ff);font-size:22px;box-shadow:0 6px 22px rgba(0,255,65,.35);}
     .brand .highlight{color:var(--accent-green);}
+    .card{background:linear-gradient(145deg,rgba(26,43,68,.9),rgba(17,29,50,.92));border:1px solid var(--border-color);border-radius:var(--radius);padding:26px 24px;box-shadow:0 24px 70px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.04);backdrop-filter:blur(8px);}
+    .card h1{font-size:1.4rem;}
+    .card .subtitle{color:var(--text-secondary);font-size:.88rem;margin-top:6px;line-height:1.5;}
+    .card .subtitle a{color:var(--accent-green);text-decoration:none;font-weight:600;}
+    .field{margin-top:16px;}
+    .field label{display:block;font-size:.78rem;font-weight:600;color:var(--text-secondary);letter-spacing:.03em;text-transform:uppercase;margin-bottom:7px;}
+    .input-wrap{position:relative;}
+    .input-wrap input{width:100%;padding:13px 44px 13px 13px;font-size:.95rem;color:#fff;background:var(--bg-input);border:1px solid var(--border-color);border-radius:10px;transition:border-color .2s,box-shadow .2s;font-family:var(--font);-webkit-appearance:none;appearance:none;}
+    .input-wrap .icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:16px;opacity:.6;font-style:normal;pointer-events:none;}
+    .input-wrap input::placeholder{color:var(--text-muted);}
+    .input-wrap input:focus{outline:none;border-color:var(--accent-green);box-shadow:0 0 0 3px rgba(0,255,65,.12);}
+    .input-wrap .toggle-pw{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:4px;}
+    .input-wrap .toggle-pw:hover{color:var(--text-primary);}
+    .row{display:flex;gap:12px;align-items:center;}
+    .checkbox{margin-top:18px;display:flex;align-items:flex-start;gap:10px;font-size:.82rem;color:var(--text-secondary);cursor:pointer;}
+    .checkbox input{position:relative;width:18px;height:18px;flex-shrink:0;margin-top:2px;accent-color:var(--accent-green);cursor:pointer;}
+    .link{display:inline-block;margin-top:16px;color:var(--accent-cyan);text-decoration:none;font-size:.85rem;font-weight:600;}
+    .link:hover{text-decoration:underline;}
+    .footer-note{text-align:center;margin-top:18px;font-size:.78rem;color:var(--text-muted);}
+    .guest-row{display:flex;justify-content:space-between;align-items:center;margin-top:18px;padding-top:16px;border-top:1px solid var(--border-color);gap:12px;}
+    .guest-row .label{font-size:.82rem;color:var(--text-secondary);text-decoration:underline;cursor:pointer;}
+    .guest-row .label:hover{color:var(--text-primary);}
+    .btn{width:100%;padding:13px 16px;font-size:1rem;font-weight:700;border:none;border-radius:10px;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease,background .2s;color:#05070a;background:linear-gradient(135deg,var(--accent-green),var(--accent-cyan));box-shadow:0 8px 22px rgba(0,255,65,.25);display:flex;align-items:center;justify-content:center;gap:8px;}
+    .btn .label{display:inline;}
+    .btn:hover{transform:translateY(-1px);}
+    .btn:active{transform:translateY(0);}
+    .btn:disabled{opacity:.75;cursor:not-allowed;transform:none;}
+    .btn.loading{background:linear-gradient(135deg,#1b8a4b,#0e967a);box-shadow:0 6px 18px rgba(0,255,65,.2);}
+    .error{font-size:.82rem;color:#ff5c7a;margin-top:12px;min-height:18px;display:flex;align-items:center;gap:8px;}
+    .error .ico{font-size:1rem;}
+    .error.long{line-height:1.5;}
+    @media (max-width:480px){
+      body{padding:20px 12px;}
+      .card{padding:22px 18px;}
+      .row{flex-direction:column;gap:0;}
+      .row .field{margin-top:15px;}
+    }
   </style>
 </head>
 <body>
@@ -62,55 +99,100 @@
 
     <section class="card">
       <h1>Welcome back</h1>
-      <p class="subtitle">Sign in to continue to your account. New here? <a href="/register">Create an account</a>.</p>
+      <p class="subtitle">Sign in to continue to your account. New here? <a href="/register" class="link">Create an account</a></p>
 
-      <form id="login-form" novalidate autocomplete="on">
+      <form id="loginForm" novalidate>
         <div class="field">
           <label for="email">Email</label>
           <div class="input-wrap">
             <span class="icon">&#9993;</span>
-            <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required />
+            <input id="email" name="email" type="email" autocomplete="username" placeholder="you@example.com" required />
           </div>
         </div>
 
         <div class="field">
-          <label for="password">
-            <span>Password</span>
-            <a href="/forgot-password" tabindex="-1">Forgot password?</a>
-          </label>
+          <label for="password">Password</label>
           <div class="input-wrap">
             <span class="icon">&#128274;</span>
-            <input type="password" id="password" name="password" placeholder="Enter your password" autocomplete="current-password" required />
-            <button type="button" class="toggle-pw" id="togglePw" aria-label="Show password">&#128065;</button>
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required />
+            <button type="button" class="toggle-pw" aria-label="Toggle password visibility" data-toggle="password">&#128065;</button>
           </div>
         </div>
 
-        <div class="checks">
-          <label class="check"><input type="checkbox" id="remember" checked /><span>Keep me signed in</span></label>
+        <div class="row">
+          <label class="checkbox">
+            <input type="checkbox" name="remember" />
+            <span>Keep me signed in</span>
+          </label>
+          <a href="/forgot" class="link">Forgot password?</a>
         </div>
 
-        <div class="error" id="error" role="alert"></div>
-
-        <button type="submit" class="btn" id="submitBtn">
-          <span class="spinner"></span>
+        <button id="loginBtn" type="submit" class="btn">
           <span class="label">SIGN IN</span>
         </button>
+
+        <div class="guest-row">
+          <span class="label" id="guestLabel">Continue as guest</span>
+          <span class="footer-note">No account needed</span>
+        </div>
       </form>
 
-      <div class="divider">or</div>
-      <button type="button" class="btn-quiet" id="guestBtn">Continue as Guest</button>
-
-      <div class="notice">
-        <span>&#128274;</span>
-        <div><b>Secure sign-in.</b> Your credentials are transmitted over an encrypted connection and never stored on this device. Protected against brute-force by automatic rate limiting.</div>
-      </div>
+      <div id="error" class="error" role="alert" aria-live="polite"></div>
     </section>
 
-    <div class="foot">
-      <a href="/">&#8617; Back to Lobby</a><br /><br />
-      <a href="/legal/terms.html">Terms</a> &middot; <a href="/legal/privacy.html">Privacy</a> &middot; <a href="/legal/sweepstakes-rules.html">Rules</a>
-    </div>
+    <p class="footer-note">By continuing, you agree to our <a href="/legal" class="link">Terms</a> and <a href="/legal/privacy" class="link">Privacy Policy</a>.</p>
   </div>
+
+  <section id="signin-section" class="card">
+    <h1>Welcome back</h1>
+    <p class="subtitle">Sign in to continue to your account. New here? <a href="/register" class="link">Create an account</a>.</p>
+
+    <form id="login-form" novalidate autocomplete="on">
+      <div class="field">
+        <label for="email">Email</label>
+        <div class="input-wrap">
+          <span class="icon">&#9993;</span>
+          <input type="email" id="email" name="email" placeholder="you@example.com"
+                 autocomplete="username" required />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="input-wrap">
+          <span class="icon">&#128274;</span>
+          <input type="password" id="password" name="password" placeholder="Enter your password"
+                 autocomplete="current-password" required />
+          <button type="button" class="toggle-pw" id="togglePw" aria-label="Show password">&#128065;</button>
+        </div>
+      </div>
+
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="remember" checked /><span>Keep me signed in</span></label>
+      </div>
+
+      <div class="error" id="error" role="alert"></div>
+
+      <button type="submit" class="btn" id="submitBtn">
+        <span class="spinner"></span>
+        <span class="label">SIGN IN</span>
+      </button>
+    </form>
+
+    <div class="divider">or</div>
+    <button type="button" class="btn-quiet" id="guestBtn">Continue as Guest</button>
+
+    <div class="notice">
+      <span>&#128274;</span>
+      <div><b>Secure sign-in.</b> Your credentials are transmitted over an encrypted connection and never stored on this device. Protected against brute-force by automatic rate limiting.</div>
+    </div>
+  </section>
+
+  <div class="foot">
+    <a href="/">&#8617; Back to Lobby</a><br /><br />
+    <a href="/legal/terms.html">Terms</a> &middot; <a href="/legal/privacy.html">Privacy</a> &middot; <a href="/legal/sweepstakes-rules.html">Rules</a>
+  </div>
+</div>
 <script>
   (function () {
     'use strict';
@@ -156,19 +238,36 @@
     }
 
     function setLoading(l) {
+      if (!btn) return;
       btn.classList.toggle('loading', l);
       btn.disabled = l;
-      btn.querySelector('.label').textContent = l ? 'SIGNING IN...' : 'SIGN IN';
+      var label = btn.querySelector('.label');
+      if (label) label.textContent = l ? 'SIGNING IN...' : 'SIGN IN';
     }
+
+    // Clear stale UI state when Chrome restores the page from the back/forward
+    // cache so queued extension/content-script messages don't target frames
+    // that already went away during navigation.
+    window.addEventListener('pageshow', function (event) {
+      if (!event.persisted) return;
+      hideError();
+      if (btn) btn.disabled = false;
+      var label = btn && btn.querySelector('.label');
+      if (label) label.textContent = 'SIGN IN';
+      if (emailEl) emailEl.focus();
+      if (passEl) passEl.type = 'password';
+      if (toggle) toggle.innerHTML = '&#128065;';
+    });
 
     form.addEventListener('submit', async function (ev) {
       ev.preventDefault();
       hideError();
-      var email = emailEl.value.trim();
-      var password = passEl.value;
-      if (!email) { showError('Please enter your email address.'); emailEl.focus(); return; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('Please enter a valid email address.'); emailEl.focus(); return; }
-      if (!password) { showError('Please enter your password.'); passEl.focus(); return; }
+      var email = (emailEl && typeof emailEl.value === 'string') ? emailEl.value.trim() : '';
+      var password = (passEl && typeof passEl.value === 'string') ? passEl.value : '';
+
+      if (!email) { showError('Please enter your email address.'); if (emailEl) emailEl.focus(); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('Please enter a valid email address.'); if (emailEl) emailEl.focus(); return; }
+      if (!password) { showError('Please enter your password.'); if (passEl) passEl.focus(); return; }
 
       setLoading(true);
       try {
@@ -194,8 +293,7 @@
         showError('A network error occurred. Please try again.');
       }
     });
-
-    document.getElementById('guestBtn').addEventListener('click', async function () {
+document.getElementById('guestBtn').addEventListener('click', async function () {
       hideError();
       btn.disabled = true;
       var refCode = params.get('ref');

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SWEEPSTAKES CASINO FRONTEND CONTROLLER (UPGRADED & FULLY UNIFIED)
  * Integrated State Management, Interactive Games, Provably Fair Suite, Audio SFX, Live Feed & Embedded Mode Protection
  */
@@ -5058,12 +5058,14 @@ function injectMobileAndNavigationDOM() {
         <p class="modal-subtitle" id="auth-subtitle">Enter your credentials to access your account.</p>
         <div id="auth-form-login" class="auth-form-section">
           <div class="form-group">
-            <label class="form-label">Email</label>
-            <input type="email" id="auth-email" class="form-input" placeholder="you@example.com">
+            <label class="form-label" for="auth-email">Email</label>
+            <input type="email" id="auth-email" class="form-input" placeholder="you@example.com"
+                   autocomplete="username">
           </div>
           <div class="form-group">
-            <label class="form-label">Password</label>
-            <input type="password" id="auth-password" class="form-input" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢">
+            <label class="form-label" for="auth-password">Password</label>
+            <input type="password" id="auth-password" class="form-input" placeholder="Enter your password"
+                   autocomplete="current-password">
           </div>
           <div id="auth-login-error" style="color:#ff4d4d; font-size:0.8rem; height:18px; margin-top:4px;"></div>
           <div class="modal-actions-flex" style="margin-top: 20px; flex-direction: column; gap: 8px;">
@@ -5943,6 +5945,19 @@ function escapeHTML(str) {
 function setupGlobalEventListeners() {
   if (state.globalListenersAttached) return;
   state.globalListenersAttached = true;
+
+  // When Chrome restores the page from the back/forward cache (bfcache),
+  // clear any stale auth/modal UI state so queued extension/content-script
+  // messages don't target frames that already navigated away.
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    if (typeof closeAuthModal === 'function') closeAuthModal();
+    if (typeof closeAllModals === 'function') closeAllModals();
+    const authOverlay = document.getElementById('modal-auth');
+    if (authOverlay) authOverlay.classList.add('hidden');
+    const errorEls = document.querySelectorAll('#auth-login-error, #auth-register-error, #auth-error');
+    errorEls.forEach((el) => { if (el) el.textContent = ''; });
+  });
 
   const primaryBtn = document.getElementById('btn-primary-action');
   if (primaryBtn) {
