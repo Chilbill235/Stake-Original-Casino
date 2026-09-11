@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <base href="/">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#05070a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1257,6 +1257,26 @@
       <div id="wallet-connect-status" style="margin-top: 14px; text-align: center; color: var(--text-muted); font-size: 0.85rem; min-height: 1.4em;"></div>
     </div>
   </div>
+  <!-- MOBILE BOTTOM NAVIGATION (only rendered on mobile, signed in) -->
+  <nav class="mobile-bottom-nav" id="mobile-bottom-nav" aria-label="Mobile navigation">
+    <button class="mbn-item active" data-mbn-route="/" onclick="mobileNavGo('/')">
+      <span class="mbn-icon">🏠</span>
+      <span class="mbn-label">Lobby</span>
+    </button>
+    <button class="mbn-item" data-mbn-route="/store" onclick="openStoreModal()">
+      <span class="mbn-icon">🛒</span>
+      <span class="mbn-label">Store</span>
+    </button>
+    <button class="mbn-item" data-mbn-route="/bonus" onclick="openBonusModal()">
+      <span class="mbn-icon">🎁</span>
+      <span class="mbn-label">Bonus</span>
+    </button>
+    <button class="mbn-item" data-mbn-route="/account" onclick="mobileNavGo('/account')">
+      <span class="mbn-icon">👤</span>
+      <span class="mbn-label">Account</span>
+    </button>
+  </nav>
+
 
   <script src="/games/loader.js"></script>
   <script src="/client.js"></script>

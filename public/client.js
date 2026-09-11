@@ -3730,6 +3730,28 @@ function toggleMainSidebar() {
   if (overlay) overlay.classList.toggle('active');
   document.body.style.overflow = sb.classList.contains('mobile-open') ? 'hidden' : '';
 }
+// Close the mobile off-canvas sidebar if it is open (used after navigation).
+function closeMainSidebar() {
+  const sb = document.getElementById('main-sidebar');
+  if (sb && sb.classList.contains('mobile-open')) toggleMainSidebar();
+}
+// Mobile bottom navigation: highlight the active tab for the current path.
+function setActiveBottomNav(path) {
+  const nav = document.getElementById('mobile-bottom-nav');
+  if (!nav) return;
+  nav.querySelectorAll('.mbn-item[data-mbn-route]').forEach(item => {
+    const route = item.dataset.mbnRoute;
+    const isMatch = route === '/' ? path === '/' : path === route || path.startsWith(route + '/');
+    item.classList.toggle('active', isMatch);
+  });
+}
+// Mobile bottom navigation: navigate and close the off-canvas sidebar.
+function mobileNavGo(path) {
+  playSound('click');
+  closeMainSidebar();
+  history.pushState(null, '', path);
+  handleRouteChange();
+}
 
 function renderAccountPage(page = 'overview') {
   const content = document.getElementById('account-content');
@@ -6054,6 +6076,8 @@ function handleRouteChange() {
   }
   const path = window.location.pathname;
   setActiveSidebarLink(path);
+  setActiveBottomNav(path);
+  closeMainSidebar();
 
   // Hybrid pages: if navigating to a dedicated page whose view is not present in
   // this shell (e.g. switching between lightweight server-rendered pages), do a
